@@ -1,0 +1,32 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#0A120D"/>
+  <rect x="118" y="120" width="1204" height="660" rx="44" fill="#0F1712" stroke="rgba(255,255,255,.12)"/>
+  <rect x="874" y="164" width="300" height="210" rx="26" fill="rgba(255,255,255,.05)" stroke="rgba(255,255,255,.09)"/>
+  <rect x="874" y="404" width="300" height="168" rx="26" fill="url(#panel2)"/>
+  <text x="186" y="192" fill="#F4FBF6" font-size="74" font-family="Arial, sans-serif" font-weight="700">Launch-ready reveal</text>
+  <text x="186" y="248" fill="#A4B2A8" font-size="28" font-family="Arial, sans-serif">The object settles. The copy closes. The publish flow feels real.</text>
+  <g filter="url(#shadow2)">
+    <rect x="292" y="288" width="412" height="292" rx="52" fill="url(#screen2)"/>
+    <rect x="734" y="228" width="166" height="412" rx="42" fill="url(#device2)"/>
+  </g>
+  <text x="906" y="468" fill="#081009" font-size="26" font-family="Arial, sans-serif" font-weight="700">Hosted first</text>
+  <text x="906" y="508" fill="#0F1A13" font-size="18" font-family="Arial, sans-serif">Manifest, preview URL, and embed all line up.</text>
+  <defs>
+    <linearGradient id="screen2" x1="292" y1="288" x2="704" y2="580" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173125"/>
+      <stop offset="1" stop-color="#0E1712"/>
+    </linearGradient>
+    <linearGradient id="device2" x1="734" y1="228" x2="900" y2="640" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EFFFF4"/>
+      <stop offset=".5" stop-color="#D2EBDB"/>
+      <stop offset="1" stop-color="#6E7C83"/>
+    </linearGradient>
+    <linearGradient id="panel2" x1="874" y1="404" x2="1174" y2="572" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#41F29A"/>
+      <stop offset="1" stop-color="#B8FF7D"/>
+    </linearGradient>
+    <filter id="shadow2" x="250" y="196" width="692" height="486" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="22" stdDeviation="20" flood-color="#000" flood-opacity=".46"/>
+    </filter>
+  </defs>
+</svg>

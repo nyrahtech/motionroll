@@ -1,0 +1,18 @@
+{
+  "sourceVideoUrl": "/motionroll_demo_sequence/demo.mp4",
+  "posterUrl": "/motionroll_demo_sequence/poster.webp",
+  "fallbackVideoUrl": "/motionroll_demo_sequence/demo.mp4",
+  "frameBaseUrl": "/motionroll_demo_sequence/frames",
+  "framePattern": "frame-{index:04d}.webp",
+  "frameCount": 321,
+  "sourceFrameCount": 1698,
+  "sourceFps": 60,
+  "frameRate": 12,
+  "durationSeconds": 28.3,
+  "durationMs": 28300,
+  "width": 1440,
+  "height": 810,
+  "sourceWidth": 1920,
+  "sourceHeight": 1080,
+  "sourceBytes": 32443108
+}

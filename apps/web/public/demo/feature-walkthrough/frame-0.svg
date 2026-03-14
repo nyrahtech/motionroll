@@ -1,0 +1,21 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#09110D"/>
+  <rect x="112" y="110" width="1216" height="680" rx="42" fill="#0F1712" stroke="rgba(255,255,255,.12)"/>
+  <rect x="168" y="168" width="520" height="564" rx="28" fill="#111B14"/>
+  <rect x="724" y="168" width="548" height="564" rx="28" fill="#101812"/>
+  <rect x="204" y="220" width="448" height="72" rx="18" fill="rgba(255,255,255,.05)"/>
+  <rect x="204" y="320" width="448" height="158" rx="24" fill="url(#pane0)"/>
+  <rect x="204" y="504" width="448" height="74" rx="18" fill="rgba(255,255,255,.05)"/>
+  <rect x="770" y="224" width="460" height="16" rx="8" fill="#E9F8EF"/>
+  <rect x="770" y="260" width="420" height="16" rx="8" fill="rgba(255,255,255,.18)"/>
+  <rect x="770" y="318" width="460" height="112" rx="24" fill="rgba(255,255,255,.04)"/>
+  <circle cx="796" cy="374" r="12" fill="#41F29A"/>
+  <text x="176" y="96" fill="#EAF8EF" font-size="62" font-family="Arial, sans-serif" font-weight="700">Feature Walkthrough</text>
+  <text x="176" y="144" fill="#A1AEA5" font-size="24" font-family="Arial, sans-serif">Guide the viewer through one focused product flow.</text>
+  <defs>
+    <linearGradient id="pane0" x1="204" y1="320" x2="652" y2="478" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173225"/>
+      <stop offset="1" stop-color="#102217"/>
+    </linearGradient>
+  </defs>
+</svg>

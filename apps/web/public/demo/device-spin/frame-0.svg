@@ -1,0 +1,27 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#0A110D"/>
+  <circle cx="720" cy="410" r="260" fill="url(#ring0)" fill-opacity=".24"/>
+  <rect x="118" y="118" width="1204" height="664" rx="40" fill="#101712" stroke="rgba(255,255,255,.1)"/>
+  <ellipse cx="720" cy="678" rx="250" ry="44" fill="#000" fill-opacity=".26"/>
+  <g filter="url(#spinshadow0)">
+    <rect x="586" y="286" width="268" height="268" rx="120" fill="url(#speaker0)"/>
+    <circle cx="720" cy="420" r="76" fill="#111812"/>
+    <circle cx="720" cy="420" r="44" fill="#D9F8E5" fill-opacity=".78"/>
+  </g>
+  <text x="168" y="154" fill="#EFFAF4" font-size="64" font-family="Arial, sans-serif" font-weight="700">Orbit Speaker</text>
+  <text x="168" y="206" fill="#A5B2A9" font-size="24" font-family="Arial, sans-serif">A calm hardware spin built for material detail and silhouette.</text>
+  <defs>
+    <radialGradient id="ring0" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(720 410) rotate(90) scale(260)">
+      <stop stop-color="#41F29A"/>
+      <stop offset="1" stop-color="#41F29A" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="speaker0" x1="586" y1="286" x2="854" y2="554" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5FFF8"/>
+      <stop offset=".45" stop-color="#D2E8DB"/>
+      <stop offset="1" stop-color="#55636A"/>
+    </linearGradient>
+    <filter id="spinshadow0" x="544" y="250" width="352" height="360" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="20" flood-color="#000" flood-opacity=".44"/>
+    </filter>
+  </defs>
+</svg>

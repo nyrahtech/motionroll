@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900">
+  <defs>
+    <linearGradient id="left" x1="0" x2="1">
+      <stop offset="0%" stop-color="#191919"/>
+      <stop offset="100%" stop-color="#343434"/>
+    </linearGradient>
+    <linearGradient id="right" x1="0" x2="1">
+      <stop offset="0%" stop-color="#164328"/>
+      <stop offset="100%" stop-color="#0d1410"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="900" fill="url(#left)"/>
+  <rect x="600" width="600" height="900" fill="url(#right)"/>
+  <rect x="585" y="130" width="30" height="600" rx="15" fill="#f6f5ef"/>
+  <text x="120" y="740" fill="#fafafa" font-size="78" font-family="Arial, sans-serif" font-weight="700">Before</text>
+  <text x="715" y="740" fill="#d6ffd1" font-size="78" font-family="Arial, sans-serif" font-weight="700">After</text>
+  <text x="120" y="820" fill="#fafafa" font-size="82" font-family="Arial, sans-serif" font-weight="700">Before / After</text>
+</svg>
+

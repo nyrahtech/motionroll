@@ -1,0 +1,27 @@
+{
+  "name": "motionroll",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev": "npm run dev --workspace @motionroll/web",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "db:generate": "npm run db:generate --workspace @motionroll/web",
+    "db:migrate": "npm run db:migrate --workspace @motionroll/web",
+    "db:seed": "npm run db:seed --workspace @motionroll/web",
+    "storage:init": "npm run storage:init --workspace @motionroll/web"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

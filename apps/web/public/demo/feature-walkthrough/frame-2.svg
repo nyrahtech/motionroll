@@ -1,0 +1,19 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#09110D"/>
+  <rect x="120" y="120" width="1200" height="660" rx="42" fill="#0F1712" stroke="rgba(255,255,255,.1)"/>
+  <rect x="166" y="170" width="484" height="560" rx="28" fill="#101812"/>
+  <rect x="676" y="170" width="596" height="560" rx="28" fill="#101812"/>
+  <rect x="724" y="216" width="500" height="190" rx="28" fill="url(#card2)"/>
+  <text x="744" y="282" fill="#081009" font-size="48" font-family="Arial, sans-serif" font-weight="700">Show the outcome</text>
+  <text x="744" y="332" fill="#102016" font-size="22" font-family="Arial, sans-serif">Finish on what the user gains, not on interface chrome.</text>
+  <rect x="744" y="514" width="440" height="18" rx="9" fill="#E7F8EE"/>
+  <rect x="744" y="552" width="320" height="12" rx="6" fill="rgba(255,255,255,.18)"/>
+  <rect x="744" y="606" width="360" height="58" rx="18" fill="rgba(255,255,255,.05)"/>
+  <text x="176" y="96" fill="#F1FBF6" font-size="66" font-family="Arial, sans-serif" font-weight="700">Guided without becoming heavy</text>
+  <defs>
+    <linearGradient id="card2" x1="724" y1="216" x2="1224" y2="406" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#41F29A"/>
+      <stop offset="1" stop-color="#B8FF7D"/>
+    </linearGradient>
+  </defs>
+</svg>

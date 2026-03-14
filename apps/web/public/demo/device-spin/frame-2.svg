@@ -1,0 +1,23 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#09110D"/>
+  <rect x="110" y="110" width="1220" height="680" rx="42" fill="#101812" stroke="rgba(255,255,255,.1)"/>
+  <rect x="178" y="176" width="440" height="230" rx="28" fill="rgba(255,255,255,.04)"/>
+  <text x="196" y="248" fill="#F0FBF5" font-size="60" font-family="Arial, sans-serif" font-weight="700">Publish a hardware story anywhere</text>
+  <text x="196" y="304" fill="#A5B2A9" font-size="24" font-family="Arial, sans-serif">The object stays central. The runtime stays lean. The output is easy to share.</text>
+  <ellipse cx="876" cy="672" rx="244" ry="42" fill="#000" fill-opacity=".26"/>
+  <g filter="url(#spinshadow2)">
+    <rect x="724" y="286" width="304" height="304" rx="128" fill="url(#speaker2)"/>
+    <circle cx="876" cy="438" r="82" fill="#111812"/>
+    <circle cx="876" cy="438" r="46" fill="#E6FBEE" fill-opacity=".86"/>
+  </g>
+  <defs>
+    <linearGradient id="speaker2" x1="724" y1="286" x2="1028" y2="590" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FBFFFD"/>
+      <stop offset=".45" stop-color="#D9ECE0"/>
+      <stop offset="1" stop-color="#697880"/>
+    </linearGradient>
+    <filter id="spinshadow2" x="680" y="250" width="392" height="396" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="20" flood-color="#000" flood-opacity=".44"/>
+    </filter>
+  </defs>
+</svg>

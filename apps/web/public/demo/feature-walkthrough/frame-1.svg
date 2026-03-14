@@ -1,0 +1,25 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#08110D"/>
+  <circle cx="1160" cy="134" r="220" fill="url(#glowfw)" fill-opacity=".36"/>
+  <rect x="100" y="102" width="1240" height="696" rx="42" fill="#0E1711" stroke="rgba(255,255,255,.1)"/>
+  <rect x="152" y="154" width="580" height="592" rx="28" fill="#111A14"/>
+  <rect x="756" y="154" width="532" height="592" rx="28" fill="#101913"/>
+  <rect x="182" y="198" width="520" height="70" rx="20" fill="rgba(255,255,255,.04)"/>
+  <rect x="182" y="296" width="520" height="260" rx="26" fill="url(#focus1)"/>
+  <rect x="182" y="296" width="520" height="260" rx="26" stroke="#41F29A" stroke-width="4"/>
+  <text x="796" y="256" fill="#F2FBF6" font-size="58" font-family="Arial, sans-serif" font-weight="700">Call out the active moment</text>
+  <text x="796" y="314" fill="#A8B5AC" font-size="24" font-family="Arial, sans-serif">Keep the copy scoped. Let the focus do the teaching.</text>
+  <rect x="796" y="388" width="388" height="18" rx="9" fill="#B8FF7D" fill-opacity=".5"/>
+  <rect x="796" y="426" width="320" height="14" rx="7" fill="rgba(255,255,255,.18)"/>
+  <rect x="796" y="490" width="420" height="160" rx="24" fill="rgba(255,255,255,.05)"/>
+  <defs>
+    <radialGradient id="glowfw" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1160 134) rotate(90) scale(220)">
+      <stop stop-color="#41F29A"/>
+      <stop offset="1" stop-color="#41F29A" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="focus1" x1="182" y1="296" x2="702" y2="556" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173624"/>
+      <stop offset="1" stop-color="#113319"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,628 @@
+@import "tailwindcss";
+
+:root {
+  /* MotionRoll Figma Design Tokens */
+  --editor-shell: #0a0a0b;
+  --editor-panel: #1a1a1c;
+  --editor-panel-elevated: #212124;
+  --editor-border: #2a2a2c;
+  --editor-border-light: #353538;
+  --editor-accent: #67e8f9;
+  --editor-accent-dim: #22d3ee;
+  --editor-text: #e5e5e7;
+  --editor-text-dim: #9ca3af;
+  --editor-hover: #2a2a2c;
+  --editor-selected: rgba(103, 232, 249, 0.12);
+  --editor-playhead: #67e8f9;
+
+  /* Shadcn/Radix tokens for Figma UI components */
+  --radius: 0.25rem;
+  --input: transparent;
+  --input-background: #1a1a1c;
+  --switch-background: #2a2a2c;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --popover: #212124;
+  --popover-foreground: #e5e5e7;
+  --muted: #212124;
+  --muted-foreground: #9ca3af;
+  --accent-foreground: #0a0a0b;
+  --destructive: #d4183d;
+  --destructive-foreground: #ffffff;
+  --border: #2a2a2c;
+  --ring: rgba(103, 232, 249, 0.4);
+  --primary: #67e8f9;
+  --primary-foreground: #0a0a0b;
+  --secondary: #212124;
+  --secondary-foreground: #e5e5e7;
+  --card: #1a1a1c;
+  --card-foreground: #e5e5e7;
+  --sidebar: #1a1a1c;
+  --sidebar-foreground: #e5e5e7;
+  --sidebar-primary: #67e8f9;
+  --sidebar-primary-foreground: #0a0a0b;
+  --sidebar-accent: #212124;
+  --sidebar-accent-foreground: #e5e5e7;
+  --sidebar-border: #2a2a2c;
+  --sidebar-ring: rgba(103, 232, 249, 0.4);
+
+  --background: #090a0f;
+  --background-muted: #111319;
+  --background-outside: #090a0f;
+  --foreground: #f6f7fb;
+  --foreground-soft: #c9ced8;
+  --foreground-muted: #98a0af;
+  --foreground-faint: #69707d;
+
+  --shell-bg: #06070b;
+  --panel-bg: #0c0e14;
+  --panel-bg-elevated: #12141b;
+  --panel-bg-muted: #0a0c12;
+  --panel-bg-preview: #090b10;
+  --surface-1: #13161d;
+  --surface-2: #171b23;
+  --surface-3: #1d212b;
+  --panel: rgba(12, 14, 20, 0.98);
+  --panel-elevated: rgba(18, 20, 27, 0.99);
+  --panel-muted: rgba(255, 255, 255, 0.02);
+  --panel-glass: rgba(12, 14, 20, 0.98);
+  --panel-preview: #090b10;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --border-active: rgba(201, 238, 255, 0.72);
+  --border-accent: rgba(201, 238, 255, 0.45);
+
+  --accent: #d6f6ff;
+  --accent-strong: #f0fbff;
+  --accent-foreground: #0c1016;
+  --timeline-selected: #cdefff;
+  --timeline-selected-border: rgba(232, 248, 255, 0.94);
+  --success: #b8dfce;
+  --warning: #f1cc82;
+  --danger: #f29aa6;
+
+  --radius-sm: 4px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  --editor-rail-width: 58px;
+  --editor-browser-width: 250px;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+
+  --font-size-xs: 0.68rem;
+  --font-size-sm: 0.82rem;
+  --font-size-base: 0.95rem;
+  --font-size-lg: 1.08rem;
+  --font-size-xl: 1.3rem;
+  --font-size-2xl: 1.68rem;
+  --font-size-3xl: 2.2rem;
+
+  --font-ui: "Inter", "DM Sans", sans-serif;
+  --font-heading: "Space Grotesk", "Inter", sans-serif;
+  --font-editorial: "Cormorant Garamond", serif;
+  --font-mono: "IBM Plex Mono", monospace;
+
+  --shadow-soft: none;
+  --shadow-panel: 0 20px 40px rgba(0, 0, 0, 0.18);
+  --shadow-focus: 0 0 0 2px rgba(201, 238, 255, 0.18);
+
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 260ms;
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --z-base: 1;
+  --z-floating: 10;
+  --z-overlay: 30;
+}
+
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--foreground);
+  background: var(--shell-bg);
+  font-family: var(--font-ui);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: rgba(182, 235, 248, 0.25);
+  color: var(--foreground);
+}
+
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4 {
+    letter-spacing: -0.03em;
+  }
+}
+
+@layer components {
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .app-shell {
+    min-height: 100vh;
+    background: var(--shell-bg);
+  }
+
+  .app-frame {
+    position: relative;
+    z-index: var(--z-base);
+    width: 100%;
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  .surface-panel,
+  .surface-panel-muted,
+  .surface-panel-elevated,
+  .surface-hero,
+  .surface-sidebar,
+  .surface-preview,
+  .surface-editor {
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(255, 255, 255, 0.025);
+    background: var(--panel-bg);
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .surface-panel-muted {
+    background: var(--panel-bg-muted);
+  }
+
+  .surface-panel-elevated,
+  .surface-hero,
+  .surface-preview {
+    background: var(--panel-bg-elevated);
+  }
+
+  .surface-sidebar {
+    background: var(--panel-bg);
+  }
+
+  .surface-preview {
+    background: var(--panel-preview);
+  }
+
+  .surface-editor {
+    border-radius: 0;
+    border-color: rgba(255, 255, 255, 0.03);
+    background: var(--shell-bg);
+    box-shadow: none;
+  }
+
+
+  .interactive-soft {
+    transition: background-color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+  }
+
+  .interactive-soft:hover {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .interactive-soft:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+  }
+
+  .sidebar-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.12) transparent;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.12);
+    border-radius: 999px;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .surface-code {
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    background: #0d1016;
+  }
+
+  .eyebrow {
+    color: var(--foreground-faint);
+    font-family: var(--font-mono);
+    font-size: 0.67rem;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .text-subtle {
+    color: var(--foreground-muted);
+  }
+
+  .text-faint {
+    color: var(--foreground-faint);
+  }
+
+  .focus-ring {
+    transition:
+      box-shadow var(--motion-fast) var(--ease-standard),
+      border-color var(--motion-fast) var(--ease-standard),
+      background-color var(--motion-fast) var(--ease-standard);
+  }
+
+  .focus-ring:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+    border-color: var(--border-active);
+  }
+
+  .panel-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .panel-tab {
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    padding: 0.32rem 0.62rem;
+    color: var(--foreground-faint);
+    background: transparent;
+    font-family: var(--font-mono);
+    font-size: 0.67rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    transition:
+      background var(--motion-base) var(--ease-standard),
+      color var(--motion-base) var(--ease-standard),
+      border-color var(--motion-base) var(--ease-standard);
+  }
+
+  .panel-tab:hover {
+    color: var(--foreground);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .panel-tab[data-active="true"] {
+    color: #0d1419;
+    background: var(--accent);
+    border-color: var(--timeline-selected-border);
+  }
+
+  .field-label {
+    color: var(--foreground-soft);
+    font-size: 0.78rem;
+    font-weight: 500;
+  }
+
+  .helper-text {
+    color: var(--foreground-faint);
+    font-size: 0.8rem;
+    line-height: 1.5;
+  }
+
+  .section-divider {
+    height: 1px;
+    width: 100%;
+    background: var(--border-subtle);
+  }
+}
+
+.motionroll-overlay-root .motionroll-overlay {
+  background: rgba(13, 16, 22, 0.88);
+  color: var(--foreground);
+  border: 1px solid rgba(191, 201, 219, 0.18);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+}
+
+.motionroll-overlay-root .motionroll-theme-light {
+  background: rgba(236, 240, 246, 0.9);
+  color: #0e1218;
+}
+
+.motionroll-overlay-root .motionroll-theme-dark {
+  background: rgba(13, 16, 22, 0.86);
+  color: var(--foreground);
+}
+
+.motionroll-overlay-root .motionroll-theme-accent {
+  background: rgba(184, 232, 245, 0.92);
+  color: #071118;
+}
+
+.motionroll-overlay-root .motionroll-overlay[data-state="inactive"] {
+  user-select: none;
+}
+
+.motionroll-overlay-root .motionroll-overlay.motionroll-preview-selected {
+  outline: 1px solid rgba(226, 247, 255, 0.95);
+  box-shadow:
+    0 0 0 4px rgba(205, 239, 255, 0.12),
+    0 14px 28px rgba(0, 0, 0, 0.3);
+}
+
+.motionroll-overlay-root .motionroll-overlay [data-text-field][contenteditable="true"] {
+  outline: none;
+  cursor: text;
+  user-select: text;
+}
+
+.motionroll-overlay-root .motionroll-overlay [data-text-field][contenteditable="true"]:focus {
+  box-shadow: inset 0 -1px 0 rgba(226, 247, 255, 0.45);
+}
+
+.timeline-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 12px;
+  width: 12px;
+  border-radius: 999px;
+  background: #f3fbff;
+  box-shadow: 0 0 0 4px rgba(205, 239, 255, 0.12);
+}
+
+.timeline-range-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.timeline-range-slider::-moz-range-thumb {
+  height: 12px;
+  width: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #f3fbff;
+  box-shadow: 0 0 0 4px rgba(205, 239, 255, 0.12);
+}
+
+.timeline-range-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.motionroll-timeline-shell .timeline-editor {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0;
+  font-family: var(--font-heading);
+  background: transparent;
+}
+
+.motionroll-timeline-shell .timeline-editor-time-area {
+  height: 32px;
+}
+
+.motionroll-timeline-shell .timeline-editor-time-area-interact {
+  inset: 0;
+}
+
+.motionroll-timeline-shell .timeline-editor-edit-area {
+  margin-top: 8px;
+}
+
+.motionroll-timeline-shell .timeline-editor-edit-area .ReactVirtualized__Grid,
+.motionroll-timeline-shell .timeline-editor-time-area .ReactVirtualized__Grid {
+  scrollbar-width: thin;
+}
+
+.motionroll-timeline-shell .timeline-editor-time-unit {
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.motionroll-timeline-shell .timeline-editor-time-unit-big {
+  height: 6px !important;
+}
+
+.motionroll-timeline-shell .timeline-editor-time-unit-scale {
+  color: var(--foreground-faint);
+  font-size: 10px;
+}
+
+.motionroll-timeline-shell .timeline-editor-edit-row {
+  align-items: center;
+    border-radius: 6px;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.028)),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 0);
+}
+
+.motionroll-timeline-shell .timeline-editor-action {
+  background: transparent;
+  border-radius: 6px;
+}
+
+.motionroll-timeline-shell .timeline-editor-action-left-stretch,
+.motionroll-timeline-shell .timeline-editor-action-right-stretch {
+  width: 8px;
+  border-radius: 6px;
+}
+
+.motionroll-timeline-shell .timeline-editor-action-left-stretch::after,
+.motionroll-timeline-shell .timeline-editor-action-right-stretch::after {
+  opacity: 0.55;
+}
+
+.motionroll-timeline-shell .timeline-editor-cursor {
+  border-left-color: rgba(255, 255, 255, 0.88);
+  border-right-color: rgba(255, 255, 255, 0.88);
+  top: 24px;
+  height: calc(100% - 24px);
+}
+
+.motionroll-timeline-shell .timeline-editor-cursor-top {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: white;
+  color: transparent;
+  overflow: hidden;
+}
+
+.motionroll-timeline-shell .timeline-editor-drag-line {
+  border-left-color: rgba(205, 239, 255, 0.5);
+}
+
+.motionroll-uppy .uppy-DragDrop-container {
+  min-height: 132px;
+  border-radius: 10px;
+  border: 1px dashed rgba(205, 239, 255, 0.18);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--foreground-soft);
+}
+
+.motionroll-uppy .uppy-DragDrop-container:hover {
+  border-color: rgba(205, 239, 255, 0.38);
+  background: rgba(205, 239, 255, 0.05);
+}
+
+
+@layer components {
+  .editor-rail-label {
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+
+  .editor-chip {
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--foreground-soft);
+    border-radius: 999px;
+    padding: 0.18rem 0.5rem;
+    font-size: 11px;
+    line-height: 1.3;
+  }
+}
+
+/* ── Figma design system additions ─────────────────────────────── */
+
+/* Custom scrollbars matching Figma theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--editor-shell);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--editor-border-light);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--editor-border);
+}
+
+/* Smooth hover on interactive controls */
+button,
+[role="button"] {
+  cursor: pointer;
+}
+
+/* Figma editor muted text */
+.editor-muted {
+  color: var(--editor-text-dim);
+}
+
+/* Figma accent highlight */
+.editor-accent {
+  color: var(--editor-accent);
+}
+
+/* Library page layout */
+.library-layout {
+  background: var(--editor-shell);
+  min-height: 100vh;
+}
+
+
+@layer components {
+  .interactive-soft {
+    transition: background-color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+  }
+
+  .interactive-soft:hover {
+    transform: translateY(-1px);
+  }
+
+  .interactive-soft:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+  }
+}
+
+/* Timeline resize handle hover — visible on group hover or when selected */
+.motionroll-clip:hover .timeline-resize-handle {
+  opacity: 0.85 !important;
+}
+
+/* Clip focus-visible ring */
+.motionroll-clip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(103,232,249,.55), 0 0 0 3px rgba(103,232,249,.12);
+}
+
+/* Seam transition button */
+.timeline-seam-btn {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+

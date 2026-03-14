@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#1a2542"/>
+      <stop offset="100%" stop-color="#090b10"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="900" fill="url(#g)"/>
+  <rect x="140" y="150" width="920" height="520" rx="42" fill="#0b1327" stroke="#9dd3ff" stroke-opacity=".35"/>
+  <rect x="200" y="230" width="360" height="360" rx="28" fill="#0f172d"/>
+  <rect x="610" y="230" width="320" height="110" rx="24" fill="#b4f0ff" fill-opacity=".15" stroke="#b4f0ff" stroke-opacity=".4"/>
+  <rect x="610" y="370" width="270" height="110" rx="24" fill="#9cf29e" fill-opacity=".14" stroke="#9cf29e" stroke-opacity=".4"/>
+  <rect x="610" y="510" width="220" height="110" rx="24" fill="#ffffff" fill-opacity=".08" stroke="#ffffff" stroke-opacity=".16"/>
+  <circle cx="380" cy="410" r="72" fill="none" stroke="#41f29a" stroke-width="10"/>
+  <text x="100" y="790" fill="#eef6ff" font-size="82" font-family="Arial, sans-serif" font-weight="700">Feature Walkthrough</text>
+</svg>
+

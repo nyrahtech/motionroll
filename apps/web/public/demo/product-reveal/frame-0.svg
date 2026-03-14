@@ -1,0 +1,28 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#08110C"/>
+  <circle cx="320" cy="180" r="260" fill="url(#glow0)" fill-opacity=".55"/>
+  <rect x="182" y="214" width="1076" height="472" rx="36" fill="#0F1712" stroke="rgba(255,255,255,.14)"/>
+  <g filter="url(#shadow0)">
+    <rect x="584" y="176" width="280" height="548" rx="54" fill="url(#device0)"/>
+    <rect x="613" y="212" width="222" height="420" rx="30" fill="#0D120E"/>
+    <circle cx="724" cy="664" r="18" fill="#D8FFE7" fill-opacity=".72"/>
+  </g>
+  <rect x="178" y="742" width="400" height="22" rx="11" fill="#B8FF7D" fill-opacity=".22"/>
+  <rect x="178" y="778" width="300" height="12" rx="6" fill="white" fill-opacity=".14"/>
+  <text x="178" y="130" fill="#EAF8EF" font-size="68" font-family="Arial, sans-serif" font-weight="700">Aether One</text>
+  <text x="178" y="178" fill="#A7B6AB" font-size="26" font-family="Arial, sans-serif">Reveal the hero object first, then let the details arrive.</text>
+  <defs>
+    <radialGradient id="glow0" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(320 180) rotate(90) scale(260)">
+      <stop stop-color="#41F29A"/>
+      <stop offset="1" stop-color="#41F29A" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="device0" x1="584" y1="176" x2="864" y2="724" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#DDF8EA"/>
+      <stop offset=".48" stop-color="#A9B6C0"/>
+      <stop offset="1" stop-color="#3D4A51"/>
+    </linearGradient>
+    <filter id="shadow0" x="536" y="148" width="376" height="648" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="24" flood-color="#000" flood-opacity=".48"/>
+    </filter>
+  </defs>
+</svg>

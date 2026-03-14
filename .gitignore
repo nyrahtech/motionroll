@@ -1,0 +1,17 @@
+node_modules/
+npm_modules/
+.next/
+dist/
+coverage/
+.turbo/
+.env
+.env.local
+.env.*.local
+apps/web/.next/
+apps/web/drizzle/
+apps/web/uploads/
+packages/*/dist/
+*.log
+*.TMP
+Thumbs.db
+*.tsbuildinfo
