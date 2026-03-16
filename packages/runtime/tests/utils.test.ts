@@ -55,6 +55,7 @@ describe("getActiveOverlayId", () => {
               align: "start",
               theme: "light",
               treatment: "default",
+              layer: 0,
             },
           },
           {
@@ -66,12 +67,47 @@ describe("getActiveOverlayId", () => {
               align: "end",
               theme: "dark",
               treatment: "default",
+              layer: 1,
             },
           },
         ],
         0.6,
       ),
     ).toBe("cta");
+  });
+
+  it("prefers the highest layer when overlapping overlays are both active", () => {
+    expect(
+      getActiveOverlayId(
+        [
+          {
+            id: "bottom",
+            timing: { start: 0.2, end: 0.8 },
+            content: {
+              headline: "Bottom",
+              body: "Body",
+              align: "start",
+              theme: "light",
+              treatment: "default",
+              layer: 0,
+            },
+          },
+          {
+            id: "top",
+            timing: { start: 0.2, end: 0.8 },
+            content: {
+              headline: "Top",
+              body: "Body",
+              align: "start",
+              theme: "dark",
+              treatment: "default",
+              layer: 1,
+            },
+          },
+        ],
+        0.5,
+      ),
+    ).toBe("top");
   });
 });
 

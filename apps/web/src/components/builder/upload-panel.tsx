@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Film } from "lucide-react";
 import Uppy from "@uppy/core";
-import Dashboard from "@uppy/dashboard";
 import DashboardView from "@uppy/react/dashboard";
 import { StatusRow } from "@/components/motionroll/surfaces";
 import { Badge } from "@/components/ui/badge";
@@ -11,29 +10,21 @@ import { EditorPanel } from "./editor-shell";
 
 export function UploadPanel({ projectId }: { projectId: string }) {
   const [status, setStatus] = useState(
-    "Select a source video and MotionRoll will validate it before registering the upload and processing job.",
+    "Select a source video. MotionRoll will validate the file, register the upload, and queue sequence processing separately from scene editing.",
   );
 
-  const uppy = useMemo(() => {
-    const instance = new Uppy({
-      autoProceed: true,
-      restrictions: {
-        maxNumberOfFiles: 1,
-        allowedFileTypes: [".mp4", ".mov", ".webm", ".m4v"],
-        maxFileSize: 524288000,
-      },
-    });
-
-    instance.use(Dashboard, {
-      inline: true,
-      proudlyDisplayPoweredByUppy: false,
-      hideProgressDetails: true,
-      note: "Video only · MP4, MOV, WEBM, M4V · Max 500 MB",
-      height: 180,
-    });
-
-    return instance;
-  }, []);
+  const uppy = useMemo(
+    () =>
+      new Uppy({
+        autoProceed: true,
+        restrictions: {
+          maxNumberOfFiles: 1,
+          allowedFileTypes: [".mp4", ".mov", ".webm", ".m4v"],
+          maxFileSize: 524288000,
+        },
+      }),
+    [],
+  );
 
   useEffect(() => {
     const onFileAdded = (file: { data?: unknown }) => {
@@ -112,8 +103,7 @@ export function UploadPanel({ projectId }: { projectId: string }) {
   return (
     <EditorPanel
       title="Upload source video"
-      description="Upload one clip and keep the rest of the pipeline automatic."
-      badge={<Badge variant="accent">Video only</Badge>}
+      badge={<Badge variant="accent">MP4 · MOV · WEBM · Max 500 MB</Badge>}
     >
       <div className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
         <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-3">
@@ -121,21 +111,23 @@ export function UploadPanel({ projectId }: { projectId: string }) {
             <Film className="h-5 w-5" />
           </div>
           <div>
-            <p className="text-sm font-medium text-white">Direct upload</p>
-            <p className="mt-1 text-sm leading-6 text-[var(--foreground-muted)]">
-              Supported formats: MP4, MOV, WEBM, and M4V.
-            </p>
+            <p className="text-sm font-medium text-white">Upload source video</p>
+            <p className="mt-0.5 text-xs" style={{ color: "var(--foreground-muted)" }}>MP4, MOV, WEBM, M4V · 500 MB max</p>
           </div>
         </div>
         <div className="motionroll-uppy px-3 py-3">
-          <DashboardView uppy={uppy} />
+          <DashboardView
+            uppy={uppy}
+            proudlyDisplayPoweredByUppy={false}
+            hideProgressDetails
+            note="MP4 · MOV · WEBM · M4V · 500 MB max"
+            height={160}
+          />
         </div>
       </div>
-      <div className="space-y-1">
-        <StatusRow label="Flow" value="Uppy -> validate -> upload -> enqueue" />
-        <StatusRow label="Retention" value="Delete after success by default" />
-      </div>
-      <p className="text-sm leading-6 text-[var(--foreground-muted)]">{status}</p>
+      {status && status !== "Select a source video. MotionRoll will validate the file, register the upload, and queue sequence processing separately from scene editing." ? (
+        <p className="text-xs" style={{ color: "var(--foreground-muted)" }}>{status}</p>
+      ) : null}
     </EditorPanel>
   );
 }

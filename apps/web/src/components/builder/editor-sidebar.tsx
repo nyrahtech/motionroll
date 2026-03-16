@@ -1,21 +1,23 @@
 "use client";
 
-import React, { type ReactNode, useEffect, useRef, useState } from "react";
+import React, { type ReactNode, useEffect, useState } from "react";
 import {
   AlignCenter,
   AlignLeft,
   AlignRight,
   ChevronDown,
-  Flag,
-  GripVertical,
+  ExternalLink,
   ImagePlus,
-  Layers3,
+  Link,
   Palette,
   SlidersHorizontal,
-  Sparkles,
   Text,
   Type,
+  Layers3,
   Video,
+  Underline,
+  Bold,
+  Italic,
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -40,6 +42,8 @@ type EditableOverlay = {
       fontFamily?: string;
       fontWeight?: number;
       fontSize?: number;
+      eyebrowFontSize?: number;
+      bodyFontSize?: number;
       lineHeight?: number;
       letterSpacing?: number;
       textAlign?: string;
@@ -47,6 +51,7 @@ type EditableOverlay = {
       opacity?: number;
       maxWidth?: number;
       italic?: boolean;
+      underline?: boolean;
       textTransform?: string;
       buttonLike?: boolean;
     };
@@ -72,19 +77,13 @@ type EditableOverlay = {
       easing?: string;
       duration?: number;
     };
-    layer?: number;
   };
 };
 
 const contentButtons = [
-  { id: "video",       label: "Video",       icon: Video },
-  { id: "headline",    label: "Headline",    icon: Type },
-  { id: "subheadline", label: "Subheadline", icon: Type },
-  { id: "text",        label: "Text",        icon: Text },
-  { id: "image",       label: "Image",       icon: ImagePlus },
-  { id: "logo",        label: "Logo",        icon: Layers3 },
-  { id: "icon",        label: "Icon",        icon: Sparkles },
-  { id: "moment",      label: "Moment",      icon: Flag },
+  { id: "text", label: "Text overlay", icon: Text },
+  { id: "image", label: "Image overlay", icon: ImagePlus },
+  { id: "video", label: "Upload scene", icon: Video },
 ] as const;
 
 const animationPresets = ["none", "fade", "slide-up", "slide-down", "scale-in", "blur-in"] as const;
@@ -97,6 +96,7 @@ const fontWeights = [
   { value: "500", label: "Medium" },
   { value: "600", label: "Semibold" },
   { value: "700", label: "Bold" },
+  { value: "800", label: "Extrabold" },
 ];
 
 interface SidebarPanelProps {
@@ -104,27 +104,15 @@ interface SidebarPanelProps {
   selectedOverlay?: EditableOverlay;
   selectedClip?: { id: string; trackType: string; metadata?: { overlayId?: string } };
   selection?: { clipId: string; trackType: string } | null;
-  projectTitle: string;
-  sectionTitle: string;
-  frameRangeStart: number;
-  frameRangeEnd: number;
-  scrubStrength: number;
-  sectionHeightVh: number;
-  onProjectTitleChange: (value: string) => void;
-  onSectionTitleChange: (value: string) => void;
-  onFrameRangeChange: (field: "start" | "end", value: number) => void;
-  onSectionFieldChange: (field: string, value: number) => void;
   onOverlayFieldChange: (field: string, value: string) => void;
   onOverlayStyleChange: (field: string, value: string | number | boolean) => void;
   onOverlayAnimationChange: (field: string, value: string | number) => void;
   onOverlayTransitionChange: (field: string, value: string | number) => void;
   onSelectOverlay: (id: string) => void;
-  onReorderOverlays: (fromIndex: number, toIndex: number) => void;
   onAddContent: (type: string) => void;
   extraAddContent?: ReactNode;
 }
 
-// ── Small collapsible section with proper open/closed state ──────────────
 function SidebarSection({
   title,
   description,
@@ -138,21 +126,20 @@ function SidebarSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section
-      className="rounded-2xl border"
-      style={{ borderColor: "var(--editor-border)", background: "rgba(255,255,255,0.025)" }}
-    >
+    <section className="border-t pt-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left cursor-pointer"
+        onClick={() => setOpen((c) => !c)}
+        className="flex w-full items-center justify-between gap-3 py-1 text-left"
       >
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--editor-text-dim)" }}>
             {title}
           </div>
           {description && !open ? (
-            <p className="mt-0.5 truncate text-[11px] leading-5" style={{ color: "var(--editor-text-dim)" }}>{description}</p>
+            <p className="mt-0.5 truncate text-[11px] leading-5" style={{ color: "var(--editor-text-dim)" }}>
+              {description}
+            </p>
           ) : null}
         </div>
         <ChevronDown
@@ -161,9 +148,11 @@ function SidebarSection({
         />
       </button>
       {open ? (
-        <div className="space-y-3 border-t px-4 pb-4 pt-3" style={{ borderColor: "var(--editor-border)" }}>
+        <div className="space-y-3 pb-1 pt-3">
           {description ? (
-            <p className="text-[11px] leading-5" style={{ color: "var(--editor-text-dim)" }}>{description}</p>
+            <p className="text-[11px] leading-5" style={{ color: "var(--editor-text-dim)" }}>
+              {description}
+            </p>
           ) : null}
           {children}
         </div>
@@ -185,26 +174,22 @@ function InspectorGroup({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-xl border" style={{ borderColor: "var(--editor-border)", background: "rgba(12,16,22,0.55)" }}>
+    <div className="border-t pt-2" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2.5 text-sm font-medium text-white"
+        onClick={() => setOpen((c) => !c)}
+        className="flex w-full items-center justify-between gap-3 py-1.5 text-sm font-medium text-white"
       >
         <span className="flex items-center gap-2">
           <Icon className="h-4 w-4 text-[var(--editor-accent)]" />
           {title}
         </span>
         <ChevronDown
-          className="h-4 w-4 text-[var(--editor-text-dim)] transition-transform"
-          style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
+          className="h-4 w-4 transition-transform"
+          style={{ color: "var(--editor-text-dim)", transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
         />
       </button>
-      {open ? (
-        <div className="space-y-3 border-t px-3 pb-3 pt-3" style={{ borderColor: "var(--editor-border)" }}>
-          {children}
-        </div>
-      ) : null}
+      {open ? <div className="space-y-3 pb-2 pt-2">{children}</div> : null}
     </div>
   );
 }
@@ -218,8 +203,8 @@ function AddButton({ icon: Icon, label, onClick }: { icon: React.ElementType; la
     <button
       type="button"
       onClick={onClick}
-      className="flex min-h-[68px] flex-col items-start gap-2 rounded-xl border px-3.5 py-3 text-left transition-[background,border-color,transform] duration-150 hover:-translate-y-[1px] hover:bg-[var(--editor-hover)] focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)] cursor-pointer"
-      style={{ background: "var(--editor-shell)", borderColor: "var(--editor-border)", color: "var(--editor-text)" }}
+      className="flex min-h-[52px] flex-col items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-center transition-[background,color] duration-150 hover:bg-[var(--editor-hover)] focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]"
+      style={{ background: "rgba(255,255,255,0.02)", color: "var(--editor-text)" }}
     >
       <Icon className="h-4 w-4 text-[var(--editor-accent)]" />
       <span className="text-xs font-medium">{label}</span>
@@ -275,14 +260,14 @@ function AlignButtons({ value, onChange }: { value: string; onChange: (next: str
   ] as const;
   return (
     <div className="grid grid-cols-3 gap-2">
-      {buttons.map(({ value: buttonValue, icon: Icon }) => {
-        const active = value === buttonValue;
+      {buttons.map(({ value: bv, icon: Icon }) => {
+        const active = value === bv;
         return (
           <button
-            key={buttonValue}
+            key={bv}
             type="button"
-            onClick={() => onChange(buttonValue)}
-            className="flex h-9 items-center justify-center rounded-lg border transition-colors hover:bg-[var(--editor-hover)] focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)] cursor-pointer"
+            onClick={() => onChange(bv)}
+            className="flex h-9 items-center justify-center rounded-lg border transition-colors hover:bg-[var(--editor-hover)] focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]"
             style={{
               borderColor: active ? "var(--editor-accent)" : "var(--editor-border)",
               background: active ? "rgba(103,232,249,0.1)" : "var(--editor-shell)",
@@ -297,7 +282,24 @@ function AlignButtons({ value, onChange }: { value: string; onChange: (next: str
   );
 }
 
-// Media preview card for image/logo/icon overlays
+function StyleToggle({ active, icon: Icon, title, onClick }: { active: boolean; icon: React.ElementType; title: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className="flex h-9 w-9 items-center justify-center rounded-lg border transition-colors hover:bg-[var(--editor-hover)] focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]"
+      style={{
+        borderColor: active ? "var(--editor-accent)" : "var(--editor-border)",
+        background: active ? "rgba(103,232,249,0.1)" : "var(--editor-shell)",
+        color: active ? "var(--editor-accent)" : "var(--editor-text-dim)",
+      }}
+    >
+      <Icon className="h-4 w-4" />
+    </button>
+  );
+}
+
 function MediaPreviewCard({ url, type }: { url?: string; type: string }) {
   if (!url) {
     return (
@@ -309,152 +311,66 @@ function MediaPreviewCard({ url, type }: { url?: string; type: string }) {
       </div>
     );
   }
-
   return (
-    <div
-      className="relative overflow-hidden rounded-xl border"
-      style={{ borderColor: "var(--editor-border)", background: "var(--editor-shell)" }}
-    >
+    <div className="relative overflow-hidden rounded-xl border" style={{ borderColor: "var(--editor-border)", background: "var(--editor-shell)" }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={url}
         alt={type}
         className="max-h-32 w-full object-contain"
-        onError={(e) => {
-          (e.currentTarget as HTMLImageElement).style.display = "none";
-        }}
+        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
       />
-      <div
-        className="absolute bottom-0 left-0 right-0 px-2 py-1 text-[10px]"
-        style={{ background: "rgba(0,0,0,0.6)", color: "var(--editor-text-dim)" }}
-      >
+      <div className="absolute bottom-0 left-0 right-0 px-2 py-1 text-[10px]" style={{ background: "rgba(0,0,0,0.6)", color: "var(--editor-text-dim)" }}>
         {type}
       </div>
     </div>
   );
 }
 
-
-// ── Drag-to-reorder layer list ────────────────────────────────────────────
-function DraggableLayerList({
-  overlays,
-  selectedId,
-  onSelect,
-  onReorder,
-}: {
-  overlays: EditableOverlay[];
-  selectedId?: string;
-  onSelect: (id: string) => void;
-  onReorder: (fromIndex: number, toIndex: number) => void;
-}) {
-  const dragIndexRef = useRef<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-
-  if (overlays.length === 0) {
-    return (
-      <p className="text-[11px]" style={{ color: "var(--editor-text-dim)" }}>
-        No overlays yet. Add content above.
-      </p>
-    );
-  }
-
+function LinkHintBadge({ href }: { href: string }) {
+  if (!href) return null;
+  const isAbsolute = /^https?:\/\//i.test(href);
   return (
-    <div className="max-h-52 space-y-0.5 overflow-y-auto pr-1 sidebar-scroll">
-      {overlays.map((overlay, index) => {
-        const selected = overlay.id === selectedId;
-        const isDragOver = dragOverIndex === index;
-        return (
-          <div
-            key={overlay.id}
-            draggable
-            onDragStart={(e) => {
-              dragIndexRef.current = index;
-              e.dataTransfer.effectAllowed = "move";
-              // Firefox requires setData to allow drag
-              e.dataTransfer.setData("text/plain", overlay.id);
-            }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-              setDragOverIndex(index);
-            }}
-            onDragLeave={() => setDragOverIndex(null)}
-            onDrop={(e) => {
-              e.preventDefault();
-              const from = dragIndexRef.current;
-              if (from !== null && from !== index) {
-                onReorder(from, index);
-              }
-              dragIndexRef.current = null;
-              setDragOverIndex(null);
-            }}
-            onDragEnd={() => {
-              dragIndexRef.current = null;
-              setDragOverIndex(null);
-            }}
-            className="group flex items-center gap-1 rounded-xl border transition-colors cursor-default"
-            style={{
-              borderColor: isDragOver
-                ? "var(--editor-accent)"
-                : selected
-                  ? "var(--editor-accent)"
-                  : "transparent",
-              background: isDragOver
-                ? "rgba(103,232,249,0.05)"
-                : selected
-                  ? "rgba(103,232,249,0.08)"
-                  : "transparent",
-              outline: isDragOver ? "1px solid rgba(103,232,249,0.25)" : undefined,
-            }}
-          >
-            {/* Drag handle */}
-            <div
-              className="flex h-full cursor-grab items-center px-2 py-3 active:cursor-grabbing"
-              style={{ color: "var(--editor-text-dim)" }}
-            >
-              <GripVertical className="h-3.5 w-3.5" />
-            </div>
-            {/* Layer info button */}
-            <button
-              type="button"
-              onClick={() => onSelect(overlay.id)}
-              className="min-w-0 flex-1 py-2.5 pr-3 text-left focus:outline-none"
-            >
-              <div className="truncate text-xs font-medium text-white">
-                {overlay.content.headline || overlay.content.body || "Untitled"}
-              </div>
-              <div className="pt-0.5 text-[10px] tabular-nums" style={{ color: "var(--editor-text-dim)" }}>
-                {overlay.content.type ?? "text"} · {Math.round(overlay.timing.start * 100)}–{Math.round(overlay.timing.end * 100)}%
-              </div>
-            </button>
-          </div>
-        );
-      })}
-    </div>
+    <span
+      className="flex items-center gap-1 text-[10px] font-medium"
+      style={{ color: isAbsolute ? "var(--editor-accent)" : "var(--editor-text-dim)" }}
+    >
+      {isAbsolute ? <ExternalLink className="h-3 w-3" /> : <Link className="h-3 w-3" />}
+      {isAbsolute ? "External link" : "Relative path"}
+    </span>
+  );
+}
+
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => { setHydrated(true); }, []);
+  return (
+    <FieldRow label={label}>
+      <div className="flex items-center gap-2">
+        {hydrated ? (
+          <input
+            type="color"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="h-9 w-9 flex-shrink-0 cursor-pointer rounded-lg border"
+            style={{ borderColor: "var(--editor-border)", background: "var(--editor-shell)", padding: "2px" }}
+          />
+        ) : (
+          <div className="h-9 w-9 flex-shrink-0 rounded-lg border" style={{ borderColor: "var(--editor-border)", background: value }} />
+        )}
+        <StyledInput value={value} onChange={(e) => onChange(e.target.value)} />
+      </div>
+    </FieldRow>
   );
 }
 
 export function SidebarPanel({
   overlays,
   selectedOverlay,
-  selectedClip,
-  selection,
-  projectTitle,
-  sectionTitle,
-  frameRangeStart,
-  frameRangeEnd,
-  scrubStrength,
-  sectionHeightVh,
-  onProjectTitleChange,
-  onSectionTitleChange,
-  onFrameRangeChange,
-  onSectionFieldChange,
   onOverlayFieldChange,
   onOverlayStyleChange,
   onOverlayAnimationChange,
   onOverlayTransitionChange,
-  onSelectOverlay,
-  onReorderOverlays,
   onAddContent,
   extraAddContent,
 }: SidebarPanelProps) {
@@ -464,46 +380,35 @@ export function SidebarPanel({
   const transition = selectedOverlay?.content.transition;
   const background = selectedOverlay?.content.background;
   const isTextLike = !selectedOverlay || selectedOverlay.content.type === "text";
-  const selectedLabel = selectedOverlay?.content.headline || selectedOverlay?.content.body || "Selected item";
-  const [hasHydrated, setHasHydrated] = useState(false);
-
-  useEffect(() => {
-    setHasHydrated(true);
-  }, []);
+  const selectedLabel = selectedOverlay?.content.headline || selectedOverlay?.content.body || "Selected overlay";
 
   return (
     <aside
-      className="flex flex-col overflow-y-auto border-r px-4 py-5 sidebar-scroll"
-      style={{ background: "var(--editor-panel)", borderColor: "var(--editor-border)", width: 320, minWidth: 320 }}
+      className="flex flex-col overflow-y-auto border-r px-4 py-4 sidebar-scroll"
+      style={{ background: "var(--editor-panel)", borderColor: "var(--editor-border)", width: 300, minWidth: 300 }}
     >
       <div className="space-y-4 pb-4">
-
-        {/* Add content — always open, no toggle */}
-        <div
-          className="rounded-2xl border p-4"
-          style={{ borderColor: "var(--editor-border)", background: "rgba(255,255,255,0.025)" }}
-        >
-          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--editor-text-dim)" }}>
-            Add content
-          </div>
+        {/* Add overlay buttons */}
+        <div className="space-y-2">
           <div className="grid grid-cols-2 gap-2">
             {contentButtons.map(({ id, label, icon }) => (
               <AddButton key={id} icon={icon} label={label} onClick={() => onAddContent(id)} />
             ))}
           </div>
-          {extraAddContent ? <div className="mt-3 pt-1">{extraAddContent}</div> : null}
+          {extraAddContent ? <div className="pt-1">{extraAddContent}</div> : null}
         </div>
 
-        {/* Selected overlay editor */}
         {selectedOverlay ? (
           <SidebarSection
-            title="Edit selected"
+            title="Overlay settings"
             description={`${selectedLabel} · ${selectedOverlay.content.type ?? "text"}`}
-            defaultOpen={true}
+            defaultOpen
           >
             <div className="space-y-3">
+
+              {/* ── Content ─────────────────────────────────────────── */}
               <InspectorGroup title="Content" icon={Type}>
-                {selectedOverlay.content.eyebrow !== undefined || isTextLike ? (
+                {isTextLike && selectedOverlay.content.eyebrow !== undefined ? (
                   <FieldRow label="Eyebrow">
                     <StyledInput
                       value={selectedOverlay.content.eyebrow ?? ""}
@@ -512,7 +417,7 @@ export function SidebarPanel({
                     />
                   </FieldRow>
                 ) : null}
-                <FieldRow label="Headline">
+                <FieldRow label={isTextLike ? "Headline" : "Caption"}>
                   <StyledInput
                     value={selectedOverlay.content.headline ?? ""}
                     onChange={(e) => onOverlayFieldChange("headline", e.target.value)}
@@ -526,17 +431,23 @@ export function SidebarPanel({
                     />
                   </FieldRow>
                 ) : null}
-                <FieldRow label="Link URL" hint="Optional">
+
+                {/* Link with absolute/relative hint */}
+                <FieldRow label="Link">
                   <StyledInput
                     value={selectedOverlay.content.linkHref ?? ""}
                     onChange={(e) => onOverlayFieldChange("linkHref", e.target.value)}
-                    placeholder="https://"
+                    placeholder="https:// or /path"
                   />
+                  <div className="mt-1">
+                    <LinkHintBadge href={selectedOverlay.content.linkHref ?? ""} />
+                  </div>
                 </FieldRow>
+
                 {!isTextLike ? (
                   <>
                     <MediaPreviewCard url={selectedOverlay.content.mediaUrl} type={selectedOverlay.content.type ?? "media"} />
-                    <FieldRow label="Media URL" hint="CDN asset">
+                    <FieldRow label="Media URL">
                       <StyledInput
                         value={selectedOverlay.content.mediaUrl ?? ""}
                         onChange={(e) => onOverlayFieldChange("mediaUrl", e.target.value)}
@@ -547,90 +458,94 @@ export function SidebarPanel({
                 ) : null}
               </InspectorGroup>
 
-              <InspectorGroup title={isTextLike ? "Typography" : "Appearance"} icon={Palette}>
-                {isTextLike ? (
-                  <>
-                    <FieldRow label="Font family">
-                      <StyledSelect value={style?.fontFamily ?? "Inter"} onValueChange={(v) => onOverlayStyleChange("fontFamily", v)}>
-                        {fontFamilies.map((f) => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+              {/* ── Typography ──────────────────────────────────────── */}
+              {isTextLike ? (
+                <InspectorGroup title="Typography" icon={Palette}>
+                  <FieldRow label="Font">
+                    <StyledSelect value={style?.fontFamily ?? "Inter"} onValueChange={(v) => onOverlayStyleChange("fontFamily", v)}>
+                      {fontFamilies.map((f) => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                    </StyledSelect>
+                  </FieldRow>
+
+                  {/* Text style toggles */}
+                  <FieldRow label="Style">
+                    <div className="flex gap-2">
+                      <StyledSelect value={String(style?.fontWeight ?? 600)} onValueChange={(v) => onOverlayStyleChange("fontWeight", Number(v))}>
+                        {fontWeights.map((w) => <SelectItem key={w.value} value={w.value}>{w.label}</SelectItem>)}
                       </StyledSelect>
-                    </FieldRow>
-                    <InlineGroup>
-                      <FieldRow label="Weight">
-                        <StyledSelect value={String(style?.fontWeight ?? 600)} onValueChange={(v) => onOverlayStyleChange("fontWeight", Number(v))}>
-                          {fontWeights.map((w) => <SelectItem key={w.value} value={w.value}>{w.label}</SelectItem>)}
-                        </StyledSelect>
-                      </FieldRow>
-                      <FieldRow label="Size">
-                        <StyledInput type="number" value={style?.fontSize ?? 32} onChange={(e) => onOverlayStyleChange("fontSize", Number(e.target.value))} />
-                      </FieldRow>
-                    </InlineGroup>
-                    <FieldRow label="Text align">
-                      <AlignButtons value={style?.textAlign ?? "start"} onChange={(v) => onOverlayStyleChange("textAlign", v)} />
-                    </FieldRow>
-                  </>
-                ) : null}
-                <InlineGroup>
-                  <FieldRow label="Color">
-                    <div className="flex items-center gap-2">
-                      {hasHydrated ? (
-                        <input
-                          type="color"
-                          value={style?.color ?? "#f6f7fb"}
-                          onChange={(e) => onOverlayStyleChange("color", e.target.value)}
-                          className="h-9 w-9 flex-shrink-0 cursor-pointer rounded-lg border"
-                          style={{ borderColor: "var(--editor-border)", background: "var(--editor-shell)" }}
-                        />
-                      ) : (
-                        <div
-                          aria-hidden="true"
-                          className="h-9 w-9 flex-shrink-0 rounded-lg border"
-                          style={{
-                            borderColor: "var(--editor-border)",
-                            background: style?.color ?? "#f6f7fb",
-                          }}
-                        />
-                      )}
+                      <StyleToggle active={style?.italic ?? false} icon={Italic} title="Italic" onClick={() => onOverlayStyleChange("italic", !(style?.italic ?? false))} />
+                      <StyleToggle active={style?.underline ?? false} icon={Underline} title="Underline" onClick={() => onOverlayStyleChange("underline", !(style?.underline ?? false))} />
+                      <StyleToggle active={(style?.fontWeight ?? 600) >= 700} icon={Bold} title="Bold" onClick={() => onOverlayStyleChange("fontWeight", (style?.fontWeight ?? 600) >= 700 ? 600 : 700)} />
+                    </div>
+                  </FieldRow>
+
+                  {/* Per-field font sizes */}
+                  <FieldRow label="Sizes" hint="eyebrow · headline · body">
+                    <div className="grid grid-cols-3 gap-2">
                       <StyledInput
-                        value={style?.color ?? "#f6f7fb"}
-                        onChange={(e) => onOverlayStyleChange("color", e.target.value)}
+                        type="number"
+                        value={style?.eyebrowFontSize ?? 12}
+                        title="Eyebrow size"
+                        onChange={(e) => onOverlayStyleChange("eyebrowFontSize", Number(e.target.value))}
+                      />
+                      <StyledInput
+                        type="number"
+                        value={style?.fontSize ?? 34}
+                        title="Headline size"
+                        onChange={(e) => onOverlayStyleChange("fontSize", Number(e.target.value))}
+                      />
+                      <StyledInput
+                        type="number"
+                        value={style?.bodyFontSize ?? 15}
+                        title="Body size"
+                        onChange={(e) => onOverlayStyleChange("bodyFontSize", Number(e.target.value))}
                       />
                     </div>
                   </FieldRow>
-                  <FieldRow label="Opacity">
-                    <StyledInput type="number" value={style?.opacity ?? 1} min={0} max={1} step={0.05} onChange={(e) => onOverlayStyleChange("opacity", Number(e.target.value))} />
+
+                  <FieldRow label="Alignment">
+                    <AlignButtons value={style?.textAlign ?? "start"} onChange={(v) => onOverlayStyleChange("textAlign", v)} />
                   </FieldRow>
-                </InlineGroup>
-                <InlineGroup>
-                  <FieldRow label="Width">
-                    <StyledInput type="number" value={layout?.width ?? style?.maxWidth ?? 420} onChange={(e) => onOverlayStyleChange("width", Number(e.target.value))} />
-                  </FieldRow>
-                  <FieldRow label="Height">
-                    <StyledInput type="number" value={layout?.height ?? ""} onChange={(e) => onOverlayStyleChange("height", Number(e.target.value))} placeholder="Auto" />
-                  </FieldRow>
-                </InlineGroup>
-                <InlineGroup>
-                  <FieldRow label="X (0–1)">
-                    <StyledInput type="number" value={layout?.x ?? 0.08} step={0.01} min={0} max={1} onChange={(e) => onOverlayStyleChange("x", Number(e.target.value))} />
-                  </FieldRow>
-                  <FieldRow label="Y (0–1)">
-                    <StyledInput type="number" value={layout?.y ?? 0.12} step={0.01} min={0} max={1} onChange={(e) => onOverlayStyleChange("y", Number(e.target.value))} />
-                  </FieldRow>
-                </InlineGroup>
-                <InlineGroup>
-                  <FieldRow label="Theme">
+
+                  <ColorField
+                    label="Color"
+                    value={style?.color ?? "#f6f7fb"}
+                    onChange={(v) => onOverlayStyleChange("color", v)}
+                  />
+
+                  <InlineGroup>
+                    <FieldRow label="Opacity">
+                      <StyledInput type="number" value={style?.opacity ?? 1} min={0} max={1} step={0.05} onChange={(e) => onOverlayStyleChange("opacity", Number(e.target.value))} />
+                    </FieldRow>
+                    <FieldRow label="Max width">
+                      <StyledInput type="number" value={layout?.width ?? style?.maxWidth ?? 420} onChange={(e) => onOverlayStyleChange("width", Number(e.target.value))} />
+                    </FieldRow>
+                  </InlineGroup>
+
+                  {/* Theme — sets the overlay's CSS class for light/dark/accent presets */}
+                  <FieldRow label="Colour theme" hint="Overrides text/bg defaults">
                     <StyledSelect value={selectedOverlay.content.theme ?? "dark"} onValueChange={(v) => onOverlayFieldChange("theme", v)}>
-                      <SelectItem value="light">Light</SelectItem>
-                      <SelectItem value="dark">Dark</SelectItem>
-                      <SelectItem value="accent">Accent</SelectItem>
+                      <SelectItem value="light">Light — pale card</SelectItem>
+                      <SelectItem value="dark">Dark — dark card</SelectItem>
+                      <SelectItem value="accent">Accent — cyan tint</SelectItem>
                     </StyledSelect>
                   </FieldRow>
-                  <FieldRow label="Layer">
-                    <StyledInput type="number" value={selectedOverlay.content.layer ?? 0} onChange={(e) => onOverlayStyleChange("layer", Number(e.target.value))} />
-                  </FieldRow>
-                </InlineGroup>
-              </InspectorGroup>
+                </InspectorGroup>
+              ) : (
+                /* Appearance for media overlays */
+                <InspectorGroup title="Appearance" icon={Palette}>
+                  <InlineGroup>
+                    <FieldRow label="Width">
+                      <StyledInput type="number" value={layout?.width ?? 420} onChange={(e) => onOverlayStyleChange("width", Number(e.target.value))} />
+                    </FieldRow>
+                    <FieldRow label="Opacity">
+                      <StyledInput type="number" value={style?.opacity ?? 1} min={0} max={1} step={0.05} onChange={(e) => onOverlayStyleChange("opacity", Number(e.target.value))} />
+                    </FieldRow>
+                  </InlineGroup>
+                </InspectorGroup>
+              )}
 
+              {/* ── Background ──────────────────────────────────────── */}
               <InspectorGroup title="Background" icon={Layers3} defaultOpen={false}>
                 <InlineGroup>
                   <FieldRow label="Enabled">
@@ -641,39 +556,63 @@ export function SidebarPanel({
                   </FieldRow>
                   <FieldRow label="Mode">
                     <StyledSelect value={background?.mode ?? "transparent"} onValueChange={(v) => onOverlayStyleChange("backgroundMode", v)}>
-                      <SelectItem value="transparent">Transparent</SelectItem>
+                      <SelectItem value="transparent">Glass</SelectItem>
                       <SelectItem value="solid">Solid</SelectItem>
                     </StyledSelect>
                   </FieldRow>
                 </InlineGroup>
+                <ColorField
+                  label="Fill color"
+                  value={background?.color ?? "#0d1016"}
+                  onChange={(v) => onOverlayStyleChange("backgroundColor", v)}
+                />
                 <InlineGroup>
-                  <FieldRow label="Fill">
-                    <StyledInput value={background?.color ?? "#0d1016"} onChange={(e) => onOverlayStyleChange("backgroundColor", e.target.value)} />
-                  </FieldRow>
                   <FieldRow label="Fill opacity">
                     <StyledInput type="number" value={background?.opacity ?? 0.82} step={0.05} min={0} max={1} onChange={(e) => onOverlayStyleChange("backgroundOpacity", Number(e.target.value))} />
                   </FieldRow>
-                </InlineGroup>
-                <InlineGroup>
                   <FieldRow label="Radius">
                     <StyledInput type="number" value={background?.radius ?? 14} onChange={(e) => onOverlayStyleChange("backgroundRadius", Number(e.target.value))} />
                   </FieldRow>
+                </InlineGroup>
+                <ColorField
+                  label="Border color"
+                  value={background?.borderColor ?? "#d6f6ff"}
+                  onChange={(v) => onOverlayStyleChange("backgroundBorderColor", v)}
+                />
+                <InlineGroup>
                   <FieldRow label="Border opacity">
                     <StyledInput type="number" value={background?.borderOpacity ?? 0} step={0.05} min={0} max={1} onChange={(e) => onOverlayStyleChange("backgroundBorderOpacity", Number(e.target.value))} />
+                  </FieldRow>
+                  <FieldRow label="Padding X">
+                    <StyledInput type="number" value={background?.paddingX ?? 18} onChange={(e) => onOverlayStyleChange("backgroundPaddingX", Number(e.target.value))} />
                   </FieldRow>
                 </InlineGroup>
               </InspectorGroup>
 
-              <InspectorGroup title="Motion &amp; timing" icon={SlidersHorizontal}>
-                <InlineGroup>
-                  <FieldRow label="Start" hint={`${Math.round(selectedOverlay.timing.start * 100)}%`}>
-                    <Slider value={[selectedOverlay.timing.start]} min={0} max={1} step={0.01} onValueChange={([v]) => onOverlayFieldChange("start", String(v))} />
-                  </FieldRow>
-                  <FieldRow label="End" hint={`${Math.round(selectedOverlay.timing.end * 100)}%`}>
-                    <Slider value={[selectedOverlay.timing.end]} min={0} max={1} step={0.01} onValueChange={([v]) => onOverlayFieldChange("end", String(v))} />
-                  </FieldRow>
-                </InlineGroup>
-                <FieldRow label="Animation">
+              {/* ── Scene timing & reveal ────────────────────────────── */}
+              <InspectorGroup title="Scene timing" icon={SlidersHorizontal}>
+                <FieldRow
+                  label="Appears at"
+                  hint={`${Math.round(selectedOverlay.timing.start * 100)}% scroll`}
+                >
+                  <Slider
+                    value={[selectedOverlay.timing.start]}
+                    min={0} max={1} step={0.01}
+                    onValueChange={([v]) => onOverlayFieldChange("start", String(v))}
+                  />
+                </FieldRow>
+                <FieldRow
+                  label="Disappears at"
+                  hint={`${Math.round(selectedOverlay.timing.end * 100)}% scroll`}
+                >
+                  <Slider
+                    value={[selectedOverlay.timing.end]}
+                    min={0} max={1} step={0.01}
+                    onValueChange={([v]) => onOverlayFieldChange("end", String(v))}
+                  />
+                </FieldRow>
+
+                <FieldRow label="Reveal animation">
                   <StyledSelect value={animation?.preset ?? "none"} onValueChange={(v) => onOverlayAnimationChange("preset", v)}>
                     {animationPresets.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                   </StyledSelect>
@@ -692,53 +631,21 @@ export function SidebarPanel({
                   <FieldRow label="Delay">
                     <StyledInput type="number" value={animation?.delay ?? 0} step={0.05} min={0} onChange={(e) => onOverlayAnimationChange("delay", Number(e.target.value))} />
                   </FieldRow>
-                  <FieldRow label="Transition">
+                  <FieldRow label="Exit transition">
                     <StyledSelect value={transition?.preset ?? "fade"} onValueChange={(v) => onOverlayTransitionChange("preset", v)}>
                       {transitionPresets.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                     </StyledSelect>
                   </FieldRow>
                 </InlineGroup>
               </InspectorGroup>
+
             </div>
           </SidebarSection>
-        ) : null}
-
-        {/* Scene layers list — drag to reorder */}
-        <SidebarSection title="Scene layers" description="Drag to reorder" defaultOpen={false}>
-          <DraggableLayerList
-            overlays={overlays}
-            selectedId={selectedOverlay?.id}
-            onSelect={onSelectOverlay}
-            onReorder={onReorderOverlays}
-          />
-        </SidebarSection>
-
-        {/* Project/section settings */}
-        <SidebarSection title="Project details" description="Sequence range and scroll settings" defaultOpen={false}>
-          <div className="space-y-3.5">
-            <FieldRow label="Project title">
-              <StyledInput value={projectTitle} onChange={(e) => onProjectTitleChange(e.target.value)} />
-            </FieldRow>
-            <FieldRow label="Section title">
-              <StyledInput value={sectionTitle} onChange={(e) => onSectionTitleChange(e.target.value)} />
-            </FieldRow>
-            <InlineGroup>
-              <FieldRow label="Frame start">
-                <StyledInput type="number" value={frameRangeStart} onChange={(e) => onFrameRangeChange("start", Number(e.target.value))} />
-              </FieldRow>
-              <FieldRow label="Frame end">
-                <StyledInput type="number" value={frameRangeEnd} onChange={(e) => onFrameRangeChange("end", Number(e.target.value))} />
-              </FieldRow>
-            </InlineGroup>
-            <FieldRow label="Scroll strength" hint={`${scrubStrength.toFixed(2)}×`}>
-              <Slider value={[scrubStrength]} min={0.2} max={2} step={0.05} onValueChange={([v]) => onSectionFieldChange("scrubStrength", v)} />
-            </FieldRow>
-            <FieldRow label="Section height" hint={`${Math.round(sectionHeightVh)}vh`}>
-              <Slider value={[sectionHeightVh]} min={120} max={500} step={10} onValueChange={([v]) => onSectionFieldChange("sectionHeightVh", v)} />
-            </FieldRow>
+        ) : (
+          <div className="pt-4 text-center text-xs" style={{ color: "var(--editor-text-dim)" }}>
+            Select an overlay in the preview or timeline to edit it.
           </div>
-        </SidebarSection>
-
+        )}
       </div>
     </aside>
   );

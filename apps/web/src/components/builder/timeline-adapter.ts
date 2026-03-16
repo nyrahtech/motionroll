@@ -27,13 +27,12 @@ export type TimelineRow = {
 };
 
 export type MotionRollTimelineAction = TimelineAction & {
-  effectId: "section" | "overlay" | "moment";
+  effectId: "section" | "layer";
 };
 
 export const motionRollTimelineEffects: Record<string, TimelineEffect> = {
   section: { id: "section", name: "Section" },
-  overlay: { id: "overlay", name: "Text" },
-  moment: { id: "moment", name: "Moment" },
+  layer: { id: "layer", name: "Layer" },
 };
 
 export function createTimelineRows(

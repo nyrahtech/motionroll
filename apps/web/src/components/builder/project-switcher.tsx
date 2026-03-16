@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 
 type SwitcherProject = {
   id: string;
@@ -26,11 +27,29 @@ type SwitcherProject = {
 export function ProjectSwitcher({
   currentProjectId,
   currentProjectTitle,
+  sectionTitle,
+  frameRangeStart,
+  frameRangeEnd,
+  scrubStrength,
+  sectionHeightVh,
   projects,
+  onProjectTitleChange,
+  onSectionTitleChange,
+  onFrameRangeChange,
+  onSectionFieldChange,
 }: {
   currentProjectId: string;
   currentProjectTitle: string;
+  sectionTitle: string;
+  frameRangeStart: number;
+  frameRangeEnd: number;
+  scrubStrength: number;
+  sectionHeightVh: number;
   projects: SwitcherProject[];
+  onProjectTitleChange: (value: string) => void;
+  onSectionTitleChange: (value: string) => void;
+  onFrameRangeChange: (field: "start" | "end", value: number) => void;
+  onSectionFieldChange: (field: "scrubStrength" | "sectionHeightVh", value: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -41,6 +60,10 @@ export function ProjectSwitcher({
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    setRenameValue(currentProjectTitle);
+  }, [currentProjectTitle]);
 
   const filteredProjects = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -53,21 +76,14 @@ export function ProjectSwitcher({
     );
   }, [projects, query]);
 
-  async function renameCurrentProject() {
+  function renameCurrentProject() {
     const nextTitle = renameValue.trim();
     if (!nextTitle || nextTitle === currentProjectTitle) {
       return;
     }
 
-    setPendingAction("rename");
-    await fetch(`/api/projects/${currentProjectId}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ title: nextTitle }),
-    });
-    window.location.reload();
+    onProjectTitleChange(nextTitle);
+    setOpen(false);
   }
 
   async function duplicateCurrentProject() {
@@ -186,16 +202,55 @@ export function ProjectSwitcher({
                 Current project
               </p>
               <div className="flex gap-2">
-                <Input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} />
+                <Input
+                  value={renameValue}
+                  onChange={(event) => {
+                    setRenameValue(event.target.value);
+                    onProjectTitleChange(event.target.value);
+                  }}
+                />
                 <Button
                   type="button"
                   variant="secondary"
                   size="sm"
-                  disabled={pendingAction === "rename"}
-                  onClick={() => void renameCurrentProject()}
+                  onClick={renameCurrentProject}
                 >
-                  {pendingAction === "rename" ? "Saving…" : "Rename"}
+                  Rename
                 </Button>
+              </div>
+              <div className="space-y-3 rounded-[10px] border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.02)] p-3">
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
+                    Project details
+                  </p>
+                  <Input value={sectionTitle} onChange={(event) => onSectionTitleChange(event.target.value)} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    type="number"
+                    value={frameRangeStart}
+                    onChange={(event) => onFrameRangeChange("start", Number(event.target.value))}
+                  />
+                  <Input
+                    type="number"
+                    value={frameRangeEnd}
+                    onChange={(event) => onFrameRangeChange("end", Number(event.target.value))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
+                    <span>Scroll strength</span>
+                    <span>{scrubStrength.toFixed(2)}x</span>
+                  </div>
+                  <Slider value={[scrubStrength]} min={0.2} max={2} step={0.05} onValueChange={([v]) => onSectionFieldChange("scrubStrength", v ?? scrubStrength)} />
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
+                    <span>Scene scroll height</span>
+                    <span>{Math.round(sectionHeightVh)}vh</span>
+                  </div>
+                  <Slider value={[sectionHeightVh]} min={120} max={500} step={10} onValueChange={([v]) => onSectionFieldChange("sectionHeightVh", v ?? sectionHeightVh)} />
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button

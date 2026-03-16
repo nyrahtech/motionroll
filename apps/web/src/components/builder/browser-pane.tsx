@@ -29,7 +29,7 @@ export function EditorRailNav({
           <RailButton
             key={tab}
             active={active}
-            label={tab === "assets" ? "Media" : tab === "overlays" ? "Text" : "Import"}
+            label={tab === "assets" ? "Media" : tab === "overlays" ? "Text" : "Source"}
             onClick={() => onTabChange(tab)}
           >
             {tab === "assets" ? (
@@ -71,7 +71,7 @@ export function BrowserPane({
   onReplaceSource: () => void;
 }) {
   const title =
-    tab === "assets" ? "Media" : tab === "overlays" ? "Text blocks" : "Import";
+    tab === "assets" ? "Media" : tab === "overlays" ? "Text blocks" : "Source video";
 
   return (
     <BrowserPanel title={title} searchValue={search} onSearchChange={onSearchChange}>

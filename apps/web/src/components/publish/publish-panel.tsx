@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import type { ProjectManifest } from "@motionroll/shared";
-import { RuntimePreview } from "@/components/builder/runtime-preview";
 import { ArrowLeft, Check, Copy, ExternalLink, Monitor, Smartphone } from "lucide-react";
 import Link from "next/link";
 
@@ -55,6 +54,22 @@ export function PublishPanel({
 
   const deviceDims = { desktop: { w: 1280, h: 720 }, tablet: { w: 768, h: 1024 }, mobile: { w: 390, h: 844 } };
   const dims = deviceDims[device];
+  const runtimeMode = device === "desktop" ? "desktop" : "mobile";
+  const runtimePreviewUrl = useMemo(() => {
+    const baseUrl =
+      !manifestState.publishTarget.publishedAt || needsRepublish
+        ? `/projects/${projectState.id}/preview`
+        : manifestState.publishTarget.previewUrl;
+    const joiner = baseUrl.includes("?") ? "&" : "?";
+    return `${baseUrl}${joiner}mode=${runtimeMode}&forceSequence=1`;
+  }, [
+    manifestState.publishTarget.previewUrl,
+    manifestState.publishTarget.publishedAt,
+    needsRepublish,
+    projectState.id,
+    runtimeMode,
+  ]);
+  const isDesktopPreview = device === "desktop";
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "var(--editor-shell)" }}>
@@ -121,9 +136,9 @@ export function PublishPanel({
       </header>
 
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6">
+        <div className="flex w-full flex-col gap-6">
         {/* Preview pane */}
-        <div className="flex flex-col items-center gap-4">
+        <div className={`flex flex-col gap-4 ${isDesktopPreview ? "w-full" : "items-center"}`}>
           <div className="text-center">
             <h1 className="text-xl font-semibold" style={{ color: "var(--editor-text)" }}>{projectState.title}</h1>
             <p className="text-sm mt-1" style={{ color: "var(--editor-text-dim)" }}>
@@ -132,25 +147,34 @@ export function PublishPanel({
           </div>
 
           <div
-            className="rounded-lg overflow-hidden shadow-2xl"
+            className="overflow-hidden rounded-none shadow-2xl"
             style={{
-              width: Math.min(dims.w, 800),
-              aspectRatio: `${dims.w}/${dims.h}`,
+              width: isDesktopPreview ? "100%" : `${dims.w}px`,
+              maxWidth: isDesktopPreview ? "none" : "100%",
+              height: isDesktopPreview ? "min(72vh, 900px)" : `${dims.h}px`,
               background: "#000",
               border: "1px solid var(--editor-border)",
             }}
           >
-            <RuntimePreview
-              manifest={manifestState}
-              mode={device === "mobile" ? "mobile" : "desktop"}
-              reducedMotion={false}
-              showControls={false}
+            <iframe
+              key={runtimePreviewUrl}
+              src={runtimePreviewUrl}
+              title={`${projectState.title} ${device} runtime preview`}
+              className="h-full w-full bg-black"
+              style={{ border: 0 }}
+              loading="eager"
+              allow="autoplay; fullscreen"
             />
           </div>
+          <p className="text-xs" style={{ color: "var(--editor-text-dim)" }}>
+            {!manifestState.publishTarget.publishedAt || needsRepublish
+              ? "Showing the current draft runtime."
+              : "Showing the currently published runtime."}
+          </p>
         </div>
 
         {/* Status panel */}
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="mx-auto grid w-full max-w-[1200px] gap-4 md:grid-cols-2">
           {/* Status card */}
           <div
             className="rounded-lg border p-5 space-y-3"
@@ -225,7 +249,7 @@ export function PublishPanel({
 
         {/* Embed code */}
         <div
-          className="rounded-lg border p-5 space-y-3"
+          className="mx-auto w-full max-w-[1200px] rounded-lg border p-5 space-y-3"
           style={{ background: "var(--editor-panel)", borderColor: "var(--editor-border)" }}
         >
           <div className="flex items-center justify-between">

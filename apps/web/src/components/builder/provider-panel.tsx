@@ -29,7 +29,7 @@ export function ProviderPanel({ projectId }: { projectId: string }) {
     },
   });
   const [message, setMessage] = useState(
-    "Provider calls are scaffolded in v1. Connection persistence is real; live generation is not.",
+    "",
   );
   const [assets, setAssets] = useState<ProviderAsset[]>([]);
 
@@ -48,7 +48,7 @@ export function ProviderPanel({ projectId }: { projectId: string }) {
       }),
     });
     const data = await response.json();
-    setMessage(data.metadata?.unsupportedReason ?? "Connection saved.");
+    setMessage(data.metadata?.unsupportedReason ?? "");
   }
 
   async function loadAssets() {
@@ -56,7 +56,7 @@ export function ProviderPanel({ projectId }: { projectId: string }) {
     const response = await fetch(`/api/providers/${values.provider}/assets`);
     const data = await response.json();
     setAssets(data.assets ?? []);
-    setMessage(data.message ?? "Loaded scaffolded assets.");
+    setMessage(data.message ?? "");
   }
 
   async function importAsset(assetExternalId: string) {
@@ -72,14 +72,13 @@ export function ProviderPanel({ projectId }: { projectId: string }) {
       }),
     });
     const data = await response.json();
-    setMessage(data.message ?? "Import scaffold recorded.");
+    setMessage(data.message ?? "");
   }
 
   return (
     <EditorPanel
-      title="Import from an AI provider"
-      description="Connection persistence is real. Provider generation and file downloads stay honest stubs for now."
-      badge={<StatusPill label="Stub-aware" tone="warning" />}
+      title="Import AI scene"
+      badge={<Badge variant="accent">Runway · Luma · Sora</Badge>}
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-2">
@@ -108,7 +107,7 @@ export function ProviderPanel({ projectId }: { projectId: string }) {
           List generated assets
         </Button>
       </div>
-      <p className="text-sm leading-6 text-[var(--foreground-muted)]">{message}</p>
+      {message ? <p className="text-xs" style={{ color: "var(--foreground-muted)" }}>{message}</p> : null}
       {assets.length > 0 ? (
         <div className="space-y-3">
           {assets.map((asset) => (

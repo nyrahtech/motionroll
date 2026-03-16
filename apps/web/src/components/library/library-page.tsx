@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { Route } from "next";
 import Link from "next/link";
 import { Archive, ArchiveRestore, MoreVertical, Plus, Search } from "lucide-react";
 import { createProjectAction } from "@/app/actions";
@@ -33,7 +34,7 @@ function getProjectStatus(project: ProjectListItem) {
   return { label: project.status, color: "var(--editor-text-dim)" };
 }
 
-function ProjectCard({ project, href, archived = false }: { project: ProjectListItem; href: string; archived?: boolean }) {
+function ProjectCard({ project, href, archived = false }: { project: ProjectListItem; href: Route; archived?: boolean }) {
   const status = getProjectStatus(project);
   const cover = getProjectCover(project);
 
@@ -220,7 +221,7 @@ export function LibraryPage({
               </p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {filtered.map((p) => (
-                  <ProjectCard key={p.id} project={p} href={`/projects/${p.id}`} />
+                  <ProjectCard key={p.id} project={p} href={`/projects/${p.id}` as Route} />
                 ))}
               </div>
             </>
@@ -248,7 +249,7 @@ export function LibraryPage({
                   </div>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {demoProjects.map((p) => (
-                      <ProjectCard key={p.id} project={p} href={`/projects/${p.id}`} />
+                      <ProjectCard key={p.id} project={p} href={`/projects/${p.id}` as Route} />
                     ))}
                   </div>
                 </section>
@@ -290,7 +291,7 @@ export function LibraryPage({
                 ) : (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {recentProjects.map((p) => (
-                      <ProjectCard key={p.id} project={p} href={`/projects/${p.id}`} />
+                      <ProjectCard key={p.id} project={p} href={`/projects/${p.id}` as Route} />
                     ))}
                     <NewProjectCard />
                   </div>
@@ -311,7 +312,7 @@ export function LibraryPage({
                   </div>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {archivedProjects.map((p) => (
-                      <ProjectCard key={p.id} project={p} href={`/projects/${p.id}`} archived />
+                      <ProjectCard key={p.id} project={p} href={`/projects/${p.id}` as Route} archived />
                     ))}
                   </div>
                 </section>

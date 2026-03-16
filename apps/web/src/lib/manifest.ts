@@ -16,6 +16,7 @@ import {
   buildSectionManifest,
   validateProjectManifest,
 } from "./manifest-helpers";
+import { buildSectionValuesFromDraft, parseProjectDraftDocument } from "./project-draft";
 
 type BuildProjectManifestOptions = {
   publishVersion?: number;
@@ -60,9 +61,12 @@ export async function buildProjectManifest(
     (target) => target.targetType === "hosted_embed",
   );
   const publishVersion = options.publishVersion ?? project.publishVersion;
+  const draft = project.draftJson ? parseProjectDraftDocument(project.draftJson) : null;
+  const baseSection = project.sections[0];
+  const draftSection = draft && baseSection ? buildSectionValuesFromDraft(baseSection, draft) : null;
 
   const sections = await Promise.all(
-    project.sections.map(async (section) => {
+    (draftSection ? [draftSection] : project.sections).map(async (section) => {
       const overlays = await db.query.projectOverlays.findMany({
         where: eq(projectOverlays.projectSectionId, section.id),
         orderBy: [asc(projectOverlays.sortOrder)],
@@ -75,10 +79,41 @@ export async function buildProjectManifest(
         where: eq(projectTransitions.projectSectionId, section.id),
         orderBy: [asc(projectTransitions.sortOrder)],
       });
+      const resolvedSection = {
+        id: section.id,
+        presetId: section.presetId ?? project.selectedPreset,
+        title: section.title,
+        commonConfig: {
+          sectionHeightVh: section.commonConfig.sectionHeightVh,
+          scrubStrength: section.commonConfig.scrubStrength,
+          frameRange: section.commonConfig.frameRange ?? { start: 0, end: 180 },
+          fallbackBehavior: section.commonConfig.fallbackBehavior ?? {
+            mobile: "sequence",
+            reducedMotion: "poster",
+          },
+          motion: section.commonConfig.motion ?? {
+            easing: "power2.out",
+            pin: true,
+            preloadWindow: 6,
+          },
+        },
+        presetConfig: (section.presetConfig ?? {}) as Record<
+          string,
+          string | number | boolean | string[]
+        >,
+      };
+      const resolvedOverlays =
+        draftSection && section.id === draftSection.id
+          ? draftSection.overlays.map((overlay) => ({
+              overlayKey: overlay.overlayKey,
+              timing: overlay.timing,
+              content: overlay.content,
+            }))
+          : overlays;
 
       return buildSectionManifest({
-        section,
-        overlays,
+        section: resolvedSection,
+        overlays: resolvedOverlays,
         moments,
         transitions: transitions.map((transition) => ({
           ...transition,
@@ -105,7 +140,7 @@ export async function buildProjectManifest(
     project: {
       id: project.id,
       slug: hostedTarget?.slug ?? project.slug,
-      title: project.title,
+      title: draft?.title ?? project.title,
       ownerId: project.ownerId,
       publishVersion,
       latestPublishVersion: project.latestPublishVersion,
@@ -113,7 +148,7 @@ export async function buildProjectManifest(
       previewUrl: publishTarget.previewUrl,
     },
     publishTarget,
-    selectedPreset: project.selectedPreset,
+    selectedPreset: draft?.presetId ?? project.selectedPreset,
     sections,
     generatedAt: (options.publishedAt ?? project.updatedAt).toISOString(),
   });

@@ -161,6 +161,7 @@ export async function createPublishedSnapshot(projectId: string) {
       status: "published",
       publishVersion: nextVersion,
       latestPublishVersion: nextVersion,
+      latestPublishId: snapshot?.id ?? null,
       lastPublishedAt: publishedAt,
       updatedAt: publishedAt,
     })

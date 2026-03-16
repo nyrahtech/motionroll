@@ -6,5 +6,6 @@ export * from "./contracts/overlays";
 export * from "./contracts/presets";
 export * from "./contracts/preset-runtime";
 export * from "./contracts/processing";
+export * from "./contracts/project-draft";
 export * from "./sequence";
 export * from "./timing";

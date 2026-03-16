@@ -1,4 +1,10 @@
-import type { PresetDefinition, PresetId, ProjectManifest } from "@motionroll/shared";
+import type {
+  OverlayDefinition,
+  PresetDefinition,
+  PresetId,
+  ProjectDraftDocument,
+  ProjectManifest,
+} from "@motionroll/shared";
 import type {
   TimelineClipModel,
   TimelineDraftState,
@@ -32,22 +38,40 @@ export type EditorProject = {
   lastOpenedAt?: Date | null;
   lastSavedAt?: Date | null;
   lastPublishedAt?: Date | null;
+  updatedAt?: Date | string | null;
   latestPublishVersion?: number;
+  draftRevision?: number;
+  draftJson?: ProjectDraftDocument | null;
   sections: Array<{
     id: string;
+    projectId?: string;
     title: string;
+    sortOrder?: number;
+    presetId?: PresetId;
+    presetConfig?: Record<string, unknown>;
     overlays?: Array<{
       id: string;
       overlayKey: string;
+      sortOrder?: number;
       timing: { start: number; end: number };
-      content: { eyebrow?: string; headline: string; body: string };
+      content: OverlayDefinition["content"];
     }>;
     commonConfig: {
       sectionHeightVh: number;
       scrubStrength: number;
-      text: { headline: string; body: string };
-      cta: { label: string; href: string };
-    };
+      frameRange?: { start: number; end: number };
+      fallbackBehavior?: {
+        mobile: "poster" | "video" | "sequence";
+        reducedMotion: "poster" | "video" | "sequence";
+      };
+      motion?: {
+        easing: "linear" | "power2.out" | "power3.out";
+        pin: boolean;
+        preloadWindow: number;
+      };
+      text?: { headline: string; body: string };
+      cta?: { label: string; href: string };
+    } & Record<string, unknown>;
   }>;
   assets: Array<{
     id: string;

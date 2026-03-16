@@ -1,12 +1,13 @@
 import {
   clampProgress,
   frameIndexToSequenceProgress,
+  progressToFrameIndex,
   progressToFrameBoundaryIndex,
   type OverlayDefinition,
   type ProjectManifest,
 } from "@motionroll/shared";
 
-export type TimelineTrackType = "section" | "overlay" | "moment";
+export type TimelineTrackType = "section" | "layer";
 
 export type TimelineClipModel = {
   id: string;
@@ -23,6 +24,7 @@ export type TimelineClipModel = {
     body?: string;
     transitionPreset?: string;
     contentType?: string;
+    layerIndex?: number;
   };
 };
 
@@ -41,6 +43,10 @@ export type TimelineTrackModel = {
   label: string;
   type: TimelineTrackType;
   clips: TimelineClipModel[];
+  metadata?: {
+    overlayId?: string;
+    layerIndex?: number;
+  };
 };
 
 export const TIMELINE_SNAP_STEP = 0.025;
@@ -163,39 +169,78 @@ export function getTimelineStepProgress(durationSeconds: number, frames = 12) {
   return clampTimelineValue(1 / Math.max(durationSeconds * frames, 1));
 }
 
-function getFrameStrip(section: ProjectManifest["sections"][number], sampleCount = 18) {
-  const frameRangeLength = Math.max(
-    section.progressMapping.frameRange.end - section.progressMapping.frameRange.start,
-    1,
-  );
+const timelineVariantPreferenceMap: Record<"desktop" | "mobile", string[]> = {
+  desktop: ["desktop", "tablet", "mobile", "original"],
+  mobile: ["mobile", "tablet", "desktop", "original"],
+};
 
+function getNearestFrameAsset(
+  frameAssets: ProjectManifest["sections"][number]["frameAssets"],
+  desiredIndex: number,
+) {
+  if (frameAssets.length === 0) {
+    return null;
+  }
+
+  const exact = frameAssets.find((frame) => frame.index === desiredIndex);
+  if (exact) {
+    return exact;
+  }
+
+  return [...frameAssets].sort(
+    (left, right) =>
+      Math.abs(left.index - desiredIndex) - Math.abs(right.index - desiredIndex) ||
+      left.index - right.index,
+  )[0] ?? null;
+}
+
+function getTimelineFrameUrl(
+  frameAssets: ProjectManifest["sections"][number]["frameAssets"],
+  desiredIndex: number,
+  mode: "desktop" | "mobile",
+) {
+  const frameAsset = getNearestFrameAsset(frameAssets, desiredIndex);
+  if (!frameAsset) {
+    return null;
+  }
+
+  for (const kind of timelineVariantPreferenceMap[mode]) {
+    const variant = frameAsset.variants.find((item) => item.kind === kind && item.url.length > 0);
+    if (variant) {
+      return variant.url;
+    }
+  }
+
+  return (
+    frameAsset.variants[0]?.url ??
+    null
+  );
+}
+
+function getFrameStrip(
+  section: ProjectManifest["sections"][number],
+  mode: "desktop" | "mobile",
+  sampleCount = 18,
+) {
   return Array.from({ length: sampleCount }, (_, index) => {
-    const frameIndex =
-      section.progressMapping.frameRange.start +
-      Math.round((frameRangeLength * index) / Math.max(sampleCount - 1, 1));
-    const frameAsset = section.frameAssets.find((frame) => frame.index === frameIndex);
-    return (
-      frameAsset?.variants.find((variant) => variant.kind === "desktop")?.url ??
-      frameAsset?.variants[0]?.url
-    );
+    const progress = sampleCount <= 1 ? 0 : index / Math.max(sampleCount - 1, 1);
+    const frameIndex = progressToFrameIndex(progress, section.progressMapping.frameRange);
+    return getTimelineFrameUrl(section.frameAssets, frameIndex, mode);
   }).filter((url): url is string => Boolean(url));
 }
 
 function createOverlayClip(
   overlay: OverlayDefinition,
   index: number,
-  trackType: "overlay" | "moment",
+  layerIndex: number,
 ): TimelineClipModel {
   return {
-    id: `${trackType}-${overlay.id}`,
-    trackType,
-    label:
-      trackType === "moment"
-        ? overlay.content.eyebrow || `Moment ${String(index + 1).padStart(2, "0")}`
-        : overlay.content.headline,
+    id: `layer-${overlay.id}`,
+    trackType: "layer",
+    label: overlay.content.headline || overlay.content.eyebrow || `Layer ${String(index + 1).padStart(2, "0")}`,
     start: overlay.timing.start,
     end: overlay.timing.end,
-    tint: trackType === "overlay" ? "accent" : "muted",
+    tint: "accent",
     metadata: {
       overlayId: overlay.id,
       theme: overlay.content.theme,
@@ -203,6 +248,7 @@ function createOverlayClip(
       body: overlay.content.body,
       transitionPreset: overlay.content.transition?.preset,
       contentType: overlay.content.type ?? "text",
+      layerIndex,
     },
   };
 }
@@ -220,6 +266,8 @@ export function getFrameRangeFromClip(
 export function deriveTimelineTracks(
   manifest: ProjectManifest,
   _durationSeconds: number,
+  mode: "desktop" | "mobile" = "desktop",
+  layerCount?: number,
 ): TimelineTrackModel[] {
   const section = manifest.sections[0];
   if (!section) {
@@ -235,36 +283,45 @@ export function deriveTimelineTracks(
     end: frameIndexToSequenceProgress(section.progressMapping.frameRange.end, frameCount),
     tint: "muted",
     metadata: {
-      frameStrip: getFrameStrip(section),
+      frameStrip: getFrameStrip(section, mode),
     },
   };
 
-  const isMomentOverlay = (overlay: OverlayDefinition) => {
-    const eyebrow = overlay.content.eyebrow?.trim().toLowerCase();
-    return eyebrow === "moment" || eyebrow === "feature" || eyebrow === "highlight";
-  };
+  const overlaysByLayer = new Map<number, OverlayDefinition[]>();
+  for (const overlay of section.overlays) {
+    const layerIndex = overlay.content.layer ?? 0;
+    const existing = overlaysByLayer.get(layerIndex);
+    if (existing) {
+      existing.push(overlay);
+    } else {
+      overlaysByLayer.set(layerIndex, [overlay]);
+    }
+  }
 
-  const contentOverlays = section.overlays.filter((overlay) => !isMomentOverlay(overlay));
-  const momentOverlays = section.overlays.filter((overlay) => isMomentOverlay(overlay));
+  const totalLayers = Math.max(
+    layerCount ?? 0,
+    [...overlaysByLayer.keys()].reduce((maxLayer, currentLayer) => Math.max(maxLayer, currentLayer + 1), 0),
+    1,
+  );
+
+  const layerTracks: TimelineTrackModel[] = Array.from({ length: totalLayers }, (_, offset) => totalLayers - offset - 1)
+    .map((layerIndex) => ({
+      id: `track-layer-${layerIndex}`,
+      label: `Layer ${String(layerIndex + 1).padStart(2, "0")}`,
+      type: "layer" as const,
+      clips: (overlaysByLayer.get(layerIndex) ?? []).map((overlay, index) => createOverlayClip(overlay, index, layerIndex)),
+      metadata: {
+        layerIndex,
+      },
+    }));
 
   return [
     {
       id: "track-sequence",
-      label: "Sequence",
+      label: "Scene",
       type: "section",
       clips: [sequenceClip],
     },
-    {
-      id: "track-content",
-      label: "Content",
-      type: "overlay",
-      clips: contentOverlays.map((overlay, index) => createOverlayClip(overlay, index, "overlay")),
-    },
-    {
-      id: "track-moments",
-      label: "Moments",
-      type: "moment",
-      clips: momentOverlays.map((overlay, index) => createOverlayClip(overlay, index, "moment")),
-    },
+    ...layerTracks,
   ];
 }

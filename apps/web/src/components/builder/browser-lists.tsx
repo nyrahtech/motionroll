@@ -102,7 +102,7 @@ export function AssetList({
   return (
     <div className="space-y-3">
       <BrowserSection
-        title="Source"
+        title="Source video"
         meta={primarySource ? <Badge variant="accent">Video</Badge> : <Badge variant="quiet">Empty</Badge>}
       >
         {primarySource ? (
@@ -110,7 +110,7 @@ export function AssetList({
             <AssetThumbnail
               asset={primarySource}
               assets={project.assets}
-              label="Source"
+              label="Source video"
               aspectClassName="aspect-[16/10]"
             />
             <div className="flex items-center justify-between gap-3">
@@ -150,7 +150,7 @@ export function AssetList({
               <BrowserCard
                 key={asset.id}
                 title={asset.kind.replace(/_/g, " ")}
-                subtitle="Derived output"
+                subtitle="Processed scene media"
                 meta={<Badge variant="quiet">Media</Badge>}
                 leading={
                   <AssetThumbnail

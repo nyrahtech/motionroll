@@ -9,8 +9,11 @@ import {
   type ResolvedFallbackStrategy,
   type SequenceProgressState,
 } from "../../shared/src/index";
-import { DEFAULT_SEQUENCE_SCROLL_DISTANCE } from "../../shared/src/sequence";
-import { clampProgress } from "../../shared/src/timing";
+import {
+  DEFAULT_SEQUENCE_SCROLL_DISTANCE,
+  DEFAULT_SEQUENCE_SETTLE_EPSILON,
+} from "../../shared/src/sequence";
+import { clampProgress, frameIndexToSequenceProgress } from "../../shared/src/timing";
 import { clamp, getActiveOverlayId, getFrameByIndex, progressToFrameIndex } from "./utils";
 
 
@@ -23,6 +26,8 @@ export interface CreateScrollSectionOptions {
   allowWheelScrub?: boolean;
   onProgressChange?: (progress: number) => void;
   scrollDistance?: number;
+  forceSequence?: boolean;
+  initialProgress?: number;
 }
 
 export interface ScrollSectionController {
@@ -38,6 +43,8 @@ const variantPreferenceMap: Record<"desktop" | "mobile", AssetVariantKind[]> = {
   desktop: ["desktop", "tablet", "mobile", "original"],
   mobile: ["mobile", "tablet", "desktop", "original"],
 };
+const DESIGN_STAGE_WIDTH = 1440;
+const DESIGN_STAGE_HEIGHT = 810;
 
 function chooseSection(manifest: ProjectManifest): ProjectSectionManifest {
   const section = manifest.sections[0];
@@ -71,6 +78,20 @@ function getFirstFrameUrl(section: ProjectSectionManifest, mode: "desktop" | "mo
     section.fallback.firstFrameUrl ??
     (section.frameAssets[0] ? chooseFrameUrl(section.frameAssets[0], mode) : "")
   );
+}
+
+function getFrameUrlForProgress(
+  section: ProjectSectionManifest,
+  mode: "desktop" | "mobile",
+  progress: number,
+) {
+  if (section.frameAssets.length === 0) {
+    return "";
+  }
+
+  const frameIndex = progressToFrameIndex(progress, section.progressMapping.frameRange);
+  const frame = getFrameByIndex(section.frameAssets, frameIndex);
+  return frame ? chooseFrameUrl(frame, mode) : "";
 }
 
 function appendTextElement(
@@ -183,6 +204,18 @@ function choosePlaybackMode(
     options.reducedMotion ?? matchesMediaQuery("(prefers-reduced-motion: reduce)");
   const mode =
     options.mode ?? (matchesMediaQuery("(max-width: 767px)") ? "mobile" : "desktop");
+  const interactionMode = options.interactionMode ?? "scroll";
+
+  if (
+    section.frameAssets.length > 0 &&
+    (interactionMode === "controlled" || interactionMode === "scroll" || options.forceSequence)
+  ) {
+    return {
+      mode,
+      fallback: "sequence" as ResolvedFallbackStrategy,
+    };
+  }
+
   const requestedBehavior = reducedMotion
     ? section.fallback.reducedMotionBehavior
     : mode === "mobile"
@@ -199,6 +232,12 @@ function choosePlaybackMode(
       allowFirstFrameFallback: true,
     }),
   };
+}
+
+function getStageScale(stageRoot: HTMLElement) {
+  const width = stageRoot.clientWidth || DESIGN_STAGE_WIDTH;
+  const height = stageRoot.clientHeight || DESIGN_STAGE_HEIGHT;
+  return clamp(Math.min(width / DESIGN_STAGE_WIDTH, height / DESIGN_STAGE_HEIGHT), 0.35, 2);
 }
 
 function getOverlayTransform(
@@ -256,24 +295,30 @@ function applyOverlayCardStyles(
   card: HTMLElement,
   overlay: OverlayDefinition,
   mode: "desktop" | "mobile",
+  stageScale = 1,
 ) {
   const layout = overlay.content.layout;
   const style = overlay.content.style;
   const background = overlay.content.background;
-  const defaultTop = mode === "mobile" ? "1rem" : "2rem";
-  const defaultLeft = mode === "mobile" ? "1rem" : "2rem";
+  const defaultTop = `${Math.round(32 * stageScale)}px`;
+  const defaultLeft = `${Math.round(32 * stageScale)}px`;
 
   card.style.position = "absolute";
   card.style.left = `${(layout?.x ?? 0.08) * 100}%`;
   card.style.top = `${(layout?.y ?? 0.12) * 100}%`;
   card.style.right = "auto";
   card.style.bottom = "auto";
-  card.style.width = `${layout?.width ?? (mode === "mobile" ? 280 : 420)}px`;
+  card.style.width = `${Math.round((layout?.width ?? 420) * stageScale)}px`;
   if (layout?.height) {
-    card.style.minHeight = `${layout.height}px`;
+    const nextHeight = `${Math.round(layout.height * stageScale)}px`;
+    card.style.minHeight = nextHeight;
+    card.style.height = nextHeight;
+  } else {
+    card.style.minHeight = "";
+    card.style.height = "";
   }
-  card.style.maxWidth = `${style?.maxWidth ?? layout?.width ?? (mode === "mobile" ? 280 : 420)}px`;
-  card.style.padding = mode === "mobile" ? "1rem" : "1.05rem";
+  card.style.maxWidth = `${Math.round((style?.maxWidth ?? layout?.width ?? 420) * stageScale)}px`;
+  card.style.padding = `${Math.round(14 * stageScale)}px ${Math.round(18 * stageScale)}px`;
   card.style.borderRadius = ".85rem";
   card.style.backdropFilter = "blur(18px)";
   card.style.cursor = "pointer";
@@ -292,7 +337,7 @@ function applyOverlayCardStyles(
   card.style.borderWidth = background?.enabled ? "1px" : "0";
   card.style.borderStyle = "solid";
   card.style.borderRadius = `${background?.radius ?? 14}px`;
-  card.style.padding = `${background?.paddingY ?? (mode === "mobile" ? 12 : 14)}px ${background?.paddingX ?? 18}px`;
+  card.style.padding = `${Math.round((background?.paddingY ?? 14) * stageScale)}px ${Math.round((background?.paddingX ?? 18) * stageScale)}px`;
   card.style.backdropFilter =
     background?.enabled && background.mode === "solid" ? "blur(18px)" : "none";
 
@@ -300,6 +345,47 @@ function applyOverlayCardStyles(
     card.style.left = overlay.content.align === "center" ? "50%" : defaultLeft;
     card.style.top = overlay.content.align === "end" ? "auto" : defaultTop;
     card.style.bottom = overlay.content.align === "end" ? defaultTop : "auto";
+  }
+}
+
+function applyOverlayContentStyles(
+  card: HTMLElement,
+  overlay: OverlayDefinition,
+  stageScale: number,
+) {
+  const headline = card.querySelector<HTMLElement>('[data-text-field="headline"]');
+  const body = card.querySelector<HTMLElement>('[data-text-field="body"]');
+  const eyebrow = card.querySelector<HTMLElement>('[data-text-field="eyebrow"]');
+  const media = card.querySelector<HTMLElement>("[data-media-field='media']");
+  const actionLink = card.querySelector<HTMLElement>("a");
+
+  if (eyebrow) {
+    eyebrow.style.fontSize = `${Math.round((overlay.content.style?.eyebrowFontSize ?? 12) * stageScale)}px`;
+  }
+
+  if (headline) {
+    headline.style.fontSize = `${Math.round((overlay.content.style?.fontSize ?? 34) * stageScale)}px`;
+  }
+
+  if (body) {
+    body.style.fontSize = `${Math.round((overlay.content.style?.bodyFontSize ?? 15) * stageScale)}px`;
+  }
+
+  if (media) {
+    media.style.maxWidth = `${Math.round((overlay.content.layout?.width ?? 420) * stageScale)}px`;
+    if (overlay.content.type === "icon") {
+      media.style.height = `${Math.round(64 * stageScale)}px`;
+    } else if (overlay.content.type === "logo") {
+      media.style.height = `${Math.round(80 * stageScale)}px`;
+    }
+  }
+
+  if (actionLink) {
+    actionLink.style.marginTop = `${Math.round(16 * stageScale)}px`;
+    actionLink.style.fontSize = `${Math.round(14 * stageScale)}px`;
+    if (overlay.content.style?.buttonLike) {
+      actionLink.style.padding = `${Math.round(9 * stageScale)}px ${Math.round(14 * stageScale)}px`;
+    }
   }
 }
 
@@ -313,6 +399,7 @@ function applyTextStyles(
     fontFamily: style?.fontFamily ?? "Inter",
     fontWeight: String(style?.fontWeight ?? 600),
     fontStyle: style?.italic ? "italic" : "normal",
+    textDecoration: style?.underline ? "underline" : "none",
     color: style?.color ?? "#f6f7fb",
     textAlign: style?.textAlign === "start" ? "left" : style?.textAlign === "end" ? "right" : "center",
     letterSpacing: `${style?.letterSpacing ?? 0}em`,
@@ -342,6 +429,27 @@ function appendMediaElement(
   image.style.borderRadius = overlay.content.type === "image" ? ".7rem" : "0";
   image.style.marginBottom = overlay.content.headline ? ".8rem" : "0";
   parent.appendChild(image);
+}
+
+function syncOverlayPresentationStyles(
+  overlayRoot: HTMLElement,
+  section: ProjectSectionManifest,
+  stageRoot: HTMLElement,
+  mode: "desktop" | "mobile",
+) {
+  const stageScale = getStageScale(stageRoot);
+  const overlayMap = new Map(section.overlays.map((overlay) => [overlay.id, overlay] as const));
+
+  for (const child of Array.from(overlayRoot.children)) {
+    const card = child as HTMLElement;
+    const overlay = overlayMap.get(card.dataset.overlayId ?? "");
+    if (!overlay) {
+      continue;
+    }
+
+    applyOverlayCardStyles(card, overlay, mode, stageScale);
+    applyOverlayContentStyles(card, overlay, stageScale);
+  }
 }
 
 function renderOverlayState(
@@ -410,7 +518,10 @@ function ensureOverlayRoot(
   }
 
   if (overlayRoot.children.length === 0) {
-    for (const overlay of section.overlays) {
+    const orderedOverlays = [...section.overlays].sort(
+      (left, right) => (left.content.layer ?? 0) - (right.content.layer ?? 0),
+    );
+    for (const overlay of orderedOverlays) {
       const card = document.createElement("article");
       card.dataset.overlayId = overlay.id;
       card.dataset.contentType = overlay.content.type ?? "text";
@@ -493,6 +604,8 @@ function ensureOverlayRoot(
     }
   }
 
+  syncOverlayPresentationStyles(overlayRoot, section, container, mode);
+
   return overlayRoot;
 }
 
@@ -505,6 +618,8 @@ function ensureCanvas(container: HTMLElement, providedCanvas?: HTMLCanvasElement
   canvas.style.width = "100%";
   canvas.style.height = "100%";
   canvas.style.display = "block";
+  canvas.style.zIndex = "1";
+  canvas.style.opacity = "0";
   if (!providedCanvas) {
     container.appendChild(canvas);
   }
@@ -521,12 +636,37 @@ function preloadImage(url: string) {
   });
 }
 
-function createPosterPlaceholder(
+function ensureStageRoot(
   container: HTMLElement,
+  interactionMode: "scroll" | "controlled",
+) {
+  if (interactionMode !== "scroll") {
+    return container;
+  }
+
+  const stageRoot = document.createElement("div");
+  stageRoot.className = "motionroll-stage-root";
+  stageRoot.style.position = "sticky";
+  stageRoot.style.top = "0";
+  stageRoot.style.left = "0";
+  stageRoot.style.width = "100%";
+  stageRoot.style.height = "100vh";
+  stageRoot.style.overflow = "hidden";
+  stageRoot.style.background = "#000";
+  container.appendChild(stageRoot);
+  return stageRoot;
+}
+
+function createPosterPlaceholder(
+  stageRoot: HTMLElement,
   section: ProjectSectionManifest,
   mode: "desktop" | "mobile",
+  progress = 0,
 ) {
-  const source = section.fallback.posterUrl ?? getFirstFrameUrl(section, mode);
+  const source =
+    getFrameUrlForProgress(section, mode, progress) ||
+    section.fallback.posterUrl ||
+    getFirstFrameUrl(section, mode);
   if (!source) {
     return null;
   }
@@ -539,8 +679,9 @@ function createPosterPlaceholder(
   poster.style.width = "100%";
   poster.style.height = "100%";
   poster.style.objectFit = "cover";
-  poster.style.zIndex = "0";
-  container.appendChild(poster);
+  poster.style.zIndex = "2";
+  poster.style.background = "#000";
+  stageRoot.appendChild(poster);
   return poster;
 }
 
@@ -570,7 +711,32 @@ function renderSequenceFrame(
   const y = (cssHeight - height) / 2;
 
   ctx.clearRect(0, 0, cssWidth, cssHeight);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, cssWidth, cssHeight);
   ctx.drawImage(image, x, y, width, height);
+  canvas.style.opacity = "1";
+}
+
+function renderBlankSequenceFrame(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) {
+    return;
+  }
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cssWidth = Math.max(1, containerSize(canvas, "width"));
+  const cssHeight = Math.max(1, containerSize(canvas, "height"));
+
+  if (canvas.width !== Math.round(cssWidth * dpr) || canvas.height !== Math.round(cssHeight * dpr)) {
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+  }
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, cssWidth, cssHeight);
+  canvas.style.opacity = "1";
 }
 
 function containerSize(canvas: HTMLCanvasElement, axis: "width" | "height") {
@@ -579,7 +745,7 @@ function containerSize(canvas: HTMLCanvasElement, axis: "width" | "height") {
 }
 
 function renderFallback(
-  container: HTMLElement,
+  stageRoot: HTMLElement,
   section: ProjectSectionManifest,
   mode: "desktop" | "mobile",
   fallback: ResolvedFallbackStrategy,
@@ -593,8 +759,11 @@ function renderFallback(
     video.playsInline = true;
     video.style.width = "100%";
     video.style.height = "100%";
-    video.style.objectFit = "cover";
-    container.appendChild(video);
+      video.style.objectFit = "cover";
+    video.style.background = "#000";
+    video.style.position = "absolute";
+    video.style.inset = "0";
+    stageRoot.appendChild(video);
     return () => video.remove();
   }
 
@@ -610,10 +779,13 @@ function renderFallback(
   const poster = document.createElement("img");
   poster.src = source;
   poster.alt = section.title;
+  poster.style.position = "absolute";
+  poster.style.inset = "0";
   poster.style.width = "100%";
   poster.style.height = "100%";
-  poster.style.objectFit = "cover";
-  container.appendChild(poster);
+    poster.style.objectFit = "cover";
+  poster.style.background = "#000";
+  stageRoot.appendChild(poster);
   return () => poster.remove();
 }
 
@@ -625,6 +797,18 @@ function createSequenceState(initialProgress = 0): SequenceProgressState {
   };
 }
 
+function isSequenceMediaVisibleAtProgress(
+  section: ProjectSectionManifest,
+  progress: number,
+) {
+  const frameCount = Math.max(section.frameCount, 1);
+  const rangeStart = frameIndexToSequenceProgress(section.progressMapping.frameRange.start, frameCount);
+  const rangeEnd = frameIndexToSequenceProgress(section.progressMapping.frameRange.end, frameCount);
+  const normalized = clampProgress(progress);
+
+  return normalized >= rangeStart && normalized <= rangeEnd + 0.0001;
+}
+
 export function createScrollSection(
   container: HTMLElement,
   manifest: ProjectManifest,
@@ -633,8 +817,9 @@ export function createScrollSection(
   const section = chooseSection(manifest);
   const { mode, fallback } = choosePlaybackMode(section, options);
   const interactionMode = options.interactionMode ?? "scroll";
+  const stageRoot = ensureStageRoot(container, interactionMode);
   const overlayRoot = ensureOverlayRoot(
-    container,
+    stageRoot,
     section,
     mode,
     interactionMode,
@@ -643,17 +828,23 @@ export function createScrollSection(
   const frameCache = new Map<number, HTMLImageElement>();
   const framePromiseCache = new Map<number, Promise<HTMLImageElement>>();
   const cleanups: Array<() => void> = [];
-  const sequenceState = createSequenceState(0);
-  const scrollDistance = options.scrollDistance ?? DEFAULT_SEQUENCE_SCROLL_DISTANCE;
+  const sequenceState = createSequenceState(options.initialProgress ?? 0);
+  const scrollDistance =
+    (options.scrollDistance ?? DEFAULT_SEQUENCE_SCROLL_DISTANCE) *
+    Math.max(section.motion.scrubStrength ?? 1, 0.5);
+  const isControlled = interactionMode === "controlled";
   let destroyed = false;
   let renderRequestId = 0;
+  let latestRequestedFrameIndex: number | null = null;
   let lastRenderedFrameIndex: number | null = null;
   let animationFrame = 0;
+  let tickActive = false;
 
   container.style.position = "relative";
   container.style.height =
     interactionMode === "controlled" ? "100%" : `${section.motion.sectionHeightVh}vh`;
-  container.style.overflow = "hidden";
+  container.style.minHeight = interactionMode === "controlled" ? "0" : "100vh";
+  container.style.overflow = interactionMode === "controlled" ? "hidden" : "visible";
   container.dataset.presetKind = section.runtimeProfile.kind;
 
   function stopTick() {
@@ -661,12 +852,25 @@ export function createScrollSection(
       cancelAnimationFrame(animationFrame);
       animationFrame = 0;
     }
+    tickActive = false;
+  }
+
+  function startTick() {
+    if (destroyed || isControlled || tickActive || typeof requestAnimationFrame !== "function") {
+      return;
+    }
+
+    tickActive = true;
+    animationFrame = requestAnimationFrame(tick);
   }
 
   function updateTargetProgress(progress: number, emit = false) {
     sequenceState.targetProgress = clampProgress(progress);
     if (emit) {
       options.onProgressChange?.(sequenceState.targetProgress);
+    }
+    if (Math.abs(sequenceState.targetProgress - sequenceState.currentProgress) > DEFAULT_SEQUENCE_SETTLE_EPSILON) {
+      startTick();
     }
   }
 
@@ -682,8 +886,11 @@ export function createScrollSection(
 
     const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
     const rect = container.getBoundingClientRect();
-    const usableDistance = Math.max(rect.height - viewportHeight, scrollDistance, 1);
-    const nextProgress = clampProgress((-rect.top) / usableDistance);
+    // In scroll mode, the end of the physical section should always map to progress 1.
+    // Keep custom scrollDistance for wheel scrubbing, but derive page scroll from the
+    // actual available section distance so the sequence finishes exactly at the bottom.
+    const availableScrollDistance = Math.max(rect.height - viewportHeight, 1);
+    const nextProgress = clampProgress((-rect.top) / availableScrollDistance);
     updateTargetProgress(nextProgress);
   }
 
@@ -695,13 +902,26 @@ export function createScrollSection(
       return;
     }
 
+    syncOverlayPresentationStyles(overlayRoot, section, stageRoot, mode);
+
     if (section.frameAssets.length === 0) {
       renderOverlayState(overlayRoot, section, progress);
       return;
     }
 
     const normalized = clampProgress(progress);
+    renderOverlayState(overlayRoot, section, normalized);
+
+    if (!isSequenceMediaVisibleAtProgress(section, normalized)) {
+      renderBlankSequenceFrame(canvas);
+      posterPlaceholder?.remove();
+      lastRenderedFrameIndex = null;
+      latestRequestedFrameIndex = null;
+      return;
+    }
+
     const desiredFrameIndex = progressToFrameIndex(normalized, section.progressMapping.frameRange);
+    latestRequestedFrameIndex = desiredFrameIndex;
     const frame = getFrameByIndex(section.frameAssets, desiredFrameIndex);
     const frameUrl = frame ? chooseFrameUrl(frame, mode) : "";
 
@@ -712,6 +932,17 @@ export function createScrollSection(
     }
 
     if (!frameCache.has(frame.index)) {
+      const cachedFallback = getFrameByIndex(
+        Array.from(frameCache.keys()).map((index) => ({ index, path: "", variants: [] })),
+        desiredFrameIndex,
+      );
+      if (cachedFallback) {
+        const cachedImage = frameCache.get(cachedFallback.index);
+        if (cachedImage) {
+          renderSequenceFrame(canvas, cachedImage);
+        }
+      }
+
       if (!framePromiseCache.has(frame.index)) {
         framePromiseCache.set(
           frame.index,
@@ -719,6 +950,9 @@ export function createScrollSection(
             .then((image) => {
               frameCache.set(frame.index, image);
               framePromiseCache.delete(frame.index);
+              if (!destroyed) {
+                void renderForProgress(sequenceState.currentProgress);
+              }
               return image;
             })
             .catch((error) => {
@@ -728,22 +962,23 @@ export function createScrollSection(
         );
       }
 
-      await framePromiseCache.get(frame.index);
+      try {
+        await framePromiseCache.get(frame.index);
+      } catch {
+        return;
+      }
     }
 
-    if (destroyed || requestId !== renderRequestId) {
+    if (destroyed || requestId !== renderRequestId || latestRequestedFrameIndex !== frame.index) {
       return;
     }
 
     const image = frameCache.get(frame.index);
-    if (image && lastRenderedFrameIndex !== frame.index) {
-      const canvas = ensureCanvas(container, options.canvas);
+    if (image) {
       renderSequenceFrame(canvas, image);
       posterPlaceholder?.remove();
       lastRenderedFrameIndex = frame.index;
     }
-
-    renderOverlayState(overlayRoot, section, normalized);
 
     const preloadTargets = new Set<number>();
     for (let offset = 1; offset <= section.motion.preloadWindow; offset += 1) {
@@ -787,19 +1022,29 @@ export function createScrollSection(
       return;
     }
 
+    tickActive = false;
+    const currentDelta = Math.abs(sequenceState.targetProgress - sequenceState.currentProgress);
+    if (currentDelta <= DEFAULT_SEQUENCE_SETTLE_EPSILON) {
+      if (sequenceState.currentProgress !== sequenceState.targetProgress) {
+        sequenceState.currentProgress = sequenceState.targetProgress;
+        void renderForProgress(sequenceState.currentProgress);
+      }
+      return;
+    }
+
     const nextProgress = stepSequenceProgress(sequenceState);
     if (Math.abs(nextProgress - sequenceState.currentProgress) > 0.00001) {
       sequenceState.currentProgress = nextProgress;
       void renderForProgress(sequenceState.currentProgress);
     }
 
-    if (typeof requestAnimationFrame === "function") {
-      animationFrame = requestAnimationFrame(tick);
+    if (Math.abs(sequenceState.targetProgress - sequenceState.currentProgress) > DEFAULT_SEQUENCE_SETTLE_EPSILON) {
+      startTick();
     }
   }
 
   if (fallback !== "sequence") {
-    cleanups.push(renderFallback(container, section, mode, fallback));
+    cleanups.push(renderFallback(stageRoot, section, mode, fallback));
     renderOverlayState(overlayRoot, section, 0);
 
     return {
@@ -808,6 +1053,9 @@ export function createScrollSection(
         cleanups.forEach((cleanup) => cleanup());
         if (!options.overlayRoot) {
           overlayRoot.remove();
+        }
+        if (interactionMode === "scroll" && stageRoot !== container) {
+          stageRoot.remove();
         }
       },
       refresh() {
@@ -830,8 +1078,13 @@ export function createScrollSection(
     };
   }
 
-  const posterPlaceholder = createPosterPlaceholder(container, section, mode);
-  const canvas = ensureCanvas(container, options.canvas);
+  const posterPlaceholder = createPosterPlaceholder(
+    stageRoot,
+    section,
+    mode,
+    sequenceState.currentProgress,
+  );
+  const canvas = ensureCanvas(stageRoot, options.canvas);
   const resizeObserver =
     typeof ResizeObserver !== "undefined"
       ? new ResizeObserver(() => {
@@ -840,10 +1093,6 @@ export function createScrollSection(
         })
       : null;
   resizeObserver?.observe(container);
-
-  if (typeof requestAnimationFrame === "function") {
-    animationFrame = requestAnimationFrame(tick);
-  }
 
   if (interactionMode === "controlled" && options.allowWheelScrub) {
     const handleWheel = (event: WheelEvent) => {
@@ -859,21 +1108,6 @@ export function createScrollSection(
   }
 
   if (interactionMode === "scroll") {
-    const stickyNodes: HTMLElement[] = [];
-    if (!options.canvas) {
-      stickyNodes.push(canvas);
-    }
-    if (!options.overlayRoot) {
-      stickyNodes.push(overlayRoot);
-    }
-    stickyNodes.forEach((node) => {
-      node.style.position = "sticky";
-      node.style.top = "0";
-      node.style.left = "0";
-      node.style.width = "100%";
-      node.style.height = "100vh";
-    });
-
     const handleScroll = () => syncScrollProgress();
     const handleResize = () => {
       lastRenderedFrameIndex = null;
@@ -897,6 +1131,9 @@ export function createScrollSection(
   cleanups.push(() => resizeObserver?.disconnect());
 
   void renderForProgress(sequenceState.currentProgress);
+  if (!isControlled && Math.abs(sequenceState.targetProgress - sequenceState.currentProgress) > DEFAULT_SEQUENCE_SETTLE_EPSILON) {
+    startTick();
+  }
 
   return {
     destroy() {
@@ -908,6 +1145,9 @@ export function createScrollSection(
       lastRenderedFrameIndex = null;
       if (!options.overlayRoot) {
         overlayRoot.remove();
+      }
+      if (interactionMode === "scroll" && stageRoot !== container) {
+        stageRoot.remove();
       }
     },
     refresh() {

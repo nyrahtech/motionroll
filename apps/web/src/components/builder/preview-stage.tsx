@@ -2,7 +2,6 @@
 
 import { useEffect } from "react";
 import type { ProjectManifest } from "@motionroll/shared";
-import { Monitor, Smartphone } from "lucide-react";
 import { RuntimePreview } from "./runtime-preview";
 
 export function PreviewStage({
@@ -26,6 +25,13 @@ export function PreviewStage({
   onOverlayLayoutChange: (
     overlayId: string,
     layout: Partial<{ x: number; y: number; width: number; height: number }>,
+    options?: {
+      intent?: "move" | "resize";
+      scaleX?: number;
+      scaleY?: number;
+      styleChanges?: Record<string, unknown>;
+      backgroundChanges?: Record<string, unknown>;
+    },
   ) => void;
   onInlineTextChange: (
     overlayId: string,
@@ -37,8 +43,6 @@ export function PreviewStage({
   onDuplicateOverlay: (overlayId: string) => void;
   onDeleteOverlay: (overlayId: string) => void;
 }) {
-  const section = manifest.sections[0];
-
   // Space key toggles play/pause when focused on the canvas
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -56,73 +60,25 @@ export function PreviewStage({
       className="flex h-full min-h-0 flex-col"
       style={{ background: "var(--editor-shell)" }}
     >
-      {/* Toolbar */}
-      <div
-        className="flex h-10 flex-shrink-0 items-center justify-between border-b px-4"
-        style={{ background: "var(--editor-panel)", borderColor: "var(--editor-border)" }}
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-xs" style={{ color: "var(--editor-text-dim)" }}>
-            {section?.title ?? "Preview Canvas"}
-          </span>
-          {isPlaying && (
-            <span
-              className="h-1.5 w-1.5 animate-pulse rounded-full"
-              style={{ background: "var(--editor-accent)" }}
-            />
-          )}
-        </div>
-
-        {/* Device mode switcher */}
-        <div
-          className="flex items-center gap-0.5 rounded p-0.5"
-          style={{ background: "var(--editor-panel-elevated)" }}
-        >
-          <button
-            onClick={() => onModeChange("desktop")}
-            className="interactive-soft flex h-7 items-center gap-1.5 rounded px-2.5 text-xs cursor-pointer"
-            style={{
-              background: mode === "desktop" ? "var(--editor-selected)" : "transparent",
-              color: mode === "desktop" ? "var(--editor-accent)" : "var(--editor-text-dim)",
-            }}
-          >
-            <Monitor className="h-3.5 w-3.5" />
-            Desktop
-          </button>
-          <button
-            onClick={() => onModeChange("mobile")}
-            className="interactive-soft flex h-7 items-center gap-1.5 rounded px-2.5 text-xs cursor-pointer"
-            style={{
-              background: mode === "mobile" ? "var(--editor-selected)" : "transparent",
-              color: mode === "mobile" ? "var(--editor-accent)" : "var(--editor-text-dim)",
-            }}
-          >
-            <Smartphone className="h-3.5 w-3.5" />
-            Mobile
-          </button>
-        </div>
-
-        <span className="text-xs tabular-nums" style={{ color: "var(--editor-text-dim)" }}>
-          {(playheadProgress * 100).toFixed(1)}%
-        </span>
-      </div>
-
       {/* Canvas area */}
       <div
-        className="flex min-h-0 flex-1 items-center justify-center p-5"
+        className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-5"
         style={{ background: "var(--editor-shell)" }}
         onClick={(e) => {
-          // Deselect on bg click
+          // Deselect only when clicking the bare background, and only when
+          // not actively editing inline text (contentEditable).
           if (e.target === e.currentTarget) {
-            onSelectOverlay("");
+            const editing = document.activeElement && (document.activeElement as HTMLElement).contentEditable === "true";
+            if (!editing) onSelectOverlay("");
           }
         }}
       >
         <div
-          className="relative overflow-hidden rounded shadow-2xl"
+          className="relative h-full max-h-full overflow-hidden rounded-none shadow-2xl"
           style={{
             width: mode === "desktop" ? "min(100%, 1280px)" : "min(100%, 420px)",
             aspectRatio: mode === "desktop" ? "16/9" : "9/16",
+            maxHeight: "100%",
             border: "1px solid var(--editor-border)",
           }}
         >
@@ -130,6 +86,7 @@ export function PreviewStage({
             manifest={manifest}
             mode={mode}
             reducedMotion={reducedMotion}
+            isPlaying={isPlaying}
             playheadProgress={playheadProgress}
             onPlayheadChange={onPlayheadChange}
             onModeChange={onModeChange}

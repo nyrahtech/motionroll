@@ -1,7 +1,7 @@
 import { clampProgress } from "./timing";
 
-export const DEFAULT_SEQUENCE_SCROLL_DISTANCE = 6400;
-export const DEFAULT_SEQUENCE_SETTLE_EPSILON = 0.00035;
+export const DEFAULT_SEQUENCE_SCROLL_DISTANCE = 7600;
+export const DEFAULT_SEQUENCE_SETTLE_EPSILON = 0.0002;
 
 export type SequenceProgressState = {
   targetProgress: number;
@@ -14,16 +14,16 @@ export function lerpProgress(start: number, end: number, amount: number) {
 
 export function getVelocityAwareSmoothing(delta: number) {
   const magnitude = Math.abs(delta);
-  if (magnitude > 0.18) {
-    return 0.25;
+  if (magnitude > 0.22) {
+    return 0.18;
   }
-  if (magnitude > 0.08) {
-    return 0.19;
-  }
-  if (magnitude > 0.03) {
+  if (magnitude > 0.1) {
     return 0.14;
   }
-  return 0.1;
+  if (magnitude > 0.04) {
+    return 0.11;
+  }
+  return 0.08;
 }
 
 export function stepSequenceProgress(

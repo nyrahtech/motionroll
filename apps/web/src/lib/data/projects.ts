@@ -23,6 +23,10 @@ import { LOCAL_OWNER } from "./local-owner";
 import { buildProjectManifest } from "@/lib/manifest";
 import { buildPublishReadinessChecks, summarizePublishReadiness } from "@/lib/publish/readiness";
 import { getDerivedAssetsSnapshot } from "@/lib/project-assets";
+import {
+  buildSectionValuesFromDraft,
+  parseProjectDraftDocument,
+} from "@/lib/project-draft";
 import { slugify } from "@/lib/utils";
 
 function hasRenderableMedia(
@@ -206,6 +210,26 @@ export async function createProjectFromPreset(presetId: PresetId, title?: string
     })),
   );
 
+  const initialDraft = parseProjectDraftDocument({
+    version: 1,
+    title: project.title,
+    presetId,
+    sectionTitle: section.title,
+    sectionHeightVh: preset.defaults.common.sectionHeightVh,
+    scrubStrength: preset.defaults.common.scrubStrength,
+    frameRangeStart: preset.defaults.common.frameRange.start,
+    frameRangeEnd: preset.defaults.common.frameRange.end,
+    overlays: preset.seededOverlays,
+  });
+
+  await db
+    .update(projects)
+    .set({
+      draftJson: initialDraft,
+      draftRevision: 1,
+    })
+    .where(eq(projects.id, project.id));
+
   await db
     .insert(publishTargets)
     .values([
@@ -254,6 +278,8 @@ export async function getProjectById(projectId: string) {
     return null;
   }
 
+  const draft = project.draftJson ? parseProjectDraftDocument(project.draftJson) : null;
+
   await db
     .update(projects)
     .set({
@@ -263,6 +289,16 @@ export async function getProjectById(projectId: string) {
 
   return {
     ...project,
+    title: draft?.title ?? project.title,
+    selectedPreset: draft?.presetId ?? project.selectedPreset,
+    sections: draft
+      ? [
+          buildSectionValuesFromDraft(
+            project.sections[0],
+            draft,
+          ),
+        ]
+      : project.sections,
     lastOpenedAt: new Date(),
   };
 }
@@ -446,28 +482,30 @@ export async function duplicateProject(projectId: string) {
   }
 
   for (const section of project.sections) {
+    const nextSectionValues: typeof projectSections.$inferInsert = {
+      projectId: copy.id,
+      title: section.title,
+      sortOrder: section.sortOrder ?? 0,
+      presetId: section.presetId ?? project.selectedPreset,
+      commonConfig: section.commonConfig as typeof projectSections.$inferInsert["commonConfig"],
+      presetConfig:
+        (section.presetConfig ?? {}) as typeof projectSections.$inferInsert["presetConfig"],
+    };
     const [nextSection] = await db
       .insert(projectSections)
-      .values({
-        projectId: copy.id,
-        title: section.title,
-        sortOrder: section.sortOrder,
-        presetId: section.presetId,
-        commonConfig: section.commonConfig,
-        presetConfig: section.presetConfig,
-      })
+      .values(nextSectionValues)
       .returning();
 
     if (!nextSection) {
       continue;
     }
 
-    if (section.overlays.length > 0) {
+    if ((section.overlays?.length ?? 0) > 0) {
       await db.insert(projectOverlays).values(
-        section.overlays.map((overlay) => ({
+        section.overlays!.map((overlay) => ({
           projectSectionId: nextSection.id,
           overlayKey: overlay.overlayKey,
-          sortOrder: overlay.sortOrder,
+          sortOrder: overlay.sortOrder ?? 0,
           timing: overlay.timing,
           content: overlay.content,
         })),

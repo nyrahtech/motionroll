@@ -393,11 +393,22 @@ select:disabled {
   user-select: none;
 }
 
-.motionroll-overlay-root .motionroll-overlay.motionroll-preview-selected {
-  outline: 1px solid rgba(226, 247, 255, 0.95);
-  box-shadow:
-    0 0 0 4px rgba(205, 239, 255, 0.12),
-    0 14px 28px rgba(0, 0, 0, 0.3);
+.moveable-control-box {
+  z-index: 40 !important;
+}
+
+.moveable-control {
+  width: 10px !important;
+  height: 10px !important;
+  margin-top: -5px !important;
+  margin-left: -5px !important;
+  border: 2px solid #081017 !important;
+  background: #67e8f9 !important;
+  box-shadow: 0 0 0 2px rgba(103, 232, 249, 0.16) !important;
+}
+
+.moveable-line {
+  background: rgba(103, 232, 249, 0.9) !important;
 }
 
 .motionroll-overlay-root .motionroll-overlay [data-text-field][contenteditable="true"] {
@@ -625,4 +636,3 @@ button,
 .timeline-seam-btn {
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
 }
-

@@ -35,8 +35,8 @@ export function SelectionDetailsPanel({
 
   const isSection = selection.trackType === "section";
   const isCta = false;
-  const isStep = selection.trackType === "moment";
-  const isText = selection.trackType === "overlay";
+  const isStep = false;
+  const isText = selection.trackType === "layer";
   const label = isSection ? "Section" : isCta ? "CTA" : isStep ? "Step" : "Text";
 
   return (

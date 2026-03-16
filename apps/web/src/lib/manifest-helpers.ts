@@ -101,19 +101,18 @@ export function normalizeFrameRange(
 
 export function normalizeOverlayRows(overlays: OverlayRow[]) {
   return [...overlays]
-    .map((overlay) => ({
+    .map((overlay, index, rows) => ({
       ...overlay,
       content: {
         ...overlay.content,
         treatment: overlay.content.treatment ?? "default",
-        layer: overlay.content.layer ?? 0,
+        layer: rows.length - index - 1,
       },
       timing: {
         start: Math.min(Math.max(overlay.timing.start, 0), 1),
         end: Math.min(Math.max(overlay.timing.end, 0), 1),
       },
     }))
-    .sort((a, b) => a.timing.start - b.timing.start)
     .map((overlay) => ({
       ...overlay,
       timing: {

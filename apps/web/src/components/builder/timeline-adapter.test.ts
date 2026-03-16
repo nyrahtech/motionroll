@@ -24,11 +24,11 @@ const tracks: TimelineTrackModel[] = [
   {
     id: "track-overlay",
     label: "Text",
-    type: "overlay",
+    type: "layer",
     clips: [
       {
-        id: "overlay-intro",
-        trackType: "overlay",
+        id: "layer-intro",
+        trackType: "layer",
         label: "Intro",
         start: 0.2,
         end: 0.4,
@@ -40,12 +40,12 @@ const tracks: TimelineTrackModel[] = [
 
 describe("timeline adapter", () => {
   it("maps MotionRoll tracks into timeline-editor rows", () => {
-    const selection: TimelineSelection = { clipId: "overlay-intro", trackType: "overlay" };
+    const selection: TimelineSelection = { clipId: "layer-intro", trackType: "layer" };
     const rows = createTimelineRows(tracks, selection, 10);
 
     expect(rows).toHaveLength(2);
     expect(rows[1]?.actions[0]).toMatchObject({
-      id: "overlay-intro",
+      id: "layer-intro",
       start: 2,
       end: 4,
       selected: true,
@@ -65,7 +65,7 @@ describe("timeline adapter", () => {
 
     expect(getChangedTimelineActions(rows, tracks, 10)).toEqual([
       {
-        clipId: "overlay-intro",
+        clipId: "layer-intro",
         timing: {
           start: 0.3,
           end: 0.5,

@@ -1,12 +1,15 @@
 "use client";
 
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   clampProgress,
   normalizeTimingRange,
+  type FontFamily,
   type OverlayDefinition,
+  type ProjectDraftDocument,
   type OverlayTransition,
   type PresetId,
+  type TransitionPreset,
 } from "@motionroll/shared";
 import { SidebarPanel } from "./editor-sidebar";
 import { TopBar } from "./editor-top-bar";
@@ -22,6 +25,13 @@ import {
 import { UploadPanel } from "./upload-panel";
 import { ProviderPanel } from "./provider-panel";
 import type { EditorContainerProps } from "./editor-types";
+import {
+  getLocalProjectDraft,
+  saveLocalProjectDraft,
+  setLastOpenedProjectId,
+  type LocalProjectDraftRecord,
+} from "@/lib/local-project-db";
+import { buildProjectDraftDocument } from "@/lib/project-draft";
 import { getPrimarySourceAsset, getRenderableAssetPreview } from "@/lib/project-assets";
 
 type HydratedOverlayDefinition = OverlayDefinition & {
@@ -38,11 +48,12 @@ type HydratedOverlayDefinition = OverlayDefinition & {
 type EditorDraft = {
   title: string;
   presetId: PresetId;
-  sectionTitle: string;
-  sectionHeightVh: number;
+  sceneName: string;
+  sceneHeight: number;
   scrubStrength: number;
   frameRangeStart: number;
   frameRangeEnd: number;
+  layerCount: number;
   overlays: HydratedOverlayDefinition[];
 };
 
@@ -114,6 +125,9 @@ function createDefaultOverlay(
         opacity: 1,
         maxWidth: type === "image" ? 360 : 420,
         italic: false,
+        underline: false,
+        eyebrowFontSize: 12,
+        bodyFontSize: 15,
         textTransform: "none",
         buttonLike: false,
       },
@@ -169,6 +183,8 @@ function hydrateOverlay(overlay: OverlayDefinition): HydratedOverlayDefinition {
         fontFamily: overlay.content.style?.fontFamily ?? "Inter",
         fontWeight: overlay.content.style?.fontWeight ?? 600,
         fontSize: overlay.content.style?.fontSize ?? 34,
+        eyebrowFontSize: overlay.content.style?.eyebrowFontSize ?? 12,
+        bodyFontSize: overlay.content.style?.bodyFontSize ?? 15,
         lineHeight: overlay.content.style?.lineHeight ?? 1.08,
         letterSpacing: overlay.content.style?.letterSpacing ?? 0,
         textAlign: overlay.content.style?.textAlign ?? overlay.content.align ?? "start",
@@ -176,6 +192,7 @@ function hydrateOverlay(overlay: OverlayDefinition): HydratedOverlayDefinition {
         opacity: overlay.content.style?.opacity ?? 1,
         maxWidth: overlay.content.style?.maxWidth ?? overlay.content.layout?.width ?? 420,
         italic: overlay.content.style?.italic ?? false,
+        underline: overlay.content.style?.underline ?? false,
         textTransform: overlay.content.style?.textTransform ?? "none",
         buttonLike: overlay.content.style?.buttonLike ?? false,
       },
@@ -205,6 +222,66 @@ function hydrateOverlay(overlay: OverlayDefinition): HydratedOverlayDefinition {
   };
 }
 
+function normalizeOverlayLayers<T extends { content: { layer?: number } }>(overlays: T[]) {
+  return overlays.map((overlay, index) => {
+    const sourceLayer = overlay.content.layer ?? Math.max(overlays.length - index - 1, 0);
+    return {
+      ...overlay,
+      content: {
+        ...overlay.content,
+        layer: Math.max(0, sourceLayer),
+      },
+    };
+  });
+}
+
+function getTopLayerIndex<T extends { content: { layer?: number } }>(overlays: T[]) {
+  return overlays.reduce((maxLayer, overlay) => Math.max(maxLayer, overlay.content.layer ?? 0), -1);
+}
+
+function getRequiredLayerCount<T extends { content: { layer?: number } }>(
+  overlays: T[],
+  requestedCount = 1,
+) {
+  return Math.max(1, requestedCount, getTopLayerIndex(overlays) + 1);
+}
+
+function reorderOverlayLayers<T extends { content: { layer?: number } }>(
+  overlays: T[],
+  layerCount: number,
+  fromRow: number,
+  toRow: number,
+) {
+  const distinctLayers = Array.from({ length: getRequiredLayerCount(overlays, layerCount) }, (_, index) => index).sort((left, right) => right - left);
+  if (
+    fromRow < 0 ||
+    toRow < 0 ||
+    fromRow >= distinctLayers.length ||
+    toRow >= distinctLayers.length ||
+    fromRow === toRow
+  ) {
+    return normalizeOverlayLayers(overlays);
+  }
+
+  const nextRows = [...distinctLayers];
+  const [moved] = nextRows.splice(fromRow, 1);
+  if (typeof moved === "undefined") {
+    return normalizeOverlayLayers(overlays);
+  }
+  nextRows.splice(toRow, 0, moved);
+
+  const remappedLayers = new Map(nextRows.map((layer, index) => [layer, nextRows.length - index - 1]));
+  return normalizeOverlayLayers(
+    overlays.map((overlay) => ({
+      ...overlay,
+      content: {
+        ...overlay.content,
+        layer: remappedLayers.get(overlay.content.layer ?? 0) ?? 0,
+      },
+    })),
+  );
+}
+
 function createDraft(
   project: EditorContainerProps["project"],
   manifest: EditorContainerProps["manifest"],
@@ -215,12 +292,13 @@ function createDraft(
   return {
     title: project.title,
     presetId: project.selectedPreset,
-    sectionTitle: section?.title ?? manifestSection?.title ?? "Primary cinematic section",
-    sectionHeightVh: section?.commonConfig.sectionHeightVh ?? manifestSection?.motion.sectionHeightVh ?? 240,
+    sceneName: section?.title ?? manifestSection?.title ?? "Scene 01",
+    sceneHeight: section?.commonConfig.sectionHeightVh ?? manifestSection?.motion.sectionHeightVh ?? 240,
     scrubStrength: section?.commonConfig.scrubStrength ?? manifestSection?.motion.scrubStrength ?? 1,
     frameRangeStart: manifestSection?.progressMapping.frameRange.start ?? 0,
     frameRangeEnd: manifestSection?.progressMapping.frameRange.end ?? 180,
-    overlays: (manifestSection?.overlays ?? []).map(hydrateOverlay),
+    layerCount: getRequiredLayerCount(manifestSection?.overlays ?? []),
+    overlays: normalizeOverlayLayers((manifestSection?.overlays ?? []).map(hydrateOverlay)),
   };
 }
 
@@ -249,7 +327,7 @@ function buildDraftManifest(
     sections: [
       {
         ...section,
-        title: draft.sectionTitle,
+        title: draft.sceneName,
         overlays: draft.overlays,
         progressMapping: {
           ...section.progressMapping,
@@ -260,11 +338,40 @@ function buildDraftManifest(
         },
         motion: {
           ...section.motion,
-          sectionHeightVh: draft.sectionHeightVh,
+          sectionHeightVh: draft.sceneHeight,
           scrubStrength: draft.scrubStrength,
         },
       },
     ],
+  };
+}
+
+function createEditorDraftFromDocument(document: ProjectDraftDocument): EditorDraft {
+  return {
+    title: document.title,
+    presetId: document.presetId,
+    sceneName: document.sectionTitle,
+    sceneHeight: document.sectionHeightVh,
+    scrubStrength: document.scrubStrength,
+    frameRangeStart: document.frameRangeStart,
+    frameRangeEnd: document.frameRangeEnd,
+    layerCount: getRequiredLayerCount(document.overlays, document.layerCount),
+    overlays: normalizeOverlayLayers(document.overlays.map(hydrateOverlay)),
+  };
+}
+
+function createDraftDocumentFromEditorDraft(draft: EditorDraft): ProjectDraftDocument {
+  return {
+    version: 1,
+    title: draft.title,
+    presetId: draft.presetId,
+    sectionTitle: draft.sceneName,
+    sectionHeightVh: draft.sceneHeight,
+    scrubStrength: draft.scrubStrength,
+    frameRangeStart: draft.frameRangeStart,
+    frameRangeEnd: draft.frameRangeEnd,
+    layerCount: getRequiredLayerCount(draft.overlays, draft.layerCount),
+    overlays: draft.overlays.map(sanitizeOverlayForSave),
   };
 }
 
@@ -281,6 +388,7 @@ function sanitizeOverlayForSave(overlay: HydratedOverlayDefinition): OverlayDefi
       mediaUrl: mediaUrl ? mediaUrl : undefined,
       linkHref: linkHref ? linkHref : undefined,
       cta: ctaLabel && ctaHref ? { label: ctaLabel, href: ctaHref } : undefined,
+      layer: overlay.content.layer ?? 0,
     },
   };
 }
@@ -302,18 +410,21 @@ function buildOverlayId(prefix: string) {
 }
 
 export function ProjectEditor({ project, projects, manifest }: EditorContainerProps) {
+  const initialRemoteDraft = buildProjectDraftDocument(project, manifest);
   const [projectState, setProjectState] = useState(project);
   const [manifestState, setManifestState] = useState(manifest);
-  const [draft, setDraft] = useState(() => createDraft(project, manifest));
+  const [draft, setDraft] = useState(() => createEditorDraftFromDocument(initialRemoteDraft));
   const [history, setHistory] = useState<HistoryState>({ past: [], future: [] });
-  const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving" | "error">("saved");
+  const [localSaveState, setLocalSaveState] = useState<"saving" | "saved" | "error">("saved");
+  const [remoteSyncState, setRemoteSyncState] = useState<"idle" | "syncing" | "synced" | "error">("synced");
+  const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(false);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const [reducedMotion, setReducedMotion] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(0.24);
   const [selection, setSelection] = useState<TimelineSelection>(
     manifest.sections[0]?.overlays[0]
-      ? { clipId: `overlay-${manifest.sections[0].overlays[0].id}`, trackType: "overlay" }
+      ? { clipId: `layer-${manifest.sections[0].overlays[0].id}`, trackType: "layer" }
       : { clipId: "section-range", trackType: "section" },
   );
   const [showImportTools, setShowImportTools] = useState(false);
@@ -321,8 +432,16 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
   const playbackLastTickRef = useRef<number | null>(null);
   const playheadRef = useRef(playhead);
   const draftRef = useRef(draft);
-  const initializedRef = useRef(false);
-  const savePromiseRef = useRef<Promise<void> | null>(null);
+  const hasUnsyncedChangesRef = useRef(hasUnsyncedChanges);
+  const persistenceReadyRef = useRef(false);
+  const syncTimeoutRef = useRef<number | null>(null);
+  const syncPromiseRef = useRef<Promise<boolean> | null>(null);
+  const pendingSyncAfterCurrentRef = useRef(false);
+  const lastSyncedRevisionRef = useRef(project.draftRevision ?? 0);
+  const latestLocalSaveAtRef = useRef(
+    new Date(project.lastSavedAt ?? project.updatedAt ?? new Date()).toISOString(),
+  );
+  const localSaveIndicatorTimeoutRef = useRef<number | null>(null);
 
   const editorManifest = useMemo(() => buildDraftManifest(manifestState, draft), [draft, manifestState]);
   const frameCount = editorManifest.sections[0]?.frameCount ?? 0;
@@ -331,8 +450,8 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     [frameCount, projectState],
   );
   const timelineTracks = useMemo(
-    () => deriveTimelineTracks(editorManifest, durationSeconds),
-    [durationSeconds, editorManifest],
+    () => deriveTimelineTracks(editorManifest, durationSeconds, previewMode, draft.layerCount),
+    [draft.layerCount, durationSeconds, editorManifest, previewMode],
   );
   const selectedClip = useMemo(
     () => findSelectedClip(timelineTracks, selection),
@@ -340,7 +459,17 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
   );
   const selectedOverlayId = selectedClip?.metadata?.overlayId;
   const selectedOverlay = draft.overlays.find((overlay) => overlay.id === selectedOverlayId);
-  const publishTarget = projectState.publishTargets?.find((target) => target.targetType === "hosted_embed");
+  const hasUnpublishedChanges =
+    hasUnsyncedChanges ||
+    !projectState.lastPublishedAt ||
+    new Date(projectState.updatedAt ?? 0).getTime() >
+      new Date(projectState.lastPublishedAt).getTime();
+  const saveStatus = {
+    local: localSaveState,
+    remote: remoteSyncState,
+    hasUnsyncedChanges,
+    hasUnpublishedChanges,
+  } as const;
   const defaultMediaUrl = useMemo(() => {
     const poster = projectState.assets.find((asset) => asset.kind === "poster");
     if (poster) {
@@ -358,6 +487,10 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
   useEffect(() => {
     playheadRef.current = playhead;
   }, [playhead]);
+
+  useEffect(() => {
+    hasUnsyncedChangesRef.current = hasUnsyncedChanges;
+  }, [hasUnsyncedChanges]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -401,22 +534,404 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     };
   }, [durationSeconds, isPlaying]);
 
+  function clearScheduledSync() {
+    if (syncTimeoutRef.current != null) {
+      window.clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = null;
+    }
+  }
+
+  function replaceDraftState(
+    nextDraft: EditorDraft,
+    options: {
+      clearHistory?: boolean;
+      hasUnsyncedChanges?: boolean;
+      remoteState?: "idle" | "syncing" | "synced" | "error";
+    } = {},
+  ) {
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
+    if (options.clearHistory) {
+      setHistory({ past: [], future: [] });
+    }
+    if (typeof options.hasUnsyncedChanges === "boolean") {
+      setHasUnsyncedChanges(options.hasUnsyncedChanges);
+    }
+    if (options.remoteState) {
+      setRemoteSyncState(options.remoteState);
+    }
+  }
+
+  async function writeDraftLocally(
+    nextDraft: EditorDraft,
+    options: {
+      dirty: boolean;
+      lastSyncedRevision?: number;
+      lastSyncedAt?: string;
+    },
+  ) {
+    const now = new Date().toISOString();
+    latestLocalSaveAtRef.current = now;
+    if (localSaveIndicatorTimeoutRef.current != null) {
+      window.clearTimeout(localSaveIndicatorTimeoutRef.current);
+    }
+    localSaveIndicatorTimeoutRef.current = window.setTimeout(() => {
+      setLocalSaveState("saving");
+    }, 120);
+
+    const record: LocalProjectDraftRecord = {
+      projectId: projectState.id,
+      draft: createDraftDocumentFromEditorDraft(nextDraft),
+      remoteRevision: options.lastSyncedRevision ?? lastSyncedRevisionRef.current,
+      lastSyncedRevision: options.lastSyncedRevision ?? lastSyncedRevisionRef.current,
+      dirty: options.dirty,
+      lastLocalSaveAt: now,
+      lastSyncedAt: options.lastSyncedAt,
+      pendingSyncAt: options.dirty ? now : undefined,
+    };
+
+    try {
+      await saveLocalProjectDraft(record);
+      if (localSaveIndicatorTimeoutRef.current != null) {
+        window.clearTimeout(localSaveIndicatorTimeoutRef.current);
+        localSaveIndicatorTimeoutRef.current = null;
+      }
+      setLocalSaveState("saved");
+    } catch {
+      if (localSaveIndicatorTimeoutRef.current != null) {
+        window.clearTimeout(localSaveIndicatorTimeoutRef.current);
+        localSaveIndicatorTimeoutRef.current = null;
+      }
+      setLocalSaveState("error");
+    }
+  }
+
+  function scheduleRemoteSync(delay = 900) {
+    // Editor writes go to IndexedDB immediately; network sync is intentionally coalesced.
+    if (!persistenceReadyRef.current || !hasUnsyncedChanges) {
+      return;
+    }
+
+    clearScheduledSync();
+    syncTimeoutRef.current = window.setTimeout(() => {
+      void flushRemoteSync();
+    }, delay);
+  }
+
+  function sendBackgroundDraftSync() {
+    if (
+      !persistenceReadyRef.current ||
+      !hasUnsyncedChangesRef.current ||
+      syncPromiseRef.current ||
+      typeof window === "undefined"
+    ) {
+      return false;
+    }
+
+    const payload = createDraftDocumentFromEditorDraft(draftRef.current);
+    const body = JSON.stringify({
+      draft: payload,
+      baseRevision: lastSyncedRevisionRef.current,
+    });
+    const endpoint = `/api/projects/${projectState.id}/draft`;
+
+    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+      try {
+        const queued = navigator.sendBeacon(
+          endpoint,
+          new Blob([body], { type: "application/json" }),
+        );
+        if (queued) {
+          return true;
+        }
+      } catch {
+        // Fall back to fetch keepalive below.
+      }
+    }
+
+    void fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body,
+      keepalive: true,
+    }).catch(() => undefined);
+
+    return true;
+  }
+
+  async function flushRemoteSync() {
+    if (!persistenceReadyRef.current || !hasUnsyncedChangesRef.current) {
+      return true;
+    }
+
+    clearScheduledSync();
+
+    if (syncPromiseRef.current) {
+      pendingSyncAfterCurrentRef.current = true;
+      return syncPromiseRef.current;
+    }
+
+    const payload = createDraftDocumentFromEditorDraft(draftRef.current);
+    const payloadSignature = JSON.stringify(payload);
+    const baseRevision = lastSyncedRevisionRef.current;
+    setRemoteSyncState("syncing");
+
+    const syncPromise = fetch(`/api/projects/${projectState.id}/draft`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        draft: payload,
+        baseRevision,
+      }),
+    })
+      .then(async (response) => {
+        const data = (await response.json()) as {
+          ok: boolean;
+          conflict?: boolean;
+          draft: ProjectDraftDocument;
+          manifest: typeof manifestState;
+          project: typeof projectState | null;
+          revision: number;
+          updatedAt: string;
+        };
+
+        if (response.status === 409 && data.conflict) {
+          const localIsNewer =
+            latestLocalSaveAtRef.current >= data.updatedAt || hasUnsyncedChangesRef.current;
+          console.warn(
+            `[MotionRoll] Draft revision mismatch for ${projectState.id}. ` +
+              `localRevision=${baseRevision} remoteRevision=${data.revision}`,
+          );
+
+          lastSyncedRevisionRef.current = data.revision;
+          if (localIsNewer) {
+            setRemoteSyncState("idle");
+            scheduleRemoteSync(150);
+            return false;
+          }
+
+          const nextDraft = createEditorDraftFromDocument(data.draft);
+            replaceDraftState(nextDraft, {
+              clearHistory: false,
+              hasUnsyncedChanges: false,
+              remoteState: "synced",
+            });
+            if (data.project) {
+              setProjectState(data.project);
+            }
+            await writeDraftLocally(nextDraft, {
+              dirty: false,
+              lastSyncedRevision: data.revision,
+              lastSyncedAt: data.updatedAt,
+          });
+          return false;
+        }
+
+        if (!response.ok) {
+          setRemoteSyncState("error");
+          return false;
+        }
+
+          lastSyncedRevisionRef.current = data.revision;
+          if (data.project) {
+            setProjectState(data.project);
+          }
+
+          const currentDraftDocument = createDraftDocumentFromEditorDraft(draftRef.current);
+          const stillMatchesSyncedPayload =
+            JSON.stringify(currentDraftDocument) === payloadSignature;
+        setHasUnsyncedChanges(!stillMatchesSyncedPayload);
+        setRemoteSyncState(stillMatchesSyncedPayload ? "synced" : "idle");
+
+        await writeDraftLocally(
+          stillMatchesSyncedPayload
+            ? createEditorDraftFromDocument(payload)
+            : draftRef.current,
+          {
+            dirty: !stillMatchesSyncedPayload,
+            lastSyncedRevision: data.revision,
+            lastSyncedAt: data.updatedAt,
+          },
+        );
+
+        if (!stillMatchesSyncedPayload) {
+          scheduleRemoteSync(250);
+        }
+
+        return true;
+      })
+      .catch(() => {
+        setRemoteSyncState("error");
+        return false;
+      })
+      .finally(() => {
+        syncPromiseRef.current = null;
+        if (pendingSyncAfterCurrentRef.current) {
+          pendingSyncAfterCurrentRef.current = false;
+          scheduleRemoteSync(200);
+        }
+      });
+
+    syncPromiseRef.current = syncPromise;
+    return syncPromise;
+  }
+
   useEffect(() => {
-    if (!initializedRef.current) {
-      initializedRef.current = true;
+    let cancelled = false;
+
+    async function hydrateProjectState() {
+      await setLastOpenedProjectId(projectState.id);
+      const remoteUpdatedAt = new Date(
+        projectState.lastSavedAt ?? projectState.updatedAt ?? new Date(),
+      ).toISOString();
+      const localRecord = await getLocalProjectDraft(projectState.id);
+      if (cancelled) {
+        return;
+      }
+
+      if (
+        localRecord &&
+        (localRecord.dirty ||
+          localRecord.lastSyncedRevision > lastSyncedRevisionRef.current ||
+          localRecord.lastLocalSaveAt >= remoteUpdatedAt)
+      ) {
+        replaceDraftState(createEditorDraftFromDocument(localRecord.draft), {
+          clearHistory: true,
+          hasUnsyncedChanges: localRecord.dirty,
+          remoteState: localRecord.dirty ? "idle" : "synced",
+        });
+        lastSyncedRevisionRef.current = localRecord.lastSyncedRevision;
+        latestLocalSaveAtRef.current = localRecord.lastLocalSaveAt;
+      } else {
+        await writeDraftLocally(draftRef.current, {
+          dirty: false,
+          lastSyncedRevision: lastSyncedRevisionRef.current,
+          lastSyncedAt: remoteUpdatedAt,
+        });
+      }
+
+      persistenceReadyRef.current = true;
+
+      try {
+        const response = await fetch(`/api/projects/${projectState.id}/draft`, {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          return;
+        }
+
+        const data = (await response.json()) as {
+          draft: ProjectDraftDocument;
+          manifest: typeof manifestState;
+          project: typeof projectState | null;
+          revision: number;
+          updatedAt: string;
+        };
+
+        if (cancelled) {
+          return;
+        }
+
+        const localAfterFetch = await getLocalProjectDraft(projectState.id);
+        if (cancelled) {
+          return;
+        }
+
+          lastSyncedRevisionRef.current = data.revision;
+          if (
+            localAfterFetch &&
+            (localAfterFetch.dirty || localAfterFetch.lastLocalSaveAt > data.updatedAt)
+          ) {
+            console.warn(
+            `[MotionRoll] Keeping newer local draft for ${projectState.id} while remote cache refresh completed.`,
+            );
+            return;
+          }
+
+          if (data.project) {
+            setProjectState(data.project);
+          }
+          setManifestState(data.manifest);
+          replaceDraftState(createEditorDraftFromDocument(data.draft), {
+            clearHistory: true,
+            hasUnsyncedChanges: false,
+            remoteState: "synced",
+        });
+        await writeDraftLocally(createEditorDraftFromDocument(data.draft), {
+          dirty: false,
+          lastSyncedRevision: data.revision,
+          lastSyncedAt: data.updatedAt,
+        });
+      } catch {
+        setRemoteSyncState((current) => (current === "syncing" ? "error" : current));
+      }
+    }
+
+    void hydrateProjectState();
+
+      return () => {
+        cancelled = true;
+        persistenceReadyRef.current = false;
+        clearScheduledSync();
+        if (localSaveIndicatorTimeoutRef.current != null) {
+          window.clearTimeout(localSaveIndicatorTimeoutRef.current);
+          localSaveIndicatorTimeoutRef.current = null;
+        }
+      };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectState.id]);
+
+  useEffect(() => {
+    if (!persistenceReadyRef.current) {
       return;
     }
 
-    if (saveState !== "dirty") {
+    void writeDraftLocally(draft, {
+      dirty: hasUnsyncedChanges,
+    });
+
+    if (hasUnsyncedChanges) {
+      scheduleRemoteSync();
+    }
+  }, [draft, hasUnsyncedChanges]);
+
+  useEffect(() => {
+    if (!persistenceReadyRef.current) {
       return;
     }
 
-    const timeout = window.setTimeout(() => {
-      void persistDraft();
-    }, 900);
+    const flush = () => {
+      if (hasUnsyncedChanges) {
+        void flushRemoteSync();
+      }
+    };
+    const queueBackgroundSync = () => {
+      if (hasUnsyncedChangesRef.current) {
+        sendBackgroundDraftSync();
+      }
+    };
 
-    return () => window.clearTimeout(timeout);
-  }, [draft, saveState]);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flush();
+      }
+    };
+
+    window.addEventListener("blur", flush);
+    window.addEventListener("pagehide", queueBackgroundSync);
+    window.addEventListener("beforeunload", queueBackgroundSync);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("blur", flush);
+      window.removeEventListener("pagehide", queueBackgroundSync);
+      window.removeEventListener("beforeunload", queueBackgroundSync);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [hasUnsyncedChanges]);
 
   // Global keyboard shortcuts: Cmd/Ctrl+Z = undo, Cmd/Ctrl+Shift+Z = redo
   useEffect(() => {
@@ -438,13 +953,46 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
         handleRedo();
       } else if (e.key === "s") {
         e.preventDefault();
-        void persistDraft();
+        void flushRemoteSync();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function handlePreview() {
+    const previewUrl = `/projects/${projectState.id}/preview`;
+    if (!hasUnsyncedChangesRef.current) {
+      window.open(previewUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const previewWindow = window.open("", "_blank", "noopener,noreferrer");
+    const didFlush = await flushRemoteSync();
+    if (!didFlush) {
+      previewWindow?.close();
+      window.alert("MotionRoll could not sync the latest draft for preview yet. Please try again.");
+      return;
+    }
+
+    if (previewWindow) {
+      previewWindow.location.href = previewUrl;
+      return;
+    }
+
+    window.open(previewUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function handlePublish() {
+    const didFlush = await flushRemoteSync();
+    if (!didFlush) {
+      window.alert("MotionRoll could not sync the latest draft for publish yet. Please try again.");
+      return;
+    }
+
+    window.location.href = `/projects/${projectState.id}/publish`;
+  }
 
   function pushHistory(current: EditorDraft) {
     setHistory((historyState) => ({
@@ -466,7 +1014,8 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
 
     draftRef.current = nextDraft;
     setDraft(nextDraft);
-    setSaveState("dirty");
+    setHasUnsyncedChanges(true);
+    setRemoteSyncState("idle");
   }
 
   function updateDraft(
@@ -474,76 +1023,6 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     recordHistory = true,
   ) {
     applyDraft(transform(structuredClone(draftRef.current)), recordHistory);
-  }
-
-  function restoreFromServer(
-    nextProject: typeof projectState,
-    nextManifest: typeof manifestState,
-  ) {
-    const nextDraft = createDraft(nextProject, nextManifest);
-    draftRef.current = nextDraft;
-    setDraft(nextDraft);
-    setProjectState(nextProject);
-    setManifestState(nextManifest);
-    setHistory({ past: [], future: [] });
-    setSaveState("saved");
-  }
-
-  async function persistDraft() {
-    if (savePromiseRef.current) {
-      return savePromiseRef.current;
-    }
-
-    setSaveState("saving");
-    const payload = structuredClone(draftRef.current);
-
-    const savePromise = fetch(`/api/projects/${projectState.id}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        title: payload.title,
-        presetId: payload.presetId,
-        sectionTitle: payload.sectionTitle,
-        sectionHeightVh: payload.sectionHeightVh,
-        scrubStrength: payload.scrubStrength,
-        frameRange: {
-          start: payload.frameRangeStart,
-          end: payload.frameRangeEnd,
-        },
-        overlays: payload.overlays.map(sanitizeOverlayForSave),
-      }),
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          setSaveState("error");
-          return;
-        }
-
-        const data = (await response.json()) as {
-          manifest: typeof manifestState;
-          project: typeof projectState | null;
-        };
-
-        if (data.project) {
-          restoreFromServer(data.project, data.manifest);
-          startTransition(() => {
-            if (selectedOverlayId) {
-              setSelection({ clipId: `overlay-${selectedOverlayId}`, trackType: "overlay" });
-            }
-          });
-        }
-      })
-      .catch(() => {
-        setSaveState("error");
-      })
-      .finally(() => {
-        savePromiseRef.current = null;
-      });
-
-    savePromiseRef.current = savePromise;
-    return savePromise;
   }
 
   function handleUndo() {
@@ -556,7 +1035,8 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       const current = structuredClone(draftRef.current);
       draftRef.current = structuredClone(previous);
       setDraft(structuredClone(previous));
-      setSaveState("dirty");
+      setHasUnsyncedChanges(true);
+      setRemoteSyncState("idle");
       return {
         past: historyState.past.slice(0, -1),
         future: [current, ...historyState.future].slice(0, 40),
@@ -574,7 +1054,8 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       const current = structuredClone(draftRef.current);
       draftRef.current = structuredClone(next);
       setDraft(structuredClone(next));
-      setSaveState("dirty");
+      setHasUnsyncedChanges(true);
+      setRemoteSyncState("idle");
       return {
         past: [...historyState.past, current].slice(-40),
         future,
@@ -616,8 +1097,18 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     });
   }
 
-  function selectOverlay(overlayId: string, trackType: "overlay" | "moment" = "overlay") {
-    setSelection({ clipId: `${trackType}-${overlayId}`, trackType });
+  function selectOverlay(overlayId: string) {
+    if (!overlayId) {
+      setSelection({ clipId: "section-range", trackType: "section" });
+      return;
+    }
+
+    const nextSelection = { clipId: `layer-${overlayId}`, trackType: "layer" } as const;
+    setSelection((current) =>
+      current?.clipId === nextSelection.clipId && current.trackType === nextSelection.trackType
+        ? current
+        : nextSelection,
+    );
   }
 
   function addOverlay(type: string) {
@@ -626,38 +1117,22 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       return;
     }
 
+    const normalizedType = type === "section" ? "moment" : type;
+
     const contentType =
-      type === "image" || type === "logo" || type === "icon"
-        ? type
+      normalizedType === "image" || normalizedType === "logo" || normalizedType === "icon"
+        ? normalizedType
         : "text";
-    const overlayId = buildOverlayId(type);
+    const overlayId = buildOverlayId(normalizedType);
     const overlay = createDefaultOverlay(
       overlayId,
       contentType,
       playheadRef.current,
       contentType === "text" ? undefined : defaultMediaUrl,
     );
-    if (type === "headline") {
-      overlay.content.headline = "A cleaner editor-first headline";
-      overlay.content.body = "Use the floating text tools or the sidebar to tune the typography.";
-      overlay.content.style = {
-        ...overlay.content.style,
-        fontSize: 48,
-        fontWeight: 700,
-      };
-    }
-    if (type === "subheadline") {
-      overlay.content.eyebrow = "Supporting";
-      overlay.content.headline = "A smaller supporting beat";
-      overlay.content.style = {
-        ...overlay.content.style,
-        fontSize: 24,
-        fontWeight: 500,
-      };
-    }
-    if (type === "moment") {
+    if (normalizedType === "moment") {
       overlay.content.eyebrow = "Moment";
-      overlay.content.headline = "Add a larger story beat";
+      overlay.content.headline = "New section beat";
       overlay.content.transition = {
         preset: "wipe",
         easing: "ease-in-out",
@@ -667,7 +1142,17 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
 
     updateDraft((current) => ({
       ...current,
-      overlays: [...current.overlays, overlay],
+      layerCount: getRequiredLayerCount(current.overlays, current.layerCount),
+      overlays: normalizeOverlayLayers([
+        {
+          ...overlay,
+          content: {
+            ...overlay.content,
+            layer: Math.max(getRequiredLayerCount(current.overlays, current.layerCount) - 1, 0),
+          },
+        },
+        ...current.overlays,
+      ]),
     }));
     selectOverlay(overlayId);
   }
@@ -705,11 +1190,11 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
 
       return {
         ...current,
-        overlays: [
+        overlays: normalizeOverlayLayers([
           ...current.overlays.flatMap((overlay) =>
             overlay.id === overlayId ? [overlay, duplicate] : [overlay],
           ),
-        ],
+        ]),
       };
     });
     selectOverlay(duplicateId);
@@ -724,7 +1209,8 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
 
     updateDraft((current) => ({
       ...current,
-      overlays: current.overlays.filter((overlay) => overlay.id !== overlayId),
+      layerCount: getRequiredLayerCount(current.overlays.filter((overlay) => overlay.id !== overlayId), current.layerCount),
+      overlays: normalizeOverlayLayers(current.overlays.filter((overlay) => overlay.id !== overlayId)),
     }));
     setSelection({ clipId: "section-range", trackType: "section" });
   }
@@ -746,16 +1232,19 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
 
 
   function handleDuplicateOverlay(overlayId: string) {
-    const clipId = `overlay-${overlayId}`;
+    const clipId = `layer-${overlayId}`;
     handleDuplicateClip(clipId);
   }
 
   function handleDeleteOverlay(overlayId: string) {
-    const clipId = `overlay-${overlayId}`;
+    const clipId = `layer-${overlayId}`;
     handleDeleteClip(clipId);
   }
 
   function handleOverlayStyleQuickChange(overlayId: string, changes: Record<string, unknown>) {
+    // recordHistory=false: live edits (color picker drag, font size input)
+    // fire on every pointermove. Skipping pushHistory avoids structuredClone
+    // + setHistory on each tick, which was the main source of lag here.
     updateDraft((current) => ({
       ...current,
       overlays: current.overlays.map((overlay) =>
@@ -766,20 +1255,20 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                 ...overlay.content,
                 style: {
                   ...overlay.content.style,
-                  ...(changes.fontFamily !== undefined ? { fontFamily: String(changes.fontFamily) } : {}),
+                  ...(changes.fontFamily !== undefined ? { fontFamily: String(changes.fontFamily) as FontFamily } : {}),
                   ...(changes.fontWeight !== undefined ? { fontWeight: Number(changes.fontWeight) } : {}),
                   ...(changes.fontSize !== undefined ? { fontSize: Number(changes.fontSize) } : {}),
                   ...(changes.color !== undefined ? { color: String(changes.color) } : {}),
                   ...(changes.italic !== undefined ? { italic: Boolean(changes.italic) } : {}),
+                  ...(changes.underline !== undefined ? { underline: Boolean(changes.underline) } : {}),
                   ...(changes.textAlign !== undefined ? { textAlign: changes.textAlign as "start" | "center" | "end" } : {}),
                 },
               },
             }
           : overlay,
       ),
-    }));
+    }), false);
   }
-
 
   function handleSetClipTransitionPreset(clipId: string, preset?: string) {
     const clip = findClipById(timelineTracks, clipId);
@@ -794,12 +1283,10 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
               ...overlay,
               content: {
                 ...overlay.content,
-                transition: preset
-                  ? {
-                      ...(overlay.content.transition ?? { preset: "fade", easing: "ease-in-out", duration: 0.4 }),
-                      preset,
-                    }
-                  : undefined,
+                transition: {
+                  ...(overlay.content.transition ?? { preset: "fade", easing: "ease-in-out", duration: 0.4 }),
+                  preset: (preset ?? "fade") as TransitionPreset,
+                },
               },
             }
           : overlay,
@@ -807,7 +1294,7 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     }));
   }
 
-  function handleMoveClipToTrack(clipId: string, nextTrack: "overlay" | "moment") {
+  function handleMoveClipToLayer(clipId: string, targetLayer: number) {
     const clip = findClipById(timelineTracks, clipId);
     const overlayId = clip?.metadata?.overlayId;
     if (!overlayId) {
@@ -816,37 +1303,70 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
 
     updateDraft((current) => ({
       ...current,
-      overlays: current.overlays.map((overlay) => {
-        if (overlay.id !== overlayId) {
-          return overlay;
-        }
-
-        const eyebrow = overlay.content.eyebrow?.trim();
-        return {
-          ...overlay,
-          content: {
-            ...overlay.content,
-            eyebrow:
-              nextTrack === "moment"
-                ? eyebrow && eyebrow.length > 0
-                  ? eyebrow
-                  : "Moment"
-                : eyebrow?.toLowerCase() === "moment"
-                  ? undefined
-                  : overlay.content.eyebrow,
-          },
-        };
-      }),
+      layerCount: getRequiredLayerCount(current.overlays, current.layerCount),
+      overlays: normalizeOverlayLayers(
+        current.overlays.map((overlay) =>
+          overlay.id === overlayId
+            ? {
+                ...overlay,
+                content: {
+                  ...overlay.content,
+                  layer: targetLayer,
+                },
+              }
+            : overlay,
+        ),
+      ),
     }));
-    setSelection({ clipId: `${nextTrack}-${overlayId}`, trackType: nextTrack });
   }
 
   function handleReorderOverlays(fromIndex: number, toIndex: number) {
     updateDraft((current) => {
-      const next = [...current.overlays];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      return { ...current, overlays: next };
+      return {
+        ...current,
+        overlays: reorderOverlayLayers(current.overlays, current.layerCount, fromIndex, toIndex),
+      };
+    });
+  }
+
+  function handleAddLayer() {
+    updateDraft((current) => ({
+      ...current,
+      layerCount: current.layerCount + 1,
+    }));
+  }
+
+  function handleDeleteLayer(layerRowIndex: number) {
+    updateDraft((current) => {
+      if (current.layerCount <= 1 || layerRowIndex < 0 || layerRowIndex >= current.layerCount) {
+        return current;
+      }
+
+      const layerValue = current.layerCount - layerRowIndex - 1;
+      const nextOverlays = current.overlays.flatMap((overlay) => {
+        const overlayLayer = overlay.content.layer ?? 0;
+        if (overlayLayer === layerValue) {
+          return [];
+        }
+
+        if (overlayLayer > layerValue) {
+          return [{
+            ...overlay,
+            content: {
+              ...overlay.content,
+              layer: overlayLayer - 1,
+            },
+          }];
+        }
+
+        return [overlay];
+      });
+
+      return {
+        ...current,
+        layerCount: getRequiredLayerCount(nextOverlays, current.layerCount - 1),
+        overlays: normalizeOverlayLayers(nextOverlays),
+      };
     });
   }
 
@@ -859,22 +1379,43 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
         projectId={projectState.id}
         projectName={draft.title}
         projects={projects}
-        saveState={saveState}
+        sectionTitle={draft.sceneName}
+        frameRangeStart={draft.frameRangeStart}
+        frameRangeEnd={draft.frameRangeEnd}
+        scrubStrength={draft.scrubStrength}
+        sectionHeightVh={draft.sceneHeight}
+        saveStatus={saveStatus}
         canUndo={history.past.length > 0}
         canRedo={history.future.length > 0}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        onPreview={() => {
-          const href = publishTarget ? `/embed/${publishTarget.slug}` : `/projects/${projectState.id}/publish`;
-          window.open(href, "_blank", "noopener,noreferrer");
+        onProjectTitleChange={(value) => updateDraft((current) => ({ ...current, title: value }))}
+        onSectionTitleChange={(value) => updateDraft((current) => ({ ...current, sceneName: value }))}
+        onFrameRangeChange={(field, value) =>
+          updateDraft((current) => ({
+            ...current,
+            frameRangeStart: field === "start" ? Math.max(0, value) : current.frameRangeStart,
+            frameRangeEnd:
+              field === "end" ? Math.max(value, current.frameRangeStart + 1) : current.frameRangeEnd,
+          }))
+        }
+        onSectionFieldChange={(field, value) => updateDraft((current) => ({
+                ...current,
+                ...(field === "scrubStrength" ? { scrubStrength: value } : { sceneHeight: value }),
+              }))}
+        previewMode={previewMode}
+        reducedMotion={reducedMotion}
+        isPlaying={isPlaying}
+        onPreviewModeChange={setPreviewMode}
+        onReducedMotionChange={setReducedMotion}
+        onRetrySync={async () => {
+          await flushRemoteSync();
         }}
-        onPublish={() => {
-          window.location.href = `/projects/${projectState.id}/publish`;
-        }}
+        onPreview={handlePreview}
+        onPublish={handlePublish}
       />
 
-      {/* Main area: left sidebar | canvas+timeline */}
-      <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 56px)" }}>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
 
         {/* Left sidebar */}
         <SidebarPanel
@@ -882,27 +1423,6 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
           selectedOverlay={selectedOverlay}
           selectedClip={selectedClip}
           selection={selection}
-          projectTitle={draft.title}
-          sectionTitle={draft.sectionTitle}
-          frameRangeStart={draft.frameRangeStart}
-          frameRangeEnd={draft.frameRangeEnd}
-          scrubStrength={draft.scrubStrength}
-          sectionHeightVh={draft.sectionHeightVh}
-          onProjectTitleChange={(value) => updateDraft((current) => ({ ...current, title: value }))}
-          onSectionTitleChange={(value) =>
-            updateDraft((current) => ({ ...current, sectionTitle: value }))
-          }
-          onFrameRangeChange={(field, value) =>
-            updateDraft((current) => ({
-              ...current,
-              frameRangeStart: field === "start" ? Math.max(0, value) : current.frameRangeStart,
-              frameRangeEnd:
-                field === "end" ? Math.max(value, current.frameRangeStart + 1) : current.frameRangeEnd,
-            }))
-          }
-          onSectionFieldChange={(field, value) =>
-            updateDraft((current) => ({ ...current, [field]: value }))
-          }
           onOverlayFieldChange={(field, value) => {
             updateSelectedOverlay((overlay) => {
               const hydrated = hydrateOverlay(overlay);
@@ -981,7 +1501,6 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                     field === "width" || field === "height" || field === "x" || field === "y"
                       ? { ...hydrated.content.layout, [field]: Number(value) }
                       : hydrated.content.layout,
-                  layer: field === "layer" ? Number(value) : hydrated.content.layer,
                 },
               };
             });
@@ -1011,7 +1530,6 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
             });
           }}
           onSelectOverlay={(overlayId) => selectOverlay(overlayId)}
-          onReorderOverlays={handleReorderOverlays}
           onAddContent={addOverlay}
           extraAddContent={
             showImportTools ? (
@@ -1024,9 +1542,9 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
         />
 
         {/* Canvas + Timeline column */}
-        <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Canvas */}
-          <div className="flex-1 min-h-0">
+          <div className="min-h-0 flex-1 overflow-hidden">
             <PreviewStage
               manifest={editorManifest}
               mode={previewMode}
@@ -1045,24 +1563,60 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
               }}
               onPlayToggle={() => setIsPlaying((current) => !current)}
               onSelectOverlay={(overlayId) => selectOverlay(overlayId)}
-              onOverlayLayoutChange={(overlayId, layout) => {
+              onOverlayLayoutChange={(overlayId, layout, options) => {
                 updateDraft((current) => ({
                   ...current,
                   overlays: current.overlays.map((overlay) =>
                     overlay.id === overlayId
-                      ? hydrateOverlay({
-                          ...overlay,
-                          content: {
-                            ...overlay.content,
-                            layout: {
-                              x: overlay.content.layout?.x ?? 0.08,
-                              y: overlay.content.layout?.y ?? 0.12,
-                              width: overlay.content.layout?.width ?? 420,
-                              height: overlay.content.layout?.height,
-                              ...layout,
+                      ? (() => {
+                          const hydrated = hydrateOverlay(overlay);
+                          const nextLayout = {
+                            x: hydrated.content.layout.x,
+                            y: hydrated.content.layout.y,
+                            width: hydrated.content.layout.width,
+                            height: hydrated.content.layout.height,
+                            ...layout,
+                          };
+                          if (options?.intent !== "resize") {
+                            return {
+                              ...hydrated,
+                              content: {
+                                ...hydrated.content,
+                                layout: nextLayout,
+                              },
+                            };
+                          }
+
+                          const scaleX = Math.max(0.35, Math.min(options.scaleX ?? 1, 4));
+                          const scaleY = Math.max(0.35, Math.min(options.scaleY ?? 1, 4));
+                          const styleChanges = options.styleChanges;
+                          const backgroundChanges = options.backgroundChanges;
+                          const areaScale = Math.sqrt(scaleX * scaleY);
+                          const contentScale = Math.max(0.5, Math.min(1 + (areaScale - 1) * 0.82, 3));
+                          const paddingScaleX = Math.max(0.5, Math.min(1 + (scaleX - 1) * 0.72, 3));
+                          const paddingScaleY = Math.max(0.5, Math.min(1 + (scaleY - 1) * 0.72, 3));
+
+                          return {
+                            ...hydrated,
+                            content: {
+                              ...hydrated.content,
+                              layout: nextLayout,
+                              style: {
+                                ...hydrated.content.style,
+                                fontSize: Number(styleChanges?.fontSize ?? Math.max(10, Math.round(hydrated.content.style.fontSize * contentScale))),
+                                eyebrowFontSize: Number(styleChanges?.eyebrowFontSize ?? Math.max(8, Math.round(hydrated.content.style.eyebrowFontSize * contentScale))),
+                                bodyFontSize: Number(styleChanges?.bodyFontSize ?? Math.max(10, Math.round(hydrated.content.style.bodyFontSize * contentScale))),
+                                maxWidth: Number(styleChanges?.maxWidth ?? Math.max(80, Math.round((hydrated.content.style.maxWidth ?? nextLayout.width ?? 420) * scaleX))),
+                              },
+                              background: {
+                                ...hydrated.content.background,
+                                radius: Number(backgroundChanges?.radius ?? Math.max(0, Math.round(hydrated.content.background.radius * contentScale))),
+                                paddingX: Number(backgroundChanges?.paddingX ?? Math.max(0, Math.round(hydrated.content.background.paddingX * paddingScaleX))),
+                                paddingY: Number(backgroundChanges?.paddingY ?? Math.max(0, Math.round(hydrated.content.background.paddingY * paddingScaleY))),
+                              },
                             },
-                          },
-                        })
+                          };
+                        })()
                       : overlay,
                   ),
                 }));
@@ -1087,15 +1641,15 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                   ),
                 }));
               }}
-              onOverlayStyleChange={handleOverlayStyleQuickChange}
-              onDuplicateOverlay={handleDuplicateOverlay}
-              onDeleteOverlay={handleDeleteOverlay}
-            />
-          </div>
+            onOverlayStyleChange={handleOverlayStyleQuickChange}
+            onDuplicateOverlay={handleDuplicateOverlay}
+            onDeleteOverlay={handleDeleteOverlay}
+          />
+        </div>
 
           {/* Timeline */}
           <div
-            className="h-72 flex-shrink-0 border-t"
+            className="h-[292px] flex-shrink-0 overflow-hidden border-t"
             style={{ borderColor: "var(--editor-border)" }}
           >
             <TimelinePanel
@@ -1113,10 +1667,13 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
               }}
               onSelectionChange={handleSelectionChange}
               onClipTimingChange={handleClipTimingChange}
+              onMoveClipToLayer={handleMoveClipToLayer}
+              onAddLayer={handleAddLayer}
+              onDeleteLayer={handleDeleteLayer}
               onAddAtPlayhead={() => addOverlay("text")}
               onDuplicateClip={handleDuplicateClip}
               onDeleteClip={handleDeleteClip}
-              onMoveClipToTrack={handleMoveClipToTrack}
+              onReorderTracks={handleReorderOverlays}
               onSetClipTransitionPreset={handleSetClipTransitionPreset}
             />
           </div>

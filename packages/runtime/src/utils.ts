@@ -36,7 +36,7 @@ export function getActiveOverlayId(
 ) {
   const normalizedProgress = clampProgress(progress);
   return [...overlays]
-    .reverse()
+    .sort((left, right) => (right.content.layer ?? 0) - (left.content.layer ?? 0))
     .find(
       (overlay) =>
         normalizedProgress >= overlay.timing.start && normalizedProgress <= overlay.timing.end,

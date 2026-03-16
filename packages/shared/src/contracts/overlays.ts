@@ -67,6 +67,8 @@ export const OverlayStyleSchema = z.object({
   fontFamily: FontFamilySchema.default("Inter"),
   fontWeight: z.number().int().min(300).max(800).default(600),
   fontSize: z.number().min(12).max(120).default(34),
+  eyebrowFontSize: z.number().min(8).max(60).default(12),
+  bodyFontSize: z.number().min(8).max(72).default(15),
   lineHeight: z.number().min(0.8).max(2.4).default(1.08),
   letterSpacing: z.number().min(-0.08).max(0.3).default(0),
   textAlign: OverlayAlignSchema.default("start"),
@@ -74,6 +76,7 @@ export const OverlayStyleSchema = z.object({
   opacity: z.number().min(0).max(1).default(1),
   maxWidth: z.number().min(140).max(1400).default(420),
   italic: z.boolean().default(false),
+  underline: z.boolean().default(false),
   textTransform: TextTransformSchema.default("none"),
   buttonLike: z.boolean().default(false),
 });

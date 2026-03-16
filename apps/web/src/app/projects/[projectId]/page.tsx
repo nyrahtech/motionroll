@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { ProjectEditor } from "@/components/builder/project-builder";
+import { ProjectEditorClient } from "./project-editor-client";
 import { buildProjectManifest } from "@/lib/manifest";
 import { getProjectById, getProjectPreset, getProjectSwitcherProjects } from "@/lib/data/projects";
 
@@ -22,7 +22,7 @@ export default async function ProjectPage({
   const manifest = await buildProjectManifest(projectId);
 
   return (
-    <ProjectEditor
+    <ProjectEditorClient
       project={project}
       projects={projects}
       manifest={manifest}
