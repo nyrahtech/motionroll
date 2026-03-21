@@ -39,9 +39,12 @@ type LiveResizeTargets = {
 export type OverlayManipulatorProps = {
   overlay: OverlayDefinition;
   selectedOverlayId: string;
+  selectedOverlayIds?: string[];
+  selectionOverlays?: OverlayDefinition[];
   containerRef: RefObject<HTMLElement | null>;
   selectedStyle?: OverlayDefinition["content"]["style"];
   isTextStyle: boolean;
+  allowLayoutEditing?: boolean;
   onLayoutChange: (
     layout: Partial<{ x: number; y: number; width: number; height: number }>,
     options?: {
@@ -54,8 +57,15 @@ export type OverlayManipulatorProps = {
   ) => void;
   onStyleChange: (changes: Record<string, unknown>) => void;
   onEdit: () => void;
+  canGroupSelection?: boolean;
+  canUngroupSelection?: boolean;
+  onGroupSelection?: () => void;
+  onUngroupSelection?: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onMoveSelection?: (delta: { x: number; y: number }) => void;
+  onDuplicateSelection?: () => void;
+  onDeleteSelection?: () => void;
   onInteractingChange: (active: boolean) => void;
 };
 
@@ -92,6 +102,22 @@ function overlayToBox(overlay: OverlayDefinition, container: HTMLElement, render
     top:  (layout?.y ?? 0.12) * cH,
     width: w,
     height: h,
+  };
+}
+
+function unionBoxes(boxes: Box[]): Box | null {
+  if (boxes.length === 0) {
+    return null;
+  }
+  const left = Math.min(...boxes.map((box) => box.left));
+  const top = Math.min(...boxes.map((box) => box.top));
+  const right = Math.max(...boxes.map((box) => box.left + box.width));
+  const bottom = Math.max(...boxes.map((box) => box.top + box.height));
+  return {
+    left,
+    top,
+    width: Math.max(MIN_DIM, right - left),
+    height: Math.max(MIN_DIM, bottom - top),
   };
 }
 
@@ -173,14 +199,24 @@ function getLiveResizeTargets(card: HTMLElement, overlay: OverlayDefinition): Li
 export function OverlayManipulator({
   overlay,
   selectedOverlayId,
+  selectedOverlayIds,
+  selectionOverlays,
   containerRef,
   selectedStyle,
   isTextStyle,
+  allowLayoutEditing = true,
   onLayoutChange,
   onStyleChange,
   onEdit,
+  canGroupSelection = false,
+  canUngroupSelection = false,
+  onGroupSelection,
+  onUngroupSelection,
   onDuplicate,
   onDelete,
+  onMoveSelection,
+  onDuplicateSelection,
+  onDeleteSelection,
   onInteractingChange,
 }: OverlayManipulatorProps) {
   // React state — only used for initial render and post-commit re-sync.
@@ -197,6 +233,12 @@ export function OverlayManipulator({
   const handleSeRef  = useRef<HTMLDivElement | null>(null);
   const dragHandleRef = useRef<HTMLButtonElement | null>(null);
   const toolbarWrapRef = useRef<HTMLDivElement | null>(null);
+  const selectionIds = (selectedOverlayIds?.length ? selectedOverlayIds : [selectedOverlayId]).filter(Boolean);
+  const selectionCardIds = (selectionOverlays?.length
+    ? selectionOverlays.map((item) => item.id)
+    : selectionIds
+  ).filter(Boolean);
+  const isMultiSelection = selectionIds.length > 1;
 
   // ── Apply box to all DOM elements synchronously ───────────────────────
   function applyBoxToDom(b: Box) {
@@ -249,6 +291,36 @@ export function OverlayManipulator({
     return containerRef.current?.querySelector<HTMLElement>(
       `[data-overlay-id="${selectedOverlayId}"]`,
     ) ?? null;
+  }
+
+  function getSelectionCards() {
+    return selectionCardIds
+      .map((overlayId) => {
+        const card = containerRef.current?.querySelector<HTMLElement>(`[data-overlay-id="${overlayId}"]`) ?? null;
+        return card ? { overlayId, card } : null;
+      })
+      .filter((entry): entry is { overlayId: string; card: HTMLElement } => Boolean(entry));
+  }
+
+  function getSelectionBox(container: HTMLElement): Box | null {
+    const cRect = container.getBoundingClientRect();
+    const cardBoxes = getSelectionCards().map(({ card }) => {
+      const rect = card.getBoundingClientRect();
+      return {
+        left: rect.left - cRect.left,
+        top: rect.top - cRect.top,
+        width: Math.max(rect.width, MIN_DIM),
+        height: Math.max(rect.height, MIN_DIM),
+      };
+    });
+    if (cardBoxes.length > 0) {
+      return unionBoxes(cardBoxes);
+    }
+
+    const overlays = selectionOverlays?.length ? selectionOverlays : [overlay];
+    return unionBoxes(
+      overlays.map((item) => overlayToBox(item, container, boxRef.current?.height ?? 100)),
+    );
   }
 
   function applyBoxToCard(card: HTMLElement, b: Box) {
@@ -319,16 +391,8 @@ export function OverlayManipulator({
     const container = containerRef.current;
     if (!container) return;
 
-    const el = container.querySelector<HTMLElement>(`[data-overlay-id="${selectedOverlayId}"]`);
-    if (el) {
-      const cRect = container.getBoundingClientRect();
-      const eRect = el.getBoundingClientRect();
-      const initial: Box = {
-        left: eRect.left - cRect.left,
-        top: eRect.top - cRect.top,
-        width: Math.max(eRect.width, MIN_DIM),
-        height: Math.max(eRect.height, MIN_DIM),
-      };
+    const initial = getSelectionBox(container);
+    if (initial) {
       boxRef.current = initial;
       setBox(initial);
     } else {
@@ -336,23 +400,15 @@ export function OverlayManipulator({
       boxRef.current = fallback;
       setBox(fallback);
     }
-  }, [overlay, selectedOverlayId, containerRef]);
+  }, [overlay, selectedOverlayId, selectedOverlayIds, selectionOverlays, containerRef]);
 
   // ── Re-sync on container resize ───────────────────────────────────────
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const observer = new ResizeObserver(() => {
-      const el = container.querySelector<HTMLElement>(`[data-overlay-id="${selectedOverlayId}"]`);
-      if (el) {
-        const cRect = container.getBoundingClientRect();
-        const eRect = el.getBoundingClientRect();
-        const next: Box = {
-          left: eRect.left - cRect.left,
-          top: eRect.top - cRect.top,
-          width: Math.max(eRect.width, MIN_DIM),
-          height: Math.max(eRect.height, MIN_DIM),
-        };
+      const next = getSelectionBox(container);
+      if (next) {
         boxRef.current = next;
         setBox(next);
       } else {
@@ -363,7 +419,7 @@ export function OverlayManipulator({
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, [overlay, selectedOverlayId, containerRef]);
+  }, [overlay, selectedOverlayId, selectedOverlayIds, selectionOverlays, containerRef]);
 
   // ── After React renders the chrome, sync DOM to boxRef ────────────────
   // (Handles the rare case where state update and DOM apply get out of sync.)
@@ -375,7 +431,7 @@ export function OverlayManipulator({
   function moveAll(next: Box, card: HTMLElement | null) {
     boxRef.current = next;
     // Card and chrome DOM writes are synchronous — zero React involvement.
-    if (card) applyBoxToCard(card, next);
+    if (!isMultiSelection && card) applyBoxToCard(card, next);
     applyBoxToDom(next);
   }
 
@@ -394,6 +450,20 @@ export function OverlayManipulator({
 
     const initialBox: Box = startBox;
     const card = getCard();
+    const selectionCards = getSelectionCards().map(({ overlayId, card: selectionCard }) => {
+      const rect = selectionCard.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      return {
+        overlayId,
+        card: selectionCard,
+        box: {
+          left: rect.left - containerRect.left,
+          top: rect.top - containerRect.top,
+          width: Math.max(rect.width, MIN_DIM),
+          height: Math.max(rect.height, MIN_DIM),
+        },
+      };
+    });
     moveAll(initialBox, card); // freeze card at pixel coords immediately
 
     const startX = e.clientX;
@@ -406,6 +476,17 @@ export function OverlayManipulator({
         left: Math.max(0, Math.min(initialBox.left + ev.clientX - startX, cRect.width  - initialBox.width)),
         top:  Math.max(0, Math.min(initialBox.top  + ev.clientY - startY, cRect.height - initialBox.height)),
       };
+      if (isMultiSelection) {
+        const deltaX = next.left - initialBox.left;
+        const deltaY = next.top - initialBox.top;
+        for (const entry of selectionCards) {
+          applyBoxToCard(entry.card, {
+            ...entry.box,
+            left: entry.box.left + deltaX,
+            top: entry.box.top + deltaY,
+          });
+        }
+      }
       moveAll(next, card);
     }
 
@@ -417,7 +498,14 @@ export function OverlayManipulator({
         onInteractingChange(false);
         return;
       }
-      onLayoutChange(boxToLayout(nextBox, overlay, container), { intent: "move", scaleX: 1, scaleY: 1 });
+      if (isMultiSelection) {
+        onMoveSelection?.({
+          x: (nextBox.left - initialBox.left) / Math.max(cRect.width, 1),
+          y: (nextBox.top - initialBox.top) / Math.max(cRect.height, 1),
+        });
+      } else {
+        onLayoutChange(boxToLayout(nextBox, overlay, container), { intent: "move", scaleX: 1, scaleY: 1 });
+      }
       // Keep card at final pixel position — the manifest-driven overlay-sync
       // effect in runtime-preview will restore fractional styles once committed.
       setBox(nextBox);
@@ -574,47 +662,58 @@ export function OverlayManipulator({
         }}
       />
 
-      {/* Corner resize handles */}
-      {handles.map(({ id, ref, cursor }) => {
-        const isNorth = id[0] === "n";
-        const isWest  = id[1] === "w";
-        return (
-          <div
-            key={id}
-            ref={ref}
-            onPointerDown={(e: ReactPointerEvent<HTMLDivElement>) => handleResizePointerDown(e, id)}
-            className="absolute z-[34] h-3 w-3 rounded-sm border-2 border-[rgba(103,232,249,0.9)] bg-[#0a1520]"
-            style={{
-              left: isWest  ? box.left - HANDLE_HALF : box.left + box.width  - HANDLE_HALF,
-              top:  isNorth ? box.top  - HANDLE_HALF : box.top  + box.height - HANDLE_HALF,
-              cursor,
-            }}
-          />
-        );
-      })}
+      {allowLayoutEditing ? (
+        <>
+          {!isMultiSelection && overlay.content.type !== "group" ? (
+            <>
+              {/* Corner resize handles */}
+              {handles.map(({ id, ref, cursor }) => {
+                const isNorth = id[0] === "n";
+                const isWest  = id[1] === "w";
+                return (
+              <div
+                key={id}
+                ref={ref}
+                data-overlay-selection-chrome
+                onPointerDown={(e: ReactPointerEvent<HTMLDivElement>) => handleResizePointerDown(e, id)}
+                className="absolute z-[34] h-3 w-3 rounded-sm border-2 border-[rgba(103,232,249,0.9)] bg-[#0a1520]"
+                    style={{
+                      left: isWest  ? box.left - HANDLE_HALF : box.left + box.width  - HANDLE_HALF,
+                      top:  isNorth ? box.top  - HANDLE_HALF : box.top  + box.height - HANDLE_HALF,
+                      cursor,
+                    }}
+                  />
+                );
+              })}
+            </>
+          ) : null}
 
-      <button
-        ref={dragHandleRef}
-        type="button"
-        onPointerDown={handleDragPointerDown}
-        className="focus-ring absolute z-[34] flex h-8 w-8 items-center justify-center rounded-md border transition-colors"
-        style={{
-          left: box.left + DRAG_HANDLE_OFFSET,
-          top: box.top + DRAG_HANDLE_OFFSET,
-          cursor: "grab",
-          borderColor: isDragging ? "rgba(205,239,255,0.28)" : "rgba(255,255,255,0.06)",
-          background: "var(--editor-panel-elevated)",
-          color: isDragging ? "var(--editor-accent)" : "var(--foreground-muted)",
-        }}
-        title="Drag overlay"
-        aria-label="Drag overlay"
-      >
-        <Move className="h-3.5 w-3.5" />
-      </button>
+          <button
+            ref={dragHandleRef}
+            type="button"
+            data-overlay-selection-chrome
+            onPointerDown={handleDragPointerDown}
+            className="focus-ring absolute z-[34] flex h-8 w-8 items-center justify-center rounded-md border transition-colors"
+            style={{
+              left: box.left + DRAG_HANDLE_OFFSET,
+              top: box.top + DRAG_HANDLE_OFFSET,
+              cursor: "grab",
+              borderColor: isDragging ? "rgba(205,239,255,0.28)" : "rgba(255,255,255,0.06)",
+              background: "var(--editor-panel-elevated)",
+              color: isDragging ? "var(--editor-accent)" : "var(--foreground-muted)",
+            }}
+            title="Drag overlay"
+            aria-label="Drag overlay"
+          >
+            <Move className="h-3.5 w-3.5" />
+          </button>
+        </>
+      ) : null}
 
       {/* Toolbar wrapper */}
       <div
         ref={toolbarWrapRef}
+        data-overlay-selection-chrome
         className="absolute z-[35]"
         style={{ top: tb.top - 8, left: tb.left - 8 }}
       >
@@ -628,10 +727,14 @@ export function OverlayManipulator({
           italic={selectedStyle?.italic ?? false}
           underline={selectedStyle?.underline ?? false}
           textAlign={(selectedStyle?.textAlign as "start" | "center" | "end") ?? "start"}
-          isTextStyle={isTextStyle}
-          onChange={onStyleChange}
-          onDuplicate={onDuplicate}
-          onDelete={onDelete}
+          isTextStyle={isTextStyle && !isMultiSelection}
+          onChange={isMultiSelection ? undefined : onStyleChange}
+          canGroup={isMultiSelection ? canGroupSelection : false}
+          canUngroup={isMultiSelection ? canUngroupSelection : canUngroupSelection}
+          onGroup={isMultiSelection ? onGroupSelection : undefined}
+          onUngroup={isMultiSelection || canUngroupSelection ? onUngroupSelection : undefined}
+          onDuplicate={isMultiSelection ? onDuplicateSelection : onDuplicate}
+          onDelete={isMultiSelection ? onDeleteSelection : onDelete}
         />
       </div>
     </>

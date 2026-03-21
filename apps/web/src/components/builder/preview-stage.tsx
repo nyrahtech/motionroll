@@ -6,19 +6,23 @@ import { RuntimePreview } from "./runtime-preview";
 
 export function PreviewStage({
   manifest, mode, playheadProgress,
-  isPlaying, selectedOverlayId, onModeChange,
+  isPlaying, selectedOverlayId, selectedOverlayIds, canGroupSelection, canUngroupSelection, onModeChange,
   onPlayheadChange, onPlayToggle, onSelectOverlay,
   onOverlayLayoutChange, onInlineTextChange, onOverlayStyleChange, onDuplicateOverlay, onDeleteOverlay,
+  onGroupSelection, onUngroupSelection, onMoveSelection, onDuplicateSelection, onDeleteSelection,
 }: {
   manifest: ProjectManifest;
   mode: "desktop" | "mobile";
   playheadProgress: number;
   isPlaying: boolean;
   selectedOverlayId?: string;
+  selectedOverlayIds?: string[];
+  canGroupSelection?: boolean;
+  canUngroupSelection?: boolean;
   onModeChange: (mode: "desktop" | "mobile") => void;
   onPlayheadChange: (value: number) => void;
   onPlayToggle: () => void;
-  onSelectOverlay: (overlayId: string) => void;
+  onSelectOverlay: (overlayId: string, options?: { additive?: boolean }) => void;
   onOverlayLayoutChange: (
     overlayId: string,
     layout: Partial<{ x: number; y: number; width: number; height: number }>,
@@ -39,6 +43,11 @@ export function PreviewStage({
   onOverlayStyleChange: (overlayId: string, changes: Record<string, unknown>) => void;
   onDuplicateOverlay: (overlayId: string) => void;
   onDeleteOverlay: (overlayId: string) => void;
+  onGroupSelection?: () => void;
+  onUngroupSelection?: () => void;
+  onMoveSelection?: (delta: { x: number; y: number }) => void;
+  onDuplicateSelection?: () => void;
+  onDeleteSelection?: () => void;
 }) {
   // Space key toggles play/pause when focused on the canvas
   useEffect(() => {
@@ -89,12 +98,20 @@ export function PreviewStage({
             onPlayToggle={onPlayToggle}
             showControls={false}
             selectedOverlayId={selectedOverlayId}
+            selectedOverlayIds={selectedOverlayIds}
+            canGroupSelection={canGroupSelection}
+            canUngroupSelection={canUngroupSelection}
             onSelectOverlay={onSelectOverlay}
             onOverlayLayoutChange={onOverlayLayoutChange}
             onInlineTextChange={onInlineTextChange}
             onOverlayStyleChange={onOverlayStyleChange}
             onDuplicateOverlay={onDuplicateOverlay}
             onDeleteOverlay={onDeleteOverlay}
+            onGroupSelection={onGroupSelection}
+            onUngroupSelection={onUngroupSelection}
+            onMoveSelection={onMoveSelection}
+            onDuplicateSelection={onDuplicateSelection}
+            onDeleteSelection={onDeleteSelection}
           />
         </div>
       </div>

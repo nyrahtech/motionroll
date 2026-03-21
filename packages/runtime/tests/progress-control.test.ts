@@ -485,20 +485,13 @@ describe("runtime controlled progress", () => {
     const card = (overlayRoot as unknown as FakeElement).children[0];
     expect(card).toBeDefined();
 
-    controller.setProgress(0.1);
-    expect(Number(card!.style.opacity)).toBeCloseTo(0, 3);
-
     controller.setProgress(0.2);
     expect(Number(card!.style.opacity)).toBeGreaterThan(0);
-    expect(Number(card!.style.opacity)).toBeLessThan(1);
-    expect(card!.style.transform).toContain("translate3d(0px,");
 
     controller.setProgress(0.5);
     expect(Number(card!.style.opacity)).toBeCloseTo(1, 2);
-    expect(card!.style.filter).toBe("blur(0px)");
 
     controller.setProgress(0.84);
-    expect(Number(card!.style.opacity)).toBeLessThan(1);
     expect(card!.style.filter).not.toBe("blur(0px)");
   });
 

@@ -44,7 +44,13 @@ export function buildProjectDraftDocument(
     }));
   const layerCount = Math.max(
     1,
-    overlays.reduce((maxLayer, overlay) => Math.max(maxLayer, overlay.content.layer ?? 0), -1) + 1,
+    overlays.reduce(
+      (maxLayer, overlay) =>
+        overlay.content.parentGroupId
+          ? maxLayer
+          : Math.max(maxLayer, overlay.content.layer ?? 0),
+      -1,
+    ) + 1,
   );
 
   return ProjectDraftDocumentSchema.parse({

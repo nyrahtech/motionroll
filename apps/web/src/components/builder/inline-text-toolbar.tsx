@@ -7,7 +7,9 @@ import {
   Bold,
   Copy,
   Italic,
+  Layers3,
   Trash2,
+  Ungroup,
   Underline,
 } from "lucide-react";
 import { ColorPicker } from "@/components/ui/color-picker";
@@ -41,6 +43,10 @@ type Props = {
     underline: boolean;
     textAlign: "start" | "center" | "end";
   }>) => void;
+  canGroup?: boolean;
+  canUngroup?: boolean;
+  onGroup?: () => void;
+  onUngroup?: () => void;
   onDuplicate?: () => void;
   onDelete?: () => void;
 };
@@ -58,6 +64,10 @@ export function InlineTextToolbar({
   textAlign = "start",
   isTextStyle = true,
   onChange,
+  canGroup = false,
+  canUngroup = false,
+  onGroup,
+  onUngroup,
   onDuplicate,
   onDelete,
   maxWidth,
@@ -67,6 +77,7 @@ export function InlineTextToolbar({
   const activeBtn = "text-[var(--editor-accent)]";
   const dimBtn = "text-[var(--editor-text-dim)]";
   const dividerClassName = "mx-0.5 h-5 w-px";
+  const showActions = Boolean(canGroup || canUngroup || onDuplicate || onDelete);
 
   return (
     <div
@@ -192,7 +203,33 @@ export function InlineTextToolbar({
         </>
       ) : null}
 
-      {isTextStyle ? (
+      {isTextStyle && showActions ? (
+        <div className={dividerClassName} style={{ background: "var(--editor-border)" }} />
+      ) : null}
+
+      {onGroup ? (
+        <button
+          type="button"
+          className={cn(btn, canGroup ? dimBtn : "cursor-default opacity-45 text-[var(--editor-text-dim)] hover:bg-transparent hover:text-[var(--editor-text-dim)]")}
+          onClick={canGroup ? onGroup : undefined}
+          title="Group selected items"
+          disabled={!canGroup}
+        >
+          <Layers3 className="h-4 w-4" />
+        </button>
+      ) : null}
+      {onUngroup ? (
+        <button
+          type="button"
+          className={cn(btn, canUngroup ? dimBtn : "cursor-default opacity-45 text-[var(--editor-text-dim)] hover:bg-transparent hover:text-[var(--editor-text-dim)]")}
+          onClick={canUngroup ? onUngroup : undefined}
+          title="Ungroup selected item"
+          disabled={!canUngroup}
+        >
+          <Ungroup className="h-4 w-4" />
+        </button>
+      ) : null}
+      {(onGroup || onUngroup) && (onDuplicate || onDelete) ? (
         <div className={dividerClassName} style={{ background: "var(--editor-border)" }} />
       ) : null}
 

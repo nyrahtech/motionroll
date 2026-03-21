@@ -12,6 +12,27 @@ import { OverlayManipulator } from "./overlay-manipulator";
 const DESIGN_STAGE_WIDTH = 1440;
 const DESIGN_STAGE_HEIGHT = 810;
 
+function getOverlayPixelPlacement(
+  overlay: ProjectManifest["sections"][number]["overlays"][number],
+  container: HTMLElement,
+  scale: number,
+) {
+  const layout = overlay.content.layout;
+  const width = Math.round((layout?.width ?? 420) * scale);
+  const height = layout?.height ? Math.round(layout.height * scale) : undefined;
+  const centerAligned = overlay.content.align === "center";
+  const anchorLeft = (layout?.x ?? (centerAligned ? 0.5 : 0.08)) * Math.max(container.clientWidth, 1);
+  const anchorTop = (layout?.y ?? (centerAligned ? 0.5 : 0.12)) * Math.max(container.clientHeight, 1);
+  return {
+    width,
+    height,
+    anchorLeft,
+    anchorTop,
+    left: centerAligned ? anchorLeft - width / 2 : anchorLeft,
+    top: centerAligned ? anchorTop - (height ?? 0) / 2 : anchorTop,
+  };
+}
+
 type RuntimePreviewProps = {
   manifest: ProjectManifest;
   mode?: "desktop" | "mobile";
@@ -21,7 +42,7 @@ type RuntimePreviewProps = {
   onPlayheadChange?: (progress: number) => void;
   onModeChange?: (mode: "desktop" | "mobile") => void;
   onPlayToggle?: () => void;
-  onSelectOverlay?: (overlayId: string) => void;
+  onSelectOverlay?: (overlayId: string, options?: { additive?: boolean }) => void;
   onOverlayLayoutChange?: (
     overlayId: string,
     layout: Partial<{ x: number; y: number; width: number; height: number }>,
@@ -43,9 +64,17 @@ type RuntimePreviewProps = {
   onDuplicateOverlay?: (overlayId: string) => void;
   onDeleteOverlay?: (overlayId: string) => void;
   selectedOverlayId?: string;
+  selectedOverlayIds?: string[];
+  canGroupSelection?: boolean;
+  canUngroupSelection?: boolean;
   showControls?: boolean;
   className?: string;
   stageClassName?: string;
+  onGroupSelection?: () => void;
+  onUngroupSelection?: () => void;
+  onMoveSelection?: (delta: { x: number; y: number }) => void;
+  onDuplicateSelection?: () => void;
+  onDeleteSelection?: () => void;
 };
 
 export function RuntimePreview({
@@ -64,9 +93,17 @@ export function RuntimePreview({
   onDuplicateOverlay,
   onDeleteOverlay,
   selectedOverlayId,
+  selectedOverlayIds,
+  canGroupSelection = false,
+  canUngroupSelection = false,
   showControls = true,
   className,
   stageClassName,
+  onGroupSelection,
+  onUngroupSelection,
+  onMoveSelection,
+  onDuplicateSelection,
+  onDeleteSelection,
 }: RuntimePreviewProps) {
   // ── Refs ───────────────────────────────────────────────────────────────
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -201,7 +238,9 @@ export function RuntimePreview({
         if (child.dataset.state !== "active") return;
         e.preventDefault();
         e.stopPropagation();
-        onSelectOverlay?.(overlayId);
+        onSelectOverlay?.(overlayId, {
+          additive: (e as MouseEvent).metaKey || (e as MouseEvent).ctrlKey,
+        });
       };
       child.style.cursor = child.dataset.state === "active" ? "pointer" : "";
 
@@ -320,7 +359,9 @@ export function RuntimePreview({
       }
 
       if (overlayRoot instanceof HTMLElement) {
-        const orderedOverlays = [...sec.overlays].sort(
+        const orderedOverlays = [...sec.overlays]
+          .filter((overlay) => !overlay.content.parentGroupId)
+          .sort(
           (left, right) => (left.content.layer ?? 0) - (right.content.layer ?? 0),
         );
 
@@ -339,21 +380,35 @@ export function RuntimePreview({
         const layout = overlay.content.layout;
         const style  = overlay.content.style;
         const bg     = overlay.content.background;
+        const placement = getOverlayPixelPlacement(overlay, container, scale);
+        const parentOverlay = overlay.content.parentGroupId
+          ? sec.overlays.find((item) => item.id === overlay.content.parentGroupId)
+          : undefined;
+        const parentPlacement = parentOverlay
+          ? getOverlayPixelPlacement(parentOverlay, container, scale)
+          : undefined;
 
         // Geometry
         card.style.position  = "absolute";
-        card.style.left      = `${(layout?.x ?? 0.08) * 100}%`;
-        card.style.top       = `${(layout?.y ?? 0.12) * 100}%`;
+        card.style.left      = overlay.content.align === "center"
+          ? `${Math.round((parentPlacement ? placement.anchorLeft - parentPlacement.left : placement.anchorLeft))}px`
+          : `${Math.round((parentPlacement ? placement.left - parentPlacement.left : placement.left))}px`;
+        card.style.top       = overlay.content.align === "center"
+          ? `${Math.round((parentPlacement ? placement.anchorTop - parentPlacement.top : placement.anchorTop))}px`
+          : `${Math.round((parentPlacement ? placement.top - parentPlacement.top : placement.top))}px`;
         card.style.right     = "auto";
         card.style.bottom    = "auto";
-        card.style.width     = `${Math.round((layout?.width ?? 420) * scale)}px`;
-        card.style.minHeight = layout?.height ? `${Math.round(layout.height * scale)}px` : "";
-        card.style.height    = layout?.height ? `${Math.round(layout.height * scale)}px` : "";
-        card.style.maxWidth  = `${Math.round((style?.maxWidth ?? layout?.width ?? 420) * scale)}px`;
+        card.style.width     = `${placement.width}px`;
+        card.style.minHeight = placement.height ? `${placement.height}px` : "";
+        card.style.height    = placement.height ? `${placement.height}px` : "";
+        card.style.maxWidth  = overlay.content.type === "group"
+          ? `${placement.width}px`
+          : `${Math.round((style?.maxWidth ?? layout?.width ?? 420) * scale)}px`;
         card.style.zIndex    = String(100 + (overlay.content.layer ?? 0));
         card.style.transform = overlay.content.align === "center"
           ? "translate3d(-50%,-50%,0)"
           : "translate3d(0,0,0)";
+        card.style.overflow = overlay.content.type === "group" ? "visible" : "";
 
         if (!layout) {
           card.style.left   = overlay.content.align === "center" ? "50%" : `${Math.round(32 * scale)}px`;
@@ -363,15 +418,27 @@ export function RuntimePreview({
 
         // Card visuals
         card.style.opacity        = String(style?.opacity ?? 1);
-        card.style.padding        = `${Math.round((bg?.paddingY ?? 14) * scale)}px ${Math.round((bg?.paddingX ?? 18) * scale)}px`;
+        card.style.padding        = overlay.content.type === "group"
+          ? "0px"
+          : `${Math.round((bg?.paddingY ?? 14) * scale)}px ${Math.round((bg?.paddingX ?? 18) * scale)}px`;
         card.style.borderRadius   = `${bg?.radius ?? 14}px`;
         card.style.borderWidth    = bg?.enabled ? "1px" : "0";
-        card.style.borderStyle    = "solid";
-        card.style.borderColor    = withOpacity(bg?.borderColor ?? "#d6f6ff", bg?.borderOpacity ?? 0);
+        card.style.borderStyle    = overlay.content.type === "group" ? "dashed" : "solid";
+        card.style.borderColor    = withOpacity(
+          bg?.borderColor ?? "#d6f6ff",
+          bg?.borderOpacity ?? (overlay.content.type === "group" ? 0.18 : 0),
+        );
         card.style.background     = bg?.enabled
           ? withOpacity(bg.color ?? "#0d1016", bg.opacity ?? 0.82)
+          : overlay.content.type === "group"
+            ? "rgba(205,239,255,0.035)"
           : "transparent";
+        card.style.borderWidth    = bg?.enabled || overlay.content.type === "group" ? "1px" : "0";
         card.style.backdropFilter = bg?.enabled ? "blur(18px)" : "none";
+
+        if (overlay.content.type === "group") {
+          continue;
+        }
 
         // Text styles
         const textAlign = style?.textAlign === "start" ? "left"
@@ -514,6 +581,21 @@ export function RuntimePreview({
               : "relative min-h-screen bg-[var(--panel-bg-preview)]",
           stageClassName,
         )}
+        onClick={(event) => {
+          const target = event.target as HTMLElement | null;
+          if (!target) {
+            return;
+          }
+          if (target.closest("[data-overlay-id]") || target.closest("[data-overlay-selection-chrome]")) {
+            return;
+          }
+          const editing =
+            document.activeElement &&
+            (document.activeElement as HTMLElement).contentEditable === "true";
+          if (!editing) {
+            onSelectOverlay?.("");
+          }
+        }}
       >
         <div
           ref={mountNodeRef}
@@ -545,14 +627,38 @@ export function RuntimePreview({
             key={selectedOverlayId}
             overlay={selectedOverlay}
             selectedOverlayId={selectedOverlayId}
+            selectedOverlayIds={selectedOverlayIds}
+            selectionOverlays={
+              selectedOverlayIds?.length
+                ? section?.overlays.filter((overlay) => (
+                  selectedOverlayIds.includes(overlay.id)
+                  || (
+                    overlay.content.parentGroupId !== undefined
+                    && selectedOverlayIds.includes(overlay.content.parentGroupId)
+                  )
+                ))
+                : selectedOverlay && selectedOverlay.content.type === "group"
+                  ? section?.overlays.filter((overlay) => (
+                    overlay.id === selectedOverlay.id || overlay.content.parentGroupId === selectedOverlay.id
+                  ))
+                  : undefined
+            }
             containerRef={containerRef}
             selectedStyle={selectedStyle}
             isTextStyle={isSelectedText}
+            allowLayoutEditing={!selectedOverlay.content.parentGroupId}
             onLayoutChange={(layout, options) => { onOverlayLayoutChange?.(selectedOverlayId, layout, options); }}
             onStyleChange={(changes) => { onOverlayStyleChange?.(selectedOverlayId, changes); }}
             onEdit={() => { onSelectOverlay?.(selectedOverlayId); }}
+            canGroupSelection={canGroupSelection}
+            canUngroupSelection={canUngroupSelection}
+            onGroupSelection={onGroupSelection}
+            onUngroupSelection={onUngroupSelection}
             onDuplicate={() => { onDuplicateOverlay?.(selectedOverlayId); }}
             onDelete={() => { onDeleteOverlay?.(selectedOverlayId); }}
+            onMoveSelection={onMoveSelection}
+            onDuplicateSelection={onDuplicateSelection}
+            onDeleteSelection={onDeleteSelection}
             onInteractingChange={setInteracting}
           />
         ) : null}

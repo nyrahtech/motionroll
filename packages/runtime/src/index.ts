@@ -279,6 +279,30 @@ function getStageScale(stageRoot: HTMLElement) {
   return clamp(Math.min(width / DESIGN_STAGE_WIDTH, height / DESIGN_STAGE_HEIGHT), 0.35, 2);
 }
 
+function getOverlayPixelPlacement(
+  overlay: OverlayDefinition,
+  stageRoot: HTMLElement,
+  stageScale: number,
+) {
+  const layout = overlay.content.layout;
+  const stageWidth = stageRoot.clientWidth || Math.round(DESIGN_STAGE_WIDTH * stageScale);
+  const stageHeight = stageRoot.clientHeight || Math.round(DESIGN_STAGE_HEIGHT * stageScale);
+  const width = Math.round((layout?.width ?? 420) * stageScale);
+  const height = layout?.height ? Math.round(layout.height * stageScale) : undefined;
+  const centerAligned = overlay.content.align === "center";
+  const anchorLeft = (layout?.x ?? (centerAligned ? 0.5 : 0.08)) * stageWidth;
+  const anchorTop = (layout?.y ?? (centerAligned ? 0.5 : 0.12)) * stageHeight;
+
+  return {
+    width,
+    height,
+    anchorLeft,
+    anchorTop,
+    left: centerAligned ? anchorLeft - width / 2 : anchorLeft,
+    top: centerAligned ? anchorTop - (height ?? 0) / 2 : anchorTop,
+  };
+}
+
 function getSectionDurationSeconds(section: ProjectSectionManifest) {
   const totalFrameCount = Math.max(
     section.progressMapping.frameCount,
@@ -517,30 +541,46 @@ function getOverlayAnimationState(
 function applyOverlayCardStyles(
   card: HTMLElement,
   overlay: OverlayDefinition,
+  stageRoot: HTMLElement,
   mode: "desktop" | "mobile",
   stageScale = 1,
+  parentPlacement?: ReturnType<typeof getOverlayPixelPlacement>,
 ) {
   const layout = overlay.content.layout;
   const style = overlay.content.style;
   const background = overlay.content.background;
   const defaultTop = `${Math.round(32 * stageScale)}px`;
   const defaultLeft = `${Math.round(32 * stageScale)}px`;
+  const placement = getOverlayPixelPlacement(overlay, stageRoot, stageScale);
+  const localLeft = parentPlacement ? placement.left - parentPlacement.left : placement.left;
+  const localTop = parentPlacement ? placement.top - parentPlacement.top : placement.top;
+  const localAnchorLeft = parentPlacement
+    ? placement.anchorLeft - parentPlacement.left
+    : placement.anchorLeft;
+  const localAnchorTop = parentPlacement
+    ? placement.anchorTop - parentPlacement.top
+    : placement.anchorTop;
 
   card.style.position = "absolute";
-  card.style.left = `${(layout?.x ?? 0.08) * 100}%`;
-  card.style.top = `${(layout?.y ?? 0.12) * 100}%`;
+  card.style.left =
+    overlay.content.align === "center" ? `${Math.round(localAnchorLeft)}px` : `${Math.round(localLeft)}px`;
+  card.style.top =
+    overlay.content.align === "center" ? `${Math.round(localAnchorTop)}px` : `${Math.round(localTop)}px`;
   card.style.right = "auto";
   card.style.bottom = "auto";
-  card.style.width = `${Math.round((layout?.width ?? 420) * stageScale)}px`;
-  if (layout?.height) {
-    const nextHeight = `${Math.round(layout.height * stageScale)}px`;
+  card.style.width = `${placement.width}px`;
+  if (placement.height) {
+    const nextHeight = `${placement.height}px`;
     card.style.minHeight = nextHeight;
     card.style.height = nextHeight;
   } else {
     card.style.minHeight = "";
     card.style.height = "";
   }
-  card.style.maxWidth = `${Math.round((style?.maxWidth ?? layout?.width ?? 420) * stageScale)}px`;
+  card.style.maxWidth =
+    overlay.content.type === "group"
+      ? `${placement.width}px`
+      : `${Math.round((style?.maxWidth ?? layout?.width ?? 420) * stageScale)}px`;
   card.style.padding = `${Math.round(14 * stageScale)}px ${Math.round(18 * stageScale)}px`;
   card.style.borderRadius = ".85rem";
   card.style.backdropFilter = "blur(18px)";
@@ -552,17 +592,23 @@ function applyOverlayCardStyles(
   card.style.background =
     background?.enabled
       ? withOpacity(background.color ?? "#0d1016", background.opacity ?? 0.82)
-      : "transparent";
+      : overlay.content.type === "group"
+        ? "rgba(205, 239, 255, 0.035)"
+        : "transparent";
   card.style.borderColor = withOpacity(
     background?.borderColor ?? "#d6f6ff",
-    background?.borderOpacity ?? 0,
+    background?.borderOpacity ?? (overlay.content.type === "group" ? 0.18 : 0),
   );
-  card.style.borderWidth = background?.enabled ? "1px" : "0";
-  card.style.borderStyle = "solid";
+  card.style.borderWidth = background?.enabled || overlay.content.type === "group" ? "1px" : "0";
+  card.style.borderStyle = overlay.content.type === "group" ? "dashed" : "solid";
   card.style.borderRadius = `${background?.radius ?? 14}px`;
-  card.style.padding = `${Math.round((background?.paddingY ?? 14) * stageScale)}px ${Math.round((background?.paddingX ?? 18) * stageScale)}px`;
+  card.style.padding =
+    overlay.content.type === "group"
+      ? "0px"
+      : `${Math.round((background?.paddingY ?? 14) * stageScale)}px ${Math.round((background?.paddingX ?? 18) * stageScale)}px`;
   card.style.backdropFilter =
     background?.enabled ? "blur(18px)" : "none";
+  card.style.overflow = overlay.content.type === "group" ? "visible" : "";
 
   if (!layout) {
     card.style.left = overlay.content.align === "center" ? "50%" : defaultLeft;
@@ -576,6 +622,10 @@ function applyOverlayContentStyles(
   overlay: OverlayDefinition,
   stageScale: number,
 ) {
+  if (overlay.content.type === "group") {
+    return;
+  }
+
   const textBlock = card.querySelector<HTMLElement>('[data-text-field="text"]');
   const media = card.querySelector<HTMLElement>("[data-media-field='media']");
   const actionLink = card.querySelector<HTMLElement>("a");
@@ -686,14 +736,20 @@ function syncOverlayPresentationStyles(
   const stageScale = getStageScale(stageRoot);
   const overlayMap = new Map(section.overlays.map((overlay) => [overlay.id, overlay] as const));
 
-  for (const child of Array.from(overlayRoot.children)) {
+  for (const child of Array.from(overlayRoot.querySelectorAll<HTMLElement>("[data-overlay-id]"))) {
     const card = child as HTMLElement;
     const overlay = overlayMap.get(card.dataset.overlayId ?? "");
     if (!overlay) {
       continue;
     }
 
-    applyOverlayCardStyles(card, overlay, mode, stageScale);
+    const parentOverlayId = overlay.content.parentGroupId;
+    const parentOverlay = parentOverlayId ? overlayMap.get(parentOverlayId) : undefined;
+    const parentPlacement = parentOverlay
+      ? getOverlayPixelPlacement(parentOverlay, stageRoot, stageScale)
+      : undefined;
+
+    applyOverlayCardStyles(card, overlay, stageRoot, mode, stageScale, parentPlacement);
     applyOverlayContentStyles(card, overlay, stageScale);
   }
 }
@@ -709,7 +765,7 @@ function renderOverlayState(
   root.dataset.activeOverlayId = activeOverlayId ?? "";
   const overlayMap = new Map(section.overlays.map((item) => [item.id, item] as const));
 
-  for (const element of root.children) {
+  for (const element of Array.from(root.querySelectorAll<HTMLElement>("[data-overlay-id]"))) {
     const overlayElement = element as HTMLElement;
     const overlay = overlayMap.get(overlayElement.dataset.overlayId ?? "");
     if (!overlay) {
@@ -760,6 +816,7 @@ function ensureOverlayRoot(
   }
 
   if (overlayRoot.children.length === 0) {
+    const overlayElements = new Map<string, HTMLElement>();
     const orderedOverlays = getOverlaysInStackOrder(section.overlays);
     for (const overlay of orderedOverlays) {
       const card = document.createElement("article");
@@ -775,9 +832,9 @@ function ensureOverlayRoot(
       card.style.pointerEvents = "none";
       card.style.willChange = "transform, opacity, filter";
       card.style.zIndex = String(100 + (overlay.content.layer ?? 0));
-      applyOverlayCardStyles(card, overlay, mode);
+      applyOverlayCardStyles(card, overlay, container, mode);
 
-      if (overlay.content.type !== "text") {
+      if (overlay.content.type !== "text" && overlay.content.type !== "group") {
         appendMediaElement(card, overlay, mode);
       }
 
@@ -818,11 +875,21 @@ function ensureOverlayRoot(
         }
       }
 
-      overlayRoot.appendChild(card);
+      overlayElements.set(overlay.id, card);
+    }
+
+    for (const overlay of orderedOverlays) {
+      const card = overlayElements.get(overlay.id);
+      if (!card) continue;
+      const parent =
+        overlay.content.parentGroupId
+          ? overlayElements.get(overlay.content.parentGroupId) ?? overlayRoot
+          : overlayRoot;
+      parent.appendChild(card);
     }
   }
 
-  for (const overlay of getOverlaysInStackOrder(section.overlays)) {
+  for (const overlay of getOverlaysInStackOrder(section.overlays).filter((item) => !item.content.parentGroupId)) {
     const card = overlayRoot.querySelector<HTMLElement>(`[data-overlay-id="${overlay.id}"]`);
     if (!card) continue;
     card.style.zIndex = String(100 + (overlay.content.layer ?? 0));

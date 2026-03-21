@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Ellipsis,
+  Layers3,
   RotateCcw,
   RotateCw,
   GripVertical,
@@ -14,6 +15,7 @@ import {
   SkipBack,
   SkipForward,
   Trash2,
+  Ungroup,
 } from "lucide-react";
 import { clampProgress, progressToFrameBoundaryIndex } from "@motionroll/shared";
 import {
@@ -31,16 +33,21 @@ import { getClipInsertionIndex, getLayerDragGhostPosition, resolveLayerTrackInde
 type TimelinePanelProps = {
   tracks: TimelineTrackModel[];
   selection: TimelineSelection;
+  selectedClipIds: string[];
   playhead: number;
   durationSeconds: number;
   isPlaying: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  canGroupSelection: boolean;
+  canUngroupSelection: boolean;
   onPlayToggle: () => void;
   onUndo: () => void;
   onRedo: () => void;
+  onGroupSelection: () => void;
+  onUngroupSelection: () => void;
   onPlayheadChange: (value: number) => void;
-  onSelectionChange: (selection: TimelineSelection) => void;
+  onSelectionChange: (selection: TimelineSelection, options?: { additive?: boolean }) => void;
   onClipTimingChange: (clipId: string, timing: { start: number; end: number }) => void;
   onCommitClipMove: (move: { clipId: string; start: number; end: number; targetLayer?: number }) => void;
   onAddLayer: () => void;
@@ -178,18 +185,23 @@ function formatFrame(progress: number, durationSeconds: number) {
 }
 
 function PlaybackStrip({
-  playhead, duration, isPlaying, canUndo, canRedo, onFrameChange, onTogglePlay, onUndo, onRedo,
+  playhead, duration, isPlaying, canUndo, canRedo, canGroupSelection, canUngroupSelection,
+  onFrameChange, onTogglePlay, onUndo, onRedo, onGroupSelection, onUngroupSelection,
 }: {
   playhead: number; duration: number; isPlaying: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  canGroupSelection: boolean;
+  canUngroupSelection: boolean;
   onFrameChange: (p: number) => void;
   onTogglePlay: () => void;
   onUndo: () => void;
   onRedo: () => void;
+  onGroupSelection: () => void;
+  onUngroupSelection: () => void;
 }) {
   const currentSec = playhead * duration;
-  const ib = "flex h-8 w-8 items-center justify-center rounded-md text-[var(--editor-text-dim)] transition-colors hover:bg-[var(--editor-hover)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]";
+  const ib = "flex h-8 w-8 items-center justify-center rounded-md text-[var(--editor-text-dim)] transition-colors hover:bg-[var(--editor-hover)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)] disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-[var(--editor-text-dim)]";
   return (
     <div className="grid h-12 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b px-4" style={{ background: "var(--editor-panel)", borderColor: "var(--editor-border)" }}>
       <div className="flex min-w-0 items-center gap-1.5 justify-self-start">
@@ -198,6 +210,26 @@ function PlaybackStrip({
         </button>
         <button type="button" onClick={onRedo} disabled={!canRedo} className={ib} title="Redo">
           <RotateCw className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onGroupSelection}
+          disabled={!canGroupSelection}
+          className={ib}
+          title="Group selected items"
+          aria-label="Group selected items"
+        >
+          <Layers3 className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onUngroupSelection}
+          disabled={!canUngroupSelection}
+          className={ib}
+          title="Ungroup selected item"
+          aria-label="Ungroup selected item"
+        >
+          <Ungroup className="h-4 w-4" />
         </button>
       </div>
       <div className="flex items-center gap-1 justify-self-center">
@@ -221,8 +253,8 @@ function PlaybackStrip({
 }
 
 export function TimelinePanel({
-  tracks, selection, playhead, durationSeconds, isPlaying, canUndo, canRedo,
-  onPlayToggle, onUndo, onRedo, onPlayheadChange, onSelectionChange,
+  tracks, selection, selectedClipIds, playhead, durationSeconds, isPlaying, canUndo, canRedo,
+  canGroupSelection, canUngroupSelection, onPlayToggle, onUndo, onRedo, onGroupSelection, onUngroupSelection, onPlayheadChange, onSelectionChange,
   onClipTimingChange, onCommitClipMove, onAddLayer, onDeleteLayer, onAddAtPlayhead, onDuplicateClip, onDeleteClip,
   onMoveClipToLayer,
   onMoveClipToNewLayer,
@@ -678,7 +710,10 @@ export function TimelinePanel({
   function beginClipDrag(e: React.MouseEvent, type: Exclude<ClipDragState, null>["type"], clip: TimelineClipModel, layerTrackIndex?: number) {
     e.preventDefault();
     e.stopPropagation();
-    onSelectionChange({ clipId: clip.id, trackType: clip.trackType });
+    onSelectionChange(
+      { clipId: clip.id, trackType: clip.trackType },
+      { additive: e.metaKey || e.ctrlKey },
+    );
 
     clipDragStateRef.current = {
       type,
@@ -920,6 +955,8 @@ export function TimelinePanel({
           const left = clipStart * totalW;
           const width = Math.max(14, (clipEnd - clipStart) * totalW);
           const isSelected = selection?.clipId === clip.id;
+          const isMultiSelected = selectedClipIds.includes(clip.id);
+          const isSelectionVisible = isSelected || isMultiSelected;
           const frameStrip = opts?.frameStrip ? frameStripCache.get(clip.id) : undefined;
           const transitionLabel = clip.metadata?.transitionPreset?.replace(/-/g, " ") ?? null;
           const isMoveDragging = draggingClipId === clip.id && draggingClipMode === "move";
@@ -935,11 +972,20 @@ export function TimelinePanel({
                   left,
                   width,
                   zIndex: stackZIndex,
-                  background: frameStrip ? "#0c1118" : isSelected ? "rgba(103,232,249,0.18)" : opts?.tint ?? "rgba(255,255,255,0.05)",
-                  borderColor: isSelected ? "var(--editor-accent)" : "rgba(255,255,255,0.08)",
+                  background: frameStrip
+                    ? "#0c1118"
+                    : clip.metadata?.isGroup
+                      ? isSelectionVisible
+                        ? "rgba(103,232,249,0.16)"
+                        : "rgba(205,239,255,0.08)"
+                      : isSelected
+                        ? "rgba(103,232,249,0.18)"
+                        : opts?.tint ?? "rgba(255,255,255,0.05)",
+                  borderColor: isSelectionVisible ? "var(--editor-accent)" : "rgba(255,255,255,0.08)",
+                  borderStyle: clip.metadata?.isGroup ? "dashed" : "solid",
                   boxShadow: isMoveDragging
                     ? "0 0 0 1px rgba(103,232,249,0.45), 0 12px 30px rgba(0,0,0,0.28)"
-                    : isSelected
+                    : isSelectionVisible
                       ? "0 0 0 1px rgba(103,232,249,0.25), 0 8px 24px rgba(0,0,0,0.22)"
                       : "inset 0 1px 0 rgba(255,255,255,0.02)",
                   color: "var(--editor-text)",
@@ -953,7 +999,6 @@ export function TimelinePanel({
                     return;
                   }
                   ev.stopPropagation();
-                  onSelectionChange({ clipId: clip.id, trackType: track.type });
                   const rect = ev.currentTarget.getBoundingClientRect();
                   const local = clampProgress((ev.clientX - rect.left) / Math.max(rect.width, 1));
                   onPlayheadChange(clampProgress(clip.start + local * (clip.end - clip.start)));
@@ -963,9 +1008,23 @@ export function TimelinePanel({
                 {frameStrip ? renderFrameStrip(frameStrip, clip) : null}
                 <div className="relative z-[1] flex h-full items-center justify-between gap-2 px-2">
                   <div className="min-w-0">
-                    <span className="block truncate text-xs font-medium text-white">{clip.label ?? clip.id}</span>
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      {clip.metadata?.isGroup ? (
+                        <span
+                          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md"
+                          style={{ background: "rgba(205,239,255,0.08)", color: "var(--editor-accent)" }}
+                        >
+                          <Layers3 className="h-3 w-3" />
+                        </span>
+                      ) : null}
+                      <span className="block truncate text-xs font-medium text-white">{clip.label ?? clip.id}</span>
+                    </div>
                     {transitionLabel ? (
                       <span className="block truncate text-[10px] uppercase tracking-[0.08em]" style={{ color: "rgba(103,232,249,0.78)" }}>{transitionLabel}</span>
+                    ) : clip.metadata?.isGroup ? (
+                      <span className="block truncate text-[10px] uppercase tracking-[0.08em]" style={{ color: "rgba(255,255,255,0.56)" }}>
+                        {clip.metadata.childCount ?? 0} items
+                      </span>
                     ) : !frameStrip && clip.metadata?.contentType ? (
                       <span className="block truncate text-[10px] uppercase tracking-[0.08em]" style={{ color: "rgba(255,255,255,0.56)" }}>{clip.metadata.contentType}</span>
                     ) : null}
@@ -975,7 +1034,7 @@ export function TimelinePanel({
                       <button
                         type="button"
                         className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgba(10,10,12,0.45)] text-[var(--editor-text-dim)] opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[rgba(255,255,255,0.08)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]"
-                        style={{ opacity: isSelected ? 1 : undefined }}
+                        style={{ opacity: isSelectionVisible ? 1 : undefined }}
                         onClick={(ev) => ev.stopPropagation()}
                       >
                         <Ellipsis className="h-3.5 w-3.5" />
@@ -997,6 +1056,13 @@ export function TimelinePanel({
                             </DropdownMenuItem>
                           ))}
                           <DropdownMenuItem onClick={() => onSetClipTransitionPreset(clip.id, undefined)}>None</DropdownMenuItem>
+                          {canGroupSelection ? <DropdownMenuSeparator /> : null}
+                          {canGroupSelection ? (
+                            <DropdownMenuItem onClick={onGroupSelection}>Group</DropdownMenuItem>
+                          ) : null}
+                          {clip.metadata?.isGroup ? (
+                            <DropdownMenuItem onClick={onUngroupSelection}>Ungroup</DropdownMenuItem>
+                          ) : null}
                           {layerTracks.length > 1 ? <DropdownMenuSeparator /> : null}
                           <DropdownMenuItem onClick={() => onMoveClipToNewLayer(clip.id)}>
                             Move to New layer
@@ -1059,10 +1125,14 @@ export function TimelinePanel({
         isPlaying={isPlaying}
         canUndo={canUndo}
         canRedo={canRedo}
+        canGroupSelection={canGroupSelection}
+        canUngroupSelection={canUngroupSelection}
         onFrameChange={onPlayheadChange}
         onTogglePlay={onPlayToggle}
         onUndo={onUndo}
         onRedo={onRedo}
+        onGroupSelection={onGroupSelection}
+        onUngroupSelection={onUngroupSelection}
       />
 
       <div

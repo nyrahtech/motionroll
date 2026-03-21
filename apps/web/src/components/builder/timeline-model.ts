@@ -33,6 +33,8 @@ export type TimelineClipModel = {
     transitionPreset?: string;
     contentType?: string;
     layerIndex?: number;
+    isGroup?: boolean;
+    childCount?: number;
   };
 };
 
@@ -274,10 +276,15 @@ function createOverlayClip(
   overlay: OverlayDefinition,
   index: number,
   layerIndex: number,
+  childCount = 0,
 ): TimelineClipModel {
   const label =
-    overlay.content.text?.split(/\r?\n/).find((line: string) => line.trim().length > 0) ??
-    `Layer ${String(index + 1).padStart(2, "0")}`;
+    overlay.content.type === "group"
+      ? childCount > 0
+        ? `Group (${childCount})`
+        : "Group"
+      : overlay.content.text?.split(/\r?\n/).find((line: string) => line.trim().length > 0) ??
+        `Layer ${String(index + 1).padStart(2, "0")}`;
 
   return {
     id: `layer-${overlay.id}`,
@@ -293,6 +300,8 @@ function createOverlayClip(
       transitionPreset: overlay.content.transition?.preset,
       contentType: overlay.content.type ?? "text",
       layerIndex,
+      isGroup: overlay.content.type === "group",
+      childCount,
     },
   };
 }
@@ -333,7 +342,8 @@ export function deriveTimelineTracks(
   };
 
   const overlaysByLayer = new Map<number, OverlayDefinition[]>();
-  for (const overlay of section.overlays) {
+  const rootOverlays = section.overlays.filter((overlay) => !overlay.content.parentGroupId);
+  for (const overlay of rootOverlays) {
     const layerIndex = overlay.content.layer ?? 0;
     const existing = overlaysByLayer.get(layerIndex);
     if (existing) {
@@ -354,7 +364,14 @@ export function deriveTimelineTracks(
       id: `track-layer-${layerIndex}`,
       label: `Layer ${String(layerIndex + 1).padStart(2, "0")}`,
       type: "layer" as const,
-      clips: (overlaysByLayer.get(layerIndex) ?? []).map((overlay, index) => createOverlayClip(overlay, index, layerIndex)),
+      clips: (overlaysByLayer.get(layerIndex) ?? []).map((overlay, index) =>
+        createOverlayClip(
+          overlay,
+          index,
+          layerIndex,
+          section.overlays.filter((child) => child.content.parentGroupId === overlay.id).length,
+        ),
+      ),
       metadata: {
         layerIndex,
       },

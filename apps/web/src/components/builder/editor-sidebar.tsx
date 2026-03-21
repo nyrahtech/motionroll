@@ -7,6 +7,7 @@ import {
   AlignRight,
   Bold,
   Film,
+  Layers3,
   ImagePlus,
   Italic,
   Sparkles,
@@ -35,7 +36,13 @@ type SidebarPanelProps = {
   projectId: string;
   activeContext: SidebarContext;
   selectedOverlay?: OverlayDefinition;
+  selectedGroupChildren?: Array<{ id: string; label: string; type: string }>;
+  canGroupSelection?: boolean;
+  canUngroupSelection?: boolean;
   onContextChange: (context: SidebarContext) => void;
+  onGroupSelection?: () => void;
+  onUngroupSelection?: () => void;
+  onSelectGroupChild?: (overlayId: string) => void;
   onOverlayFieldChange: (field: string, value: string | number) => void;
   onOverlayStyleChange: (field: string, value: string | number | boolean) => void;
   onOverlayStyleLiveChange?: (field: string, value: string | number) => void;
@@ -237,6 +244,10 @@ function Inspector({
   onOverlayStyleLiveChange,
   onOverlayAnimationChange,
   onOverlayTransitionChange,
+  selectedGroupChildren,
+  canUngroupSelection,
+  onUngroupSelection,
+  onSelectGroupChild,
 }: Pick<
   SidebarPanelProps,
   | "selectedOverlay"
@@ -245,6 +256,10 @@ function Inspector({
   | "onOverlayStyleLiveChange"
   | "onOverlayAnimationChange"
   | "onOverlayTransitionChange"
+  | "selectedGroupChildren"
+  | "canUngroupSelection"
+  | "onUngroupSelection"
+  | "onSelectGroupChild"
 >) {
   if (!selectedOverlay) {
     return <EmptyInspector />;
@@ -258,7 +273,37 @@ function Inspector({
   const layout = selectedOverlay.content.layout;
   const isTextual = type === "text";
   const usesMedia = type === "image" || type === "logo" || type === "icon";
+  const isGroup = type === "group";
   const backgroundOpacity = background?.enabled ? (background.opacity ?? 0.82) : 0;
+
+  if (isGroup) {
+    return (
+      <div className="space-y-4">
+        {canUngroupSelection ? (
+          <div className="flex items-center justify-between gap-3">
+            <div className="inline-flex items-center gap-2 text-xs text-[var(--foreground-muted)]">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-[10px] bg-[rgba(205,239,255,0.08)] text-[var(--editor-accent)]">
+                <Layers3 className="h-3.5 w-3.5" />
+              </span>
+              <span>{selectedGroupChildren?.length ?? 0} items</span>
+            </div>
+            <button
+              type="button"
+              onClick={onUngroupSelection}
+              className="focus-ring inline-flex h-8 items-center rounded-[10px] border px-2.5 text-xs font-medium text-white transition-colors hover:bg-[rgba(255,255,255,0.05)]"
+              style={{ borderColor: "rgba(255,255,255,0.08)" }}
+            >
+              Ungroup
+            </button>
+          </div>
+        ) : null}
+
+        <div className="text-xs text-[var(--foreground-muted)]">
+          Grouped items are locked. Move, duplicate, delete, or ungroup to edit them.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -280,12 +325,14 @@ function Inspector({
         </Field>
       ) : null}
 
-      <Field label="Link">
+      {!isGroup ? (
+        <Field label="Link">
         <Input
           value={selectedOverlay.content.linkHref ?? ""}
           onChange={(event) => onOverlayFieldChange("linkHref", event.currentTarget.value)}
         />
-      </Field>
+        </Field>
+      ) : null}
 
       {isTextual ? (
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_112px] sm:items-end">
@@ -474,7 +521,13 @@ export function SidebarPanel({
   projectId,
   activeContext,
   selectedOverlay,
+  selectedGroupChildren,
+  canGroupSelection = false,
+  canUngroupSelection = false,
   onContextChange,
+  onGroupSelection,
+  onUngroupSelection,
+  onSelectGroupChild,
   onOverlayFieldChange,
   onOverlayStyleChange,
   onOverlayStyleLiveChange,
@@ -484,6 +537,8 @@ export function SidebarPanel({
 }: SidebarPanelProps) {
   const showUploadTool = activeContext === "upload";
   const showAiTool = activeContext === "ai";
+  const showInspector = activeContext === "edit";
+  const showGroupAction = canGroupSelection && activeContext === "edit";
 
   return (
     <aside
@@ -529,14 +584,33 @@ export function SidebarPanel({
             </ToolPanel>
           ) : null}
 
-          <Inspector
-            selectedOverlay={selectedOverlay}
-            onOverlayFieldChange={onOverlayFieldChange}
-            onOverlayStyleChange={onOverlayStyleChange}
-            onOverlayStyleLiveChange={onOverlayStyleLiveChange}
-            onOverlayAnimationChange={onOverlayAnimationChange}
-            onOverlayTransitionChange={onOverlayTransitionChange}
-          />
+          {showGroupAction ? (
+            <div className="flex items-center justify-end">
+              <button
+                type="button"
+                onClick={onGroupSelection}
+                className="focus-ring inline-flex h-8 items-center rounded-[10px] border px-2.5 text-xs font-medium text-white transition-colors hover:bg-[rgba(255,255,255,0.05)]"
+                style={{ borderColor: "rgba(255,255,255,0.08)" }}
+              >
+                Group
+              </button>
+            </div>
+          ) : null}
+
+          {showInspector ? (
+            <Inspector
+              selectedOverlay={selectedOverlay}
+              onOverlayFieldChange={onOverlayFieldChange}
+              onOverlayStyleChange={onOverlayStyleChange}
+              onOverlayStyleLiveChange={onOverlayStyleLiveChange}
+              onOverlayAnimationChange={onOverlayAnimationChange}
+              onOverlayTransitionChange={onOverlayTransitionChange}
+              selectedGroupChildren={selectedGroupChildren}
+              canUngroupSelection={canUngroupSelection}
+              onUngroupSelection={onUngroupSelection}
+              onSelectGroupChild={onSelectGroupChild}
+            />
+          ) : null}
         </div>
       </div>
     </aside>

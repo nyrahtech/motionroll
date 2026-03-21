@@ -61,9 +61,20 @@ type HistoryState = {
   future: EditorDraft[];
 };
 
+const DESIGN_STAGE_WIDTH = 1440;
+const DESIGN_STAGE_HEIGHT = 810;
+
+type LayoutChangeOptions = {
+  intent?: "move" | "resize";
+  scaleX?: number;
+  scaleY?: number;
+  styleChanges?: Partial<NonNullable<OverlayDefinition["content"]["style"]>>;
+  backgroundChanges?: Partial<NonNullable<OverlayDefinition["content"]["background"]>>;
+};
+
 function createDefaultOverlay(
   id: string,
-  type: "text" | "image" | "logo" | "icon" | "moment",
+  type: "text" | "image" | "logo" | "icon" | "moment" | "group",
   playhead: number,
   mediaUrl?: string,
 ): HydratedOverlayDefinition {
@@ -83,6 +94,8 @@ function createDefaultOverlay(
       text:
         type === "image" || type === "logo" || type === "icon"
           ? undefined
+          : type === "group"
+            ? undefined
           : type === "moment"
             ? "Moment highlight"
             : "New text block",
@@ -95,7 +108,17 @@ function createDefaultOverlay(
       layout: {
         x: 0.08,
         y: 0.12,
-        width: type === "image" ? 360 : type === "logo" ? 220 : type === "icon" ? 180 : 420,
+        width:
+          type === "image"
+            ? 360
+            : type === "logo"
+              ? 220
+              : type === "icon"
+                ? 180
+                : type === "group"
+                  ? 480
+                  : 420,
+        ...(type === "group" ? { height: 260 } : {}),
       },
       style: {
         fontFamily: "Inter",
@@ -106,7 +129,12 @@ function createDefaultOverlay(
         textAlign: "start",
         color: "#f6f7fb",
         opacity: 1,
-        maxWidth: type === "image" ? 360 : 420,
+        maxWidth:
+          type === "image"
+            ? 360
+            : type === "group"
+              ? 480
+              : 420,
         italic: false,
         underline: false,
         textTransform: "none",
@@ -118,8 +146,8 @@ function createDefaultOverlay(
         color: "#0d1016",
         opacity: 0.82,
         radius: 14,
-        paddingX: 18,
-        paddingY: 14,
+        paddingX: type === "group" ? 0 : 18,
+        paddingY: type === "group" ? 0 : 14,
         borderColor: "#d6f6ff",
         borderOpacity: 0,
       },
@@ -134,6 +162,7 @@ function createDefaultOverlay(
         easing: "ease-in-out",
         duration: 0.4,
       },
+      parentGroupId: undefined,
     },
   };
 }
@@ -216,6 +245,7 @@ function hydrateOverlay(overlay: OverlayDefinition): HydratedOverlayDefinition {
         easing: overlay.content.transition?.easing ?? "ease-in-out",
         duration: overlay.content.transition?.duration ?? 0.4,
       },
+      parentGroupId: overlay.content.parentGroupId,
     },
   };
 }
@@ -233,24 +263,38 @@ function normalizeOverlayLayers<T extends { content: { layer?: number } }>(overl
   });
 }
 
-function getTopLayerIndex<T extends { content: { layer?: number } }>(overlays: T[]) {
-  return overlays.reduce((maxLayer, overlay) => Math.max(maxLayer, overlay.content.layer ?? 0), -1);
+function isGroupOverlay(overlay: Pick<OverlayDefinition, "content">) {
+  return overlay.content.type === "group";
 }
 
-function getRequiredLayerCount<T extends { content: { layer?: number } }>(
+function getRootOverlays<T extends { content: { layer?: number; parentGroupId?: string } }>(overlays: T[]) {
+  return overlays.filter((overlay) => !overlay.content.parentGroupId);
+}
+
+function getTopLayerIndex<T extends { content: { layer?: number; parentGroupId?: string } }>(overlays: T[]) {
+  return getRootOverlays(overlays).reduce(
+    (maxLayer, overlay) => Math.max(maxLayer, overlay.content.layer ?? 0),
+    -1,
+  );
+}
+
+function getRequiredLayerCount<T extends { content: { layer?: number; parentGroupId?: string } }>(
   overlays: T[],
   requestedCount = 1,
 ) {
   return Math.max(1, requestedCount, getTopLayerIndex(overlays) + 1);
 }
 
-function reorderOverlayLayers<T extends { content: { layer?: number } }>(
+function reorderOverlayLayers<T extends { content: { layer?: number; parentGroupId?: string } }>(
   overlays: T[],
   layerCount: number,
   fromRow: number,
   toRow: number,
 ) {
-  const distinctLayers = Array.from({ length: getRequiredLayerCount(overlays, layerCount) }, (_, index) => index).sort((left, right) => right - left);
+  const distinctLayers = Array.from(
+    { length: getRequiredLayerCount(overlays, layerCount) },
+    (_, index) => index,
+  ).sort((left, right) => right - left);
   if (
     fromRow < 0 ||
     toRow < 0 ||
@@ -274,9 +318,207 @@ function reorderOverlayLayers<T extends { content: { layer?: number } }>(
       ...overlay,
       content: {
         ...overlay.content,
-        layer: remappedLayers.get(overlay.content.layer ?? 0) ?? 0,
+        layer:
+          overlay.content.parentGroupId
+            ? overlay.content.layer ?? 0
+            : remappedLayers.get(overlay.content.layer ?? 0) ?? 0,
       },
     })),
+  );
+}
+
+function getOverlayById<T extends { id: string }>(overlays: T[], overlayId: string) {
+  return overlays.find((overlay) => overlay.id === overlayId);
+}
+
+function getDirectGroupChildren<T extends { id: string; content: { parentGroupId?: string } }>(
+  overlays: T[],
+  groupId: string,
+) {
+  return overlays.filter((overlay) => overlay.content.parentGroupId === groupId);
+}
+
+function getRootOverlayId(
+  overlays: Array<Pick<HydratedOverlayDefinition, "id" | "content">>,
+  overlayId: string,
+) {
+  let current = getOverlayById(overlays, overlayId);
+  while (current?.content.parentGroupId) {
+    const parent = getOverlayById(overlays, current.content.parentGroupId);
+    if (!parent) {
+      break;
+    }
+    current = parent;
+  }
+  return current?.id ?? overlayId;
+}
+
+function estimateOverlayHeight(overlay: HydratedOverlayDefinition) {
+  const explicitHeight = overlay.content.layout.height;
+  if (typeof explicitHeight === "number") {
+    return explicitHeight;
+  }
+  switch (overlay.content.type) {
+    case "image":
+      return 220;
+    case "logo":
+      return 80;
+    case "icon":
+      return 64;
+    case "group":
+      return 260;
+    default:
+      return 120;
+  }
+}
+
+function getOverlayAbsoluteBounds(overlay: HydratedOverlayDefinition) {
+  const width = overlay.content.layout.width;
+  const height = estimateOverlayHeight(overlay);
+  const centerAligned = overlay.content.align === "center";
+  const left =
+    (overlay.content.layout.x ?? 0.08) -
+    (centerAligned ? width / DESIGN_STAGE_WIDTH / 2 : 0);
+  const top =
+    (overlay.content.layout.y ?? 0.12) -
+    (centerAligned ? height / DESIGN_STAGE_HEIGHT / 2 : 0);
+  return {
+    left,
+    top,
+    right: left + width / DESIGN_STAGE_WIDTH,
+    bottom: top + height / DESIGN_STAGE_HEIGHT,
+    width,
+    height,
+  };
+}
+
+function shiftOverlayAbsoluteLayout(
+  overlay: HydratedOverlayDefinition,
+  deltaX: number,
+  deltaY: number,
+) {
+  return {
+    ...overlay,
+    content: {
+      ...overlay.content,
+      layout: {
+        ...overlay.content.layout,
+        x: clampProgress((overlay.content.layout.x ?? 0.08) + deltaX),
+        y: clampProgress((overlay.content.layout.y ?? 0.12) + deltaY),
+      },
+    },
+  };
+}
+
+function getGroupSelectionEligibility(overlays: HydratedOverlayDefinition[], overlayIds: string[]) {
+  if (overlayIds.length < 2) {
+    return false;
+  }
+  return overlayIds.every((overlayId) => {
+    const overlay = getOverlayById(overlays, overlayId);
+    if (!overlay) {
+      return false;
+    }
+    return !overlay.content.parentGroupId && !isGroupOverlay(overlay);
+  });
+}
+
+function duplicateRootOverlays(
+  overlays: HydratedOverlayDefinition[],
+  rootOverlayIds: string[],
+) {
+  const duplicatesBySource = new Map<string, HydratedOverlayDefinition[]>();
+  const duplicateIds: string[] = [];
+
+  for (const rootOverlayId of rootOverlayIds) {
+    const source = getOverlayById(overlays, rootOverlayId);
+    if (!source) {
+      continue;
+    }
+
+    if (isGroupOverlay(source)) {
+      const duplicateGroupId = buildOverlayId("copy");
+      const groupChildren = getDirectGroupChildren(overlays, source.id);
+      duplicateIds.push(duplicateGroupId);
+      duplicatesBySource.set(rootOverlayId, [
+        hydrateOverlay({
+          ...source,
+          id: duplicateGroupId,
+          content: {
+            ...source.content,
+            layout: {
+              ...source.content.layout,
+              x: clampProgress((source.content.layout.x ?? 0.08) + 0.02),
+              y: clampProgress((source.content.layout.y ?? 0.12) + 0.02),
+            },
+          },
+        }),
+        ...groupChildren.map((child) =>
+          hydrateOverlay({
+            ...child,
+            id: buildOverlayId("copy"),
+            content: {
+              ...child.content,
+              parentGroupId: duplicateGroupId,
+              layout: {
+                ...child.content.layout,
+                x: clampProgress((child.content.layout.x ?? 0.08) + 0.02),
+                y: clampProgress((child.content.layout.y ?? 0.12) + 0.02),
+              },
+            },
+          }),
+        ),
+      ]);
+      continue;
+    }
+
+    const duplicateId = buildOverlayId("copy");
+    duplicateIds.push(duplicateId);
+    duplicatesBySource.set(rootOverlayId, [
+      hydrateOverlay({
+        ...source,
+        id: duplicateId,
+        timing: normalizeTimingRange(
+          {
+            start: clampProgress(source.timing.start + 0.04),
+            end: clampProgress(source.timing.end + 0.04),
+          },
+          0.08,
+        ),
+        content: {
+          ...source.content,
+          text: `${source.content.text ?? "Text block"} Copy`,
+        },
+      }),
+    ]);
+  }
+
+  return {
+    overlays: normalizeOverlayLayers(
+      overlays.flatMap((overlay) => {
+        const duplicates = duplicatesBySource.get(overlay.id);
+        return duplicates ? [overlay, ...duplicates] : [overlay];
+      }),
+    ),
+    duplicateIds,
+  };
+}
+
+function deleteRootOverlays(
+  overlays: HydratedOverlayDefinition[],
+  rootOverlayIds: string[],
+) {
+  const removedIds = new Set(rootOverlayIds);
+  return normalizeOverlayLayers(
+    overlays.filter((overlay) => {
+      if (removedIds.has(overlay.id)) {
+        return false;
+      }
+      if (overlay.content.parentGroupId && removedIds.has(overlay.content.parentGroupId)) {
+        return false;
+      }
+      return true;
+    }),
   );
 }
 
@@ -436,6 +678,10 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       ? { clipId: `layer-${manifest.sections[0].overlays[0].id}`, trackType: "layer" }
       : { clipId: "section-range", trackType: "section" },
   );
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string>(
+    manifest.sections[0]?.overlays[0]?.id ?? "",
+  );
+  const [multiSelectedOverlayIds, setMultiSelectedOverlayIds] = useState<string[]>([]);
   const [activeSidebarContext, setActiveSidebarContext] = useState<SidebarContext>(
     manifest.sections[0]?.overlays[0] ? "edit" : "insert",
   );
@@ -468,8 +714,44 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     () => findSelectedClip(timelineTracks, selection),
     [selection, timelineTracks],
   );
-  const selectedOverlayId = selectedClip?.metadata?.overlayId;
   const selectedOverlay = draft.overlays.find((overlay) => overlay.id === selectedOverlayId);
+  const selectedRootOverlayId = selectedOverlayId
+    ? getRootOverlayId(draft.overlays, selectedOverlayId)
+    : "";
+  const selectedTimelineClipIds = multiSelectedOverlayIds.map((overlayId) => `layer-${overlayId}`);
+  const selectedRootOverlays = useMemo(
+    () =>
+      multiSelectedOverlayIds
+        .map((overlayId) => getOverlayById(draft.overlays, overlayId))
+        .filter((overlay): overlay is HydratedOverlayDefinition => Boolean(overlay)),
+    [draft.overlays, multiSelectedOverlayIds],
+  );
+  const canGroupSelection = getGroupSelectionEligibility(draft.overlays, multiSelectedOverlayIds);
+  const selectedGroupOverlay = useMemo(() => {
+    if (!selectedOverlay) {
+      return undefined;
+    }
+    if (isGroupOverlay(selectedOverlay)) {
+      return selectedOverlay;
+    }
+    if (selectedOverlay.content.parentGroupId) {
+      return getOverlayById(draft.overlays, selectedOverlay.content.parentGroupId);
+    }
+    return undefined;
+  }, [draft.overlays, selectedOverlay]);
+  const canUngroupSelection = Boolean(selectedGroupOverlay && isGroupOverlay(selectedGroupOverlay));
+  const selectedGroupChildren = useMemo(() => {
+    if (!selectedGroupOverlay || !isGroupOverlay(selectedGroupOverlay)) {
+      return [];
+    }
+    return getDirectGroupChildren(draft.overlays, selectedGroupOverlay.id).map((child, index) => ({
+      id: child.id,
+      label:
+        child.content.text?.split(/\r?\n/).find((line) => line.trim().length > 0) ??
+        `${child.content.type ?? "item"} ${index + 1}`,
+      type: child.content.type ?? "text",
+    }));
+  }, [draft.overlays, selectedGroupOverlay]);
   const hasUnpublishedChanges =
     hasUnsyncedChanges ||
     !projectState.lastPublishedAt ||
@@ -514,6 +796,26 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       setActiveSidebarContext("insert");
     }
   }, [activeSidebarContext, selectedOverlay]);
+
+  useEffect(() => {
+    if (!selectedOverlayId) {
+      return;
+    }
+    if (draft.overlays.some((overlay) => overlay.id === selectedOverlayId)) {
+      return;
+    }
+    setSelectedOverlayId("");
+  }, [draft.overlays, selectedOverlayId]);
+
+  useEffect(() => {
+    setMultiSelectedOverlayIds((current) =>
+      current.filter((overlayId) =>
+        draft.overlays.some(
+          (overlay) => overlay.id === overlayId && !overlay.content.parentGroupId,
+        ),
+      ),
+    );
+  }, [draft.overlays]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -1086,14 +1388,38 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     });
   }
 
-  function handleSelectionChange(nextSelection: TimelineSelection) {
+  function handleSelectionChange(
+    nextSelection: TimelineSelection,
+    options?: { additive?: boolean },
+  ) {
+    const nextOverlayId =
+      nextSelection?.trackType === "layer"
+        ? findClipById(timelineTracks, nextSelection.clipId)?.metadata?.overlayId
+        : undefined;
+
+    if (nextOverlayId) {
+      const nextSelectedIds = options?.additive
+        ? multiSelectedOverlayIds.includes(nextOverlayId)
+          ? multiSelectedOverlayIds.filter((overlayId) => overlayId !== nextOverlayId)
+          : [...multiSelectedOverlayIds, nextOverlayId]
+        : [nextOverlayId];
+      const activeOverlayId = nextSelectedIds.at(-1) ?? "";
+
+      setSelection(
+        activeOverlayId
+          ? { clipId: `layer-${activeOverlayId}`, trackType: "layer" }
+          : { clipId: "section-range", trackType: "section" },
+      );
+      setSelectedOverlayId(activeOverlayId);
+      setActiveSidebarContext(activeOverlayId ? "edit" : "insert");
+      setMultiSelectedOverlayIds(nextSelectedIds);
+      return;
+    }
+
     setSelection(nextSelection);
-    setActiveSidebarContext((current) => {
-      if (nextSelection?.trackType === "layer") {
-        return "edit";
-      }
-      return current === "edit" ? "insert" : current;
-    });
+    setMultiSelectedOverlayIds([]);
+    setSelectedOverlayId("");
+    setActiveSidebarContext((current) => (current === "edit" ? "insert" : current));
   }
 
   function handleClipTimingChange(clipId: string, timing: { start: number; end: number }) {
@@ -1126,20 +1452,39 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     });
   }
 
-  function selectOverlay(overlayId: string) {
+  function selectOverlay(overlayId: string, options?: { additive?: boolean }) {
     if (!overlayId) {
       setSelection({ clipId: "section-range", trackType: "section" });
+      setSelectedOverlayId("");
+      setMultiSelectedOverlayIds([]);
       setActiveSidebarContext((current) => (current === "edit" ? "insert" : current));
       return;
     }
 
-    const nextSelection = { clipId: `layer-${overlayId}`, trackType: "layer" } as const;
+    const rootOverlayId = getRootOverlayId(draftRef.current.overlays, overlayId);
+    const rootOverlay = getOverlayById(draftRef.current.overlays, rootOverlayId);
+    const nextSelectedOverlayId =
+      rootOverlay && isGroupOverlay(rootOverlay)
+        ? rootOverlayId
+        : overlayId;
+    const nextSelectedIds = options?.additive
+      ? multiSelectedOverlayIds.includes(rootOverlayId)
+        ? multiSelectedOverlayIds.filter((id) => id !== rootOverlayId)
+        : [...multiSelectedOverlayIds, rootOverlayId]
+      : [rootOverlayId];
+    const activeRootOverlayId = nextSelectedIds.at(-1) ?? "";
+    const nextSelection = activeRootOverlayId
+      ? { clipId: `layer-${activeRootOverlayId}`, trackType: "layer" as const }
+      : { clipId: "section-range", trackType: "section" as const };
+
     setSelection((current) =>
       current?.clipId === nextSelection.clipId && current.trackType === nextSelection.trackType
         ? current
         : nextSelection,
     );
-    setActiveSidebarContext("edit");
+    setSelectedOverlayId(options?.additive ? activeRootOverlayId : nextSelectedOverlayId);
+    setMultiSelectedOverlayIds(nextSelectedIds);
+    setActiveSidebarContext(activeRootOverlayId ? "edit" : "insert");
   }
 
   function addOverlay(type: string) {
@@ -1188,6 +1533,126 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     selectOverlay(overlayId);
   }
 
+  function handleGroupSelection() {
+    updateDraft((current) => {
+      if (!getGroupSelectionEligibility(current.overlays, multiSelectedOverlayIds)) {
+        return current;
+      }
+
+      const selected = multiSelectedOverlayIds
+        .map((overlayId) => getOverlayById(current.overlays, overlayId))
+        .filter((overlay): overlay is HydratedOverlayDefinition => Boolean(overlay));
+      if (selected.length < 2) {
+        return current;
+      }
+
+      const bounds = selected
+        .map(getOverlayAbsoluteBounds)
+        .reduce(
+          (acc, next) => ({
+            left: Math.min(acc.left, next.left),
+            top: Math.min(acc.top, next.top),
+            right: Math.max(acc.right, next.right),
+            bottom: Math.max(acc.bottom, next.bottom),
+          }),
+          {
+            left: Number.POSITIVE_INFINITY,
+            top: Number.POSITIVE_INFINITY,
+            right: Number.NEGATIVE_INFINITY,
+            bottom: Number.NEGATIVE_INFINITY,
+          },
+        );
+
+      const groupId = buildOverlayId("group");
+      const group = createDefaultOverlay(groupId, "group", playheadRef.current);
+      group.timing = normalizeTimingRange(
+        {
+          start: Math.min(...selected.map((overlay) => overlay.timing.start)),
+          end: Math.max(...selected.map((overlay) => overlay.timing.end)),
+        },
+        0.08,
+      );
+      group.content.layer = Math.max(...selected.map((overlay) => overlay.content.layer ?? 0));
+      group.content.layout = {
+        x: clampProgress(bounds.left),
+        y: clampProgress(bounds.top),
+        width: Math.max(140, Math.round((bounds.right - bounds.left) * DESIGN_STAGE_WIDTH)),
+        height: Math.max(80, Math.round((bounds.bottom - bounds.top) * DESIGN_STAGE_HEIGHT)),
+      };
+      group.content.style.maxWidth = group.content.layout.width;
+      group.content.background.paddingX = 0;
+      group.content.background.paddingY = 0;
+
+      const nextOverlays = normalizeOverlayLayers([
+        group,
+        ...current.overlays.map((overlay) =>
+          multiSelectedOverlayIds.includes(overlay.id)
+            ? {
+                ...overlay,
+                content: {
+                  ...overlay.content,
+                  parentGroupId: groupId,
+                },
+              }
+            : overlay,
+        ),
+      ]);
+
+      queueMicrotask(() => {
+        setMultiSelectedOverlayIds([groupId]);
+        selectOverlay(groupId);
+      });
+
+      return {
+        ...current,
+        layerCount: getRequiredLayerCount(nextOverlays, current.layerCount),
+        overlays: nextOverlays,
+      };
+    });
+  }
+
+  function handleUngroupOverlay(overlayId: string) {
+    updateDraft((current) => {
+      const overlay = getOverlayById(current.overlays, overlayId);
+      if (!overlay || !isGroupOverlay(overlay)) {
+        return current;
+      }
+
+      const nextOverlays = normalizeOverlayLayers(
+        current.overlays
+          .filter((item) => item.id !== overlayId)
+          .map((item) =>
+            item.content.parentGroupId === overlayId
+              ? {
+                  ...item,
+                  content: {
+                    ...item.content,
+                    parentGroupId: undefined,
+                  },
+                }
+              : item,
+          ),
+      );
+
+      queueMicrotask(() => {
+        const childToSelect = getDirectGroupChildren(current.overlays, overlayId)[0]?.id ?? "";
+        if (childToSelect) {
+          selectOverlay(childToSelect);
+        } else {
+          setSelectedOverlayId("");
+          setMultiSelectedOverlayIds([]);
+          setSelection({ clipId: "section-range", trackType: "section" });
+        }
+      });
+
+      return {
+        ...current,
+        layerCount: getRequiredLayerCount(nextOverlays, current.layerCount),
+        overlays: nextOverlays,
+      };
+    });
+  }
+
   function handleDuplicateClip(clipId: string) {
     const clip = findClipById(timelineTracks, clipId);
     const overlayId = clip?.metadata?.overlayId;
@@ -1195,40 +1660,23 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       return;
     }
 
-    const duplicateId = buildOverlayId("copy");
-
+    let nextDuplicateId = "";
     updateDraft((current) => {
-      const source = current.overlays.find((overlay) => overlay.id === overlayId);
-      if (!source) {
+      const { overlays, duplicateIds } = duplicateRootOverlays(current.overlays, [overlayId]);
+      const duplicateId = duplicateIds[0];
+      if (!duplicateId) {
         return current;
       }
-
-      const duplicate = hydrateOverlay({
-        ...source,
-        id: duplicateId,
-        timing: normalizeTimingRange(
-          {
-            start: clampProgress(source.timing.start + 0.04),
-            end: clampProgress(source.timing.end + 0.04),
-          },
-          0.08,
-        ),
-        content: {
-          ...source.content,
-          text: `${source.content.text ?? "Text block"} Copy`,
-        },
-      });
+      nextDuplicateId = duplicateId;
 
       return {
         ...current,
-        overlays: normalizeOverlayLayers([
-          ...current.overlays.flatMap((overlay) =>
-            overlay.id === overlayId ? [overlay, duplicate] : [overlay],
-          ),
-        ]),
+        overlays,
       };
     });
-    selectOverlay(duplicateId);
+    if (nextDuplicateId) {
+      selectOverlay(nextDuplicateId);
+    }
   }
 
   function handleDeleteClip(clipId: string) {
@@ -1238,11 +1686,17 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       return;
     }
 
-    updateDraft((current) => ({
-      ...current,
-      layerCount: getRequiredLayerCount(current.overlays.filter((overlay) => overlay.id !== overlayId), current.layerCount),
-      overlays: normalizeOverlayLayers(current.overlays.filter((overlay) => overlay.id !== overlayId)),
-    }));
+    updateDraft((current) => {
+      const nextOverlays = deleteRootOverlays(current.overlays, [overlayId]);
+
+      return {
+        ...current,
+        layerCount: getRequiredLayerCount(nextOverlays, current.layerCount),
+        overlays: normalizeOverlayLayers(nextOverlays),
+      };
+    });
+    setSelectedOverlayId("");
+    setMultiSelectedOverlayIds([]);
     setSelection({ clipId: "section-range", trackType: "section" });
   }
 
@@ -1263,13 +1717,89 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
 
 
   function handleDuplicateOverlay(overlayId: string) {
-    const clipId = `layer-${overlayId}`;
-    handleDuplicateClip(clipId);
+    const rootOverlayId = getRootOverlayId(draftRef.current.overlays, overlayId);
+    handleDuplicateClip(`layer-${rootOverlayId}`);
   }
 
   function handleDeleteOverlay(overlayId: string) {
-    const clipId = `layer-${overlayId}`;
-    handleDeleteClip(clipId);
+    const rootOverlayId = getRootOverlayId(draftRef.current.overlays, overlayId);
+    handleDeleteClip(`layer-${rootOverlayId}`);
+  }
+
+  function handleMoveSelection(delta: { x: number; y: number }) {
+    if (multiSelectedOverlayIds.length < 2) {
+      return;
+    }
+
+    updateDraft((current) => ({
+      ...current,
+      overlays: current.overlays.map((overlay) => {
+        const isSelectedRoot = multiSelectedOverlayIds.includes(overlay.id);
+        const isSelectedGroupChild =
+          overlay.content.parentGroupId !== undefined &&
+          multiSelectedOverlayIds.includes(overlay.content.parentGroupId);
+
+        if (!isSelectedRoot && !isSelectedGroupChild) {
+          return overlay;
+        }
+
+        return shiftOverlayAbsoluteLayout(hydrateOverlay(overlay), delta.x, delta.y);
+      }),
+    }));
+  }
+
+  function handleDuplicateSelection() {
+    if (multiSelectedOverlayIds.length < 2) {
+      if (selectedOverlayId) {
+        handleDuplicateOverlay(selectedOverlayId);
+      }
+      return;
+    }
+
+    let duplicateIds: string[] = [];
+    updateDraft((current) => {
+      const result = duplicateRootOverlays(current.overlays, multiSelectedOverlayIds);
+      duplicateIds = result.duplicateIds;
+      return {
+        ...current,
+        overlays: result.overlays,
+      };
+    });
+
+    if (duplicateIds.length > 0) {
+      const activeDuplicateId = duplicateIds[duplicateIds.length - 1];
+      if (!activeDuplicateId) {
+        return;
+      }
+      setSelection({ clipId: `layer-${activeDuplicateId}`, trackType: "layer" });
+      setSelectedOverlayId(activeDuplicateId);
+      setMultiSelectedOverlayIds(duplicateIds);
+      setActiveSidebarContext("edit");
+    }
+  }
+
+  function handleDeleteSelection() {
+    if (multiSelectedOverlayIds.length < 2) {
+      if (selectedOverlayId) {
+        handleDeleteOverlay(selectedOverlayId);
+      }
+      return;
+    }
+
+    updateDraft((current) => ({
+      ...current,
+      ...(() => {
+        const overlays = deleteRootOverlays(current.overlays, multiSelectedOverlayIds);
+        return {
+          layerCount: getRequiredLayerCount(overlays, current.layerCount),
+          overlays,
+        };
+      })(),
+    }));
+    setSelectedOverlayId("");
+    setMultiSelectedOverlayIds([]);
+    setSelection({ clipId: "section-range", trackType: "section" });
+    setActiveSidebarContext((current) => (current === "edit" ? "insert" : current));
   }
 
   function handleOverlayStyleQuickChange(overlayId: string, changes: Record<string, unknown>) {
@@ -1347,27 +1877,46 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       return;
     }
 
-    updateDraft((current) => ({
-      ...current,
-      layerCount: getRequiredLayerCount(current.overlays, current.layerCount),
-      overlays: normalizeOverlayLayers(
-        current.overlays.map((overlay) =>
-          overlay.id === overlayId
-            ? {
-                ...overlay,
-                timing: {
-                  start: move.start,
-                  end: move.end,
-                },
-                content: {
-                  ...overlay.content,
-                  layer: move.targetLayer ?? overlay.content.layer ?? 0,
-                },
-              }
-            : overlay,
-        ),
-      ),
-    }));
+    updateDraft((current) => {
+      const overlay = getOverlayById(current.overlays, overlayId);
+      if (!overlay) {
+        return current;
+      }
+
+      const nextOverlays = current.overlays.map((item) => {
+        if (item.id === overlayId) {
+          return {
+            ...item,
+            timing: {
+              start: move.start,
+              end: move.end,
+            },
+            content: {
+              ...item.content,
+              layer: move.targetLayer ?? item.content.layer ?? 0,
+            },
+          };
+        }
+
+        if (isGroupOverlay(overlay) && item.content.parentGroupId === overlayId) {
+          return {
+            ...item,
+            content: {
+              ...item.content,
+              layer: move.targetLayer ?? overlay.content.layer ?? item.content.layer ?? 0,
+            },
+          };
+        }
+
+        return item;
+      });
+
+      return {
+        ...current,
+        layerCount: getRequiredLayerCount(nextOverlays, current.layerCount),
+        overlays: normalizeOverlayLayers(nextOverlays),
+      };
+    });
   }
 
   function handleMoveClipToLayer(clipId: string, targetLayer: number) {
@@ -1398,7 +1947,8 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
         layerCount: targetLayer + 1,
         overlays: normalizeOverlayLayers(
           current.overlays.map((overlay) =>
-            overlay.id === overlayId
+            overlay.id === overlayId ||
+            overlay.content.parentGroupId === overlayId
               ? {
                   ...overlay,
                   content: {
@@ -1436,13 +1986,19 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       }
 
       const layerValue = current.layerCount - layerRowIndex - 1;
+      const deletedRootIds = new Set(
+        getRootOverlays(current.overlays)
+          .filter((overlay) => (overlay.content.layer ?? 0) === layerValue)
+          .map((overlay) => overlay.id),
+      );
+
       const nextOverlays = current.overlays.flatMap((overlay) => {
-        const overlayLayer = overlay.content.layer ?? 0;
-        if (overlayLayer === layerValue) {
+        if (deletedRootIds.has(overlay.id) || (overlay.content.parentGroupId && deletedRootIds.has(overlay.content.parentGroupId))) {
           return [];
         }
 
-        if (overlayLayer > layerValue) {
+        const overlayLayer = overlay.content.layer ?? 0;
+        if (!overlay.content.parentGroupId && overlayLayer > layerValue) {
           return [{
             ...overlay,
             content: {
@@ -1514,12 +2070,22 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
           projectId={projectState.id}
           activeContext={activeSidebarContext}
           selectedOverlay={selectedOverlay}
+          selectedGroupChildren={selectedGroupChildren}
+          canGroupSelection={canGroupSelection}
+          canUngroupSelection={canUngroupSelection}
           onContextChange={(context) => {
             if (context === "upload" || context === "ai") {
               setSelection({ clipId: "section-range", trackType: "section" });
             }
             setActiveSidebarContext(context);
           }}
+          onGroupSelection={handleGroupSelection}
+          onUngroupSelection={() => {
+            if (selectedGroupOverlay && isGroupOverlay(selectedGroupOverlay)) {
+              handleUngroupOverlay(selectedGroupOverlay.id);
+            }
+          }}
+          onSelectGroupChild={(overlayId) => selectOverlay(overlayId)}
           onOverlayFieldChange={(field, value) => {
             updateSelectedOverlay((overlay) => {
               const hydrated = hydrateOverlay(overlay);
@@ -1656,6 +2222,9 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
               playheadProgress={playhead}
               isPlaying={isPlaying}
               selectedOverlayId={selectedOverlayId}
+              selectedOverlayIds={multiSelectedOverlayIds}
+              canGroupSelection={canGroupSelection}
+              canUngroupSelection={canUngroupSelection}
               onModeChange={setPreviewMode}
               onPlayheadChange={(value) => {
                 const nextPlayhead = clampProgress(value);
@@ -1664,62 +2233,85 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                 setPlayhead(nextPlayhead);
               }}
               onPlayToggle={() => setIsPlaying((current) => !current)}
-              onSelectOverlay={(overlayId) => selectOverlay(overlayId)}
+              onSelectOverlay={(overlayId, options) => selectOverlay(overlayId, options)}
               onOverlayLayoutChange={(overlayId, layout, options) => {
-                updateDraft((current) => ({
-                  ...current,
-                  overlays: current.overlays.map((overlay) =>
-                    overlay.id === overlayId
-                      ? (() => {
-                          const hydrated = hydrateOverlay(overlay);
-                          const nextLayout = {
-                            x: hydrated.content.layout.x,
-                            y: hydrated.content.layout.y,
-                            width: hydrated.content.layout.width,
-                            height: hydrated.content.layout.height,
-                            ...layout,
-                          };
-                          if (options?.intent !== "resize") {
-                            return {
-                              ...hydrated,
-                              content: {
-                                ...hydrated.content,
-                                layout: nextLayout,
-                              },
-                            };
-                          }
+                updateDraft((current) => {
+                  const target = getOverlayById(current.overlays, overlayId);
+                  if (!target || target.content.parentGroupId) {
+                    return current;
+                  }
 
-                          const scaleX = Math.max(0.35, Math.min(options.scaleX ?? 1, 4));
-                          const scaleY = Math.max(0.35, Math.min(options.scaleY ?? 1, 4));
-                          const styleChanges = options.styleChanges;
-                          const backgroundChanges = options.backgroundChanges;
-                          const areaScale = Math.sqrt(scaleX * scaleY);
-                          const contentScale = Math.max(0.5, Math.min(1 + (areaScale - 1) * 0.82, 3));
-                          const paddingScaleX = Math.max(0.5, Math.min(1 + (scaleX - 1) * 0.72, 3));
-                          const paddingScaleY = Math.max(0.5, Math.min(1 + (scaleY - 1) * 0.72, 3));
+                  const hydratedTarget = hydrateOverlay(target);
+                  const previousLayout = hydratedTarget.content.layout;
+                  const nextLayout = {
+                    x: previousLayout.x,
+                    y: previousLayout.y,
+                    width: previousLayout.width,
+                    height: previousLayout.height,
+                    ...layout,
+                  };
 
-                          return {
-                            ...hydrated,
-                            content: {
-                              ...hydrated.content,
-                              layout: nextLayout,
-                              style: {
-                                ...hydrated.content.style,
-                                fontSize: Number(styleChanges?.fontSize ?? Math.max(10, Math.round(hydrated.content.style.fontSize * contentScale))),
-                                maxWidth: Number(styleChanges?.maxWidth ?? Math.max(80, Math.round((hydrated.content.style.maxWidth ?? nextLayout.width ?? 420) * scaleX))),
-                              },
-                              background: {
-                                ...hydrated.content.background,
-                                radius: Number(backgroundChanges?.radius ?? Math.max(0, Math.round(hydrated.content.background.radius * contentScale))),
-                                paddingX: Number(backgroundChanges?.paddingX ?? Math.max(0, Math.round(hydrated.content.background.paddingX * paddingScaleX))),
-                                paddingY: Number(backgroundChanges?.paddingY ?? Math.max(0, Math.round(hydrated.content.background.paddingY * paddingScaleY))),
-                              },
-                            },
-                          };
-                        })()
-                      : overlay,
-                  ),
-                }));
+                  const buildUpdatedOverlay = (overlay: HydratedOverlayDefinition) => {
+                    if (options?.intent !== "resize") {
+                      return {
+                        ...overlay,
+                        content: {
+                          ...overlay.content,
+                          layout: nextLayout,
+                        },
+                      };
+                    }
+
+                    const scaleX = Math.max(0.35, Math.min(options.scaleX ?? 1, 4));
+                    const scaleY = Math.max(0.35, Math.min(options.scaleY ?? 1, 4));
+                    const styleChanges = options.styleChanges;
+                    const backgroundChanges = options.backgroundChanges;
+                    const areaScale = Math.sqrt(scaleX * scaleY);
+                    const contentScale = Math.max(0.5, Math.min(1 + (areaScale - 1) * 0.82, 3));
+                    const paddingScaleX = Math.max(0.5, Math.min(1 + (scaleX - 1) * 0.72, 3));
+                    const paddingScaleY = Math.max(0.5, Math.min(1 + (scaleY - 1) * 0.72, 3));
+
+                    return {
+                      ...overlay,
+                      content: {
+                        ...overlay.content,
+                        layout: nextLayout,
+                        style: {
+                          ...overlay.content.style,
+                          fontSize: Number(styleChanges?.fontSize ?? Math.max(10, Math.round(overlay.content.style.fontSize * contentScale))),
+                          maxWidth: Number(styleChanges?.maxWidth ?? Math.max(80, Math.round((overlay.content.style.maxWidth ?? nextLayout.width ?? 420) * scaleX))),
+                        },
+                        background: {
+                          ...overlay.content.background,
+                          radius: Number(backgroundChanges?.radius ?? Math.max(0, Math.round(overlay.content.background.radius * contentScale))),
+                          paddingX: Number(backgroundChanges?.paddingX ?? Math.max(0, Math.round(overlay.content.background.paddingX * paddingScaleX))),
+                          paddingY: Number(backgroundChanges?.paddingY ?? Math.max(0, Math.round(overlay.content.background.paddingY * paddingScaleY))),
+                        },
+                      },
+                    };
+                  };
+
+                  const deltaX = (nextLayout.x ?? previousLayout.x) - previousLayout.x;
+                  const deltaY = (nextLayout.y ?? previousLayout.y) - previousLayout.y;
+                  const nextOverlays = current.overlays.map((overlay) => {
+                    if (overlay.id === overlayId) {
+                      return buildUpdatedOverlay(hydrateOverlay(overlay));
+                    }
+                    if (
+                      options?.intent !== "resize" &&
+                      isGroupOverlay(hydratedTarget) &&
+                      overlay.content.parentGroupId === overlayId
+                    ) {
+                      return shiftOverlayAbsoluteLayout(hydrateOverlay(overlay), deltaX, deltaY);
+                    }
+                    return overlay;
+                  });
+
+                  return {
+                    ...current,
+                    overlays: nextOverlays,
+                  };
+                });
               }}
               onInlineTextChange={(overlayId, field, value, htmlValue) => {
                 updateDraft((current) => ({
@@ -1739,9 +2331,18 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                 }));
               }}
             onOverlayStyleChange={handleOverlayStyleQuickChange}
-            onDuplicateOverlay={handleDuplicateOverlay}
-            onDeleteOverlay={handleDeleteOverlay}
-          />
+              onDuplicateOverlay={handleDuplicateOverlay}
+              onDeleteOverlay={handleDeleteOverlay}
+              onGroupSelection={handleGroupSelection}
+              onUngroupSelection={() => {
+                if (selectedGroupOverlay && isGroupOverlay(selectedGroupOverlay)) {
+                  handleUngroupOverlay(selectedGroupOverlay.id);
+                }
+              }}
+              onMoveSelection={handleMoveSelection}
+              onDuplicateSelection={handleDuplicateSelection}
+              onDeleteSelection={handleDeleteSelection}
+            />
         </div>
 
           {/* Timeline */}
@@ -1752,14 +2353,23 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
             <TimelinePanel
               tracks={timelineTracks}
               selection={selection}
+              selectedClipIds={selectedTimelineClipIds}
               playhead={playhead}
               durationSeconds={durationSeconds}
               isPlaying={isPlaying}
               canUndo={history.past.length > 0}
               canRedo={history.future.length > 0}
+              canGroupSelection={canGroupSelection}
+              canUngroupSelection={canUngroupSelection}
               onPlayToggle={() => setIsPlaying((current) => !current)}
               onUndo={handleUndo}
               onRedo={handleRedo}
+              onGroupSelection={handleGroupSelection}
+              onUngroupSelection={() => {
+                if (selectedGroupOverlay && isGroupOverlay(selectedGroupOverlay)) {
+                  handleUngroupOverlay(selectedGroupOverlay.id);
+                }
+              }}
               onPlayheadChange={(value) => {
                 const nextPlayhead = clampProgress(value);
                 setIsPlaying(false);

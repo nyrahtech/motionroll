@@ -9,7 +9,7 @@ export type OverlayTheme = z.infer<typeof OverlayThemeSchema>;
 export const OverlayTreatmentSchema = z.enum(["default", "cinematic-pop"]);
 export type OverlayTreatment = z.infer<typeof OverlayTreatmentSchema>;
 
-export const ContentTypeSchema = z.enum(["text", "image", "logo", "icon"]);
+export const ContentTypeSchema = z.enum(["text", "image", "logo", "icon", "group"]);
 export type ContentType = z.infer<typeof ContentTypeSchema>;
 
 export const FontFamilySchema = z.enum([
@@ -177,6 +177,7 @@ const OverlayContentInputSchema = z.object({
   animation: OverlayAnimationSchema.optional(),
   transition: OverlayTransitionSchema.optional(),
   layer: z.number().int().min(0).max(999).optional(),
+  parentGroupId: z.string().min(1).optional(),
 });
 
 export const OverlayContentSchema = OverlayContentInputSchema.transform((content) => {
@@ -230,6 +231,7 @@ export const OverlayContentSchema = OverlayContentInputSchema.transform((content
     ...(content.animation ? { animation: content.animation } : {}),
     ...(content.transition ? { transition: content.transition } : {}),
     ...(typeof content.layer === "number" ? { layer: content.layer } : {}),
+    ...(content.parentGroupId ? { parentGroupId: content.parentGroupId } : {}),
   };
 });
 export type OverlayContent = {
@@ -248,6 +250,7 @@ export type OverlayContent = {
   animation?: OverlayAnimation;
   transition?: OverlayTransition;
   layer?: number;
+  parentGroupId?: string;
 };
 
 export const OverlayDefinitionSchema = z.object({
