@@ -23,8 +23,7 @@ export type EditorFormValues = {
   selectedOverlayId?: string;
   overlayStart?: number;
   overlayEnd?: number;
-  headline: string;
-  body: string;
+  text: string;
   ctaLabel: string;
   ctaHref: string;
 };
@@ -69,7 +68,7 @@ export type EditorProject = {
         pin: boolean;
         preloadWindow: number;
       };
-      text?: { headline: string; body: string };
+      text?: { content: string };
       cta?: { label: string; href: string };
     } & Record<string, unknown>;
   }>;

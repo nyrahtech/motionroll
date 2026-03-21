@@ -4,6 +4,7 @@ import {
   type AssetVariantKind,
   type FrameAsset,
   type OverlayDefinition,
+  type MotionEasing,
   type ProjectManifest,
   type ProjectSectionManifest,
   type ResolvedFallbackStrategy,
@@ -14,7 +15,7 @@ import {
   DEFAULT_SEQUENCE_SETTLE_EPSILON,
 } from "../../shared/src/sequence";
 import { clampProgress, frameIndexToSequenceProgress } from "../../shared/src/timing";
-import { clamp, getActiveOverlayId, getFrameByIndex, progressToFrameIndex } from "./utils";
+import { clamp, getActiveOverlayId, getFrameByIndex, getOverlaysInStackOrder, progressToFrameIndex } from "./utils";
 
 
 export interface CreateScrollSectionOptions {
@@ -24,6 +25,7 @@ export interface CreateScrollSectionOptions {
   overlayRoot?: HTMLElement;
   interactionMode?: "scroll" | "controlled";
   allowWheelScrub?: boolean;
+  enableOverlayTransitions?: boolean;
   onProgressChange?: (progress: number) => void;
   scrollDistance?: number;
   forceSequence?: boolean;
@@ -89,9 +91,24 @@ function getFrameUrlForProgress(
     return "";
   }
 
-  const frameIndex = progressToFrameIndex(progress, section.progressMapping.frameRange);
+  const frameIndex = progressToFrameIndex(
+    getSequenceRangeLocalProgress(section, progress),
+    section.progressMapping.frameRange,
+  );
   const frame = getFrameByIndex(section.frameAssets, frameIndex);
   return frame ? chooseFrameUrl(frame, mode) : "";
+}
+
+function getSequenceRangeLocalProgress(
+  section: ProjectSectionManifest,
+  progress: number,
+) {
+  const frameCount = Math.max(section.frameCount, 1);
+  const rangeStart = frameIndexToSequenceProgress(section.progressMapping.frameRange.start, frameCount);
+  const rangeEnd = frameIndexToSequenceProgress(section.progressMapping.frameRange.end, frameCount);
+  const normalized = clampProgress(progress);
+  const visibleWidth = Math.max(rangeEnd - rangeStart, Number.EPSILON);
+  return clampProgress((normalized - rangeStart) / visibleWidth);
 }
 
 function appendTextElement(
@@ -100,7 +117,7 @@ function appendTextElement(
   text: string,
   style: Partial<CSSStyleDeclaration>,
   dataField?: string,
-  html?: string,
+  html?: unknown,
 ) {
   const element = document.createElement(tagName);
   if (html) {
@@ -116,13 +133,35 @@ function appendTextElement(
   return element;
 }
 
-function sanitizeRichTextHtml(input: string) {
-  if (typeof window === "undefined" || !input.trim()) {
+function normalizeRichTextHtml(input: unknown) {
+  if (typeof input === "string") {
+    return input;
+  }
+
+  if (input && typeof input === "object") {
+    const legacy = input as {
+      eyebrow?: string;
+      headline?: string;
+      body?: string;
+      text?: string;
+    };
+    return [legacy.text, legacy.eyebrow, legacy.headline, legacy.body]
+      .map((value) => value?.trim())
+      .filter((value): value is string => Boolean(value))
+      .join("<br><br>");
+  }
+
+  return "";
+}
+
+function sanitizeRichTextHtml(input: unknown) {
+  const normalized = normalizeRichTextHtml(input);
+  if (typeof window === "undefined" || !normalized.trim()) {
     return "";
   }
 
   const template = document.createElement("template");
-  template.innerHTML = input;
+  template.innerHTML = normalized;
   const allowedTags = new Set(["A", "EM", "I", "BR"]);
 
   for (const node of Array.from(template.content.querySelectorAll("*"))) {
@@ -240,34 +279,133 @@ function getStageScale(stageRoot: HTMLElement) {
   return clamp(Math.min(width / DESIGN_STAGE_WIDTH, height / DESIGN_STAGE_HEIGHT), 0.35, 2);
 }
 
-function getOverlayTransform(
+function getSectionDurationSeconds(section: ProjectSectionManifest) {
+  const totalFrameCount = Math.max(
+    section.progressMapping.frameCount,
+    section.frameCount,
+    section.progressMapping.frameRange.end + 1,
+    0,
+  );
+  return totalFrameCount > 0 ? totalFrameCount / 24 : 8;
+}
+
+function mix(from: number, to: number, progress: number) {
+  return from + (to - from) * progress;
+}
+
+function formatPx(value: number) {
+  if (Math.abs(value) < 0.001) {
+    return "0px";
+  }
+  return `${Number(value.toFixed(3))}px`;
+}
+
+function formatScale(value: number) {
+  return Number(value.toFixed(4));
+}
+
+function applyMotionEasing(progress: number, easing: MotionEasing | undefined) {
+  const t = clamp(progress, 0, 1);
+
+  if (easing === "linear") {
+    return t;
+  }
+
+  if (easing === "ease-in-out") {
+    return t < 0.5 ? 4 * t * t * t : 1 - ((-2 * t + 2) ** 3) / 2;
+  }
+
+  if (easing === "back-out") {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * ((t - 1) ** 3) + c1 * ((t - 1) ** 2);
+  }
+
+  if (easing === "expo-out") {
+    return t >= 1 ? 1 : 1 - 2 ** (-10 * t);
+  }
+
+  return 1 - (1 - t) ** 3;
+}
+
+function getBaseOverlayTranslate(overlay: OverlayDefinition) {
+  return overlay.content.align === "center"
+    ? { x: -50, y: -50, unit: "%" as const }
+    : { x: 0, y: 0, unit: "px" as const };
+}
+
+function getOverlayHiddenOffset(
   overlay: OverlayDefinition,
   entrance: ProjectSectionManifest["runtimeProfile"]["overlayEntrance"],
-  visible: boolean,
 ) {
   const animationPreset = overlay.content.animation?.preset ?? "fade";
 
   if (overlay.content.align === "center") {
-    if (!visible && animationPreset === "scale-in") {
-      return "translate3d(-50%, -50%, 0) scale(0.94)";
-    }
-    return visible ? "translate3d(-50%, -50%, 0)" : "translate3d(-50%, calc(-50% + 18px), 0)";
-  }
-
-  if (!visible) {
-    if (animationPreset === "slide-up") {
-      return "translate3d(0, 22px, 0)";
-    }
-    if (animationPreset === "slide-down") {
-      return "translate3d(0, -22px, 0)";
-    }
     if (animationPreset === "scale-in") {
-      return "translate3d(0, 0, 0) scale(0.94)";
+      return { x: -50, y: -50, unit: "%" as const, scale: 0.94 };
     }
-    return entrance === "crossfade" ? "translate3d(0, 0, 0)" : "translate3d(0, 18px, 0)";
+    return {
+      x: -50,
+      y: entrance === "crossfade" ? -50 : -50 + 18,
+      unit: entrance === "crossfade" ? "%" as const : "calc-percent-plus-px" as const,
+      scale: 1,
+    };
   }
 
-  return "translate3d(0, 0, 0)";
+  if (animationPreset === "slide-up") {
+    return { x: 0, y: 22, unit: "px" as const, scale: 1 };
+  }
+  if (animationPreset === "slide-down") {
+    return { x: 0, y: -22, unit: "px" as const, scale: 1 };
+  }
+  if (animationPreset === "scale-in") {
+    return { x: 0, y: 0, unit: "px" as const, scale: 0.94 };
+  }
+  return {
+    x: 0,
+    y: entrance === "crossfade" ? 0 : 18,
+    unit: "px" as const,
+    scale: 1,
+  };
+}
+
+function getOverlayTransform(
+  overlay: OverlayDefinition,
+  entrance: ProjectSectionManifest["runtimeProfile"]["overlayEntrance"],
+  introProgress: number,
+  outroProgress: number,
+) {
+  const baseTranslate = getBaseOverlayTranslate(overlay);
+  const hidden = getOverlayHiddenOffset(overlay, entrance);
+  const introT = applyMotionEasing(introProgress, overlay.content.animation?.easing);
+  const exitT = applyMotionEasing(outroProgress, overlay.content.transition?.easing);
+  let translateX = baseTranslate.x;
+  let translateY = baseTranslate.y;
+  let scale = 1;
+
+  if (baseTranslate.unit === "px") {
+    translateX += hidden.x * (1 - introT);
+    translateY += hidden.y * (1 - introT);
+  }
+
+  scale = mix(hidden.scale ?? 1, 1, introT);
+
+  const transitionPreset = overlay.content.transition?.preset ?? "crossfade";
+  if (transitionPreset === "zoom-dissolve") {
+    scale *= mix(1, 1.04, exitT);
+  }
+
+  if (overlay.content.align === "center") {
+    if (hidden.unit === "calc-percent-plus-px") {
+      const yOffsetPx = 18;
+      const nextYOffset = formatPx(yOffsetPx * (1 - introT));
+      return `translate3d(-50%, calc(-50% + ${nextYOffset}), 0) scale(${formatScale(scale)})`;
+    }
+
+    return `translate3d(-50%, -50%, 0) scale(${formatScale(scale)})`;
+  }
+
+  return `translate3d(${formatPx(translateX)}, ${formatPx(translateY)}, 0) scale(${formatScale(scale)})`;
 }
 
 function getOverlayTransitionStyle(overlay: OverlayDefinition) {
@@ -289,6 +427,91 @@ function getOverlayTransitionStyle(overlay: OverlayDefinition) {
   }
 
   return "opacity 200ms ease, transform 200ms ease";
+}
+
+function getTimedProgress(
+  progress: number,
+  start: number,
+  delay: number,
+  duration: number,
+) {
+  if (duration <= Number.EPSILON) {
+    return progress >= start + delay ? 1 : 0;
+  }
+
+  return clamp((progress - (start + delay)) / duration, 0, 1);
+}
+
+function getOverlayAnimationState(
+  overlay: OverlayDefinition,
+  section: ProjectSectionManifest,
+  progress: number,
+) {
+  const normalized = clampProgress(progress);
+  const durationSeconds = getSectionDurationSeconds(section);
+  const introDelay = clampProgress((overlay.content.animation?.delay ?? 0) / durationSeconds);
+  const introDuration = clampProgress((overlay.content.animation?.duration ?? 0.45) / durationSeconds);
+  const outroDuration = clampProgress((overlay.content.transition?.duration ?? 0.4) / durationSeconds);
+  const introProgress = getTimedProgress(normalized, overlay.timing.start, introDelay, introDuration);
+  const outroStart = Math.max(overlay.timing.start, overlay.timing.end - outroDuration);
+  const outroProgress = clamp(
+    outroDuration <= Number.EPSILON ? (normalized >= overlay.timing.end ? 1 : 0) : (normalized - outroStart) / Math.max(overlay.timing.end - outroStart, Number.EPSILON),
+    0,
+    1,
+  );
+  const introOpacity = introProgress;
+  let outroOpacity = 1;
+  const transitionPreset = overlay.content.transition?.preset ?? "crossfade";
+  if (transitionPreset === "fade" || transitionPreset === "crossfade") {
+    outroOpacity = 1 - applyMotionEasing(outroProgress, overlay.content.transition?.easing);
+  } else if (transitionPreset === "wipe") {
+    outroOpacity = mix(1, 0.78, applyMotionEasing(outroProgress, overlay.content.transition?.easing));
+  } else {
+    outroOpacity = 1 - applyMotionEasing(outroProgress, overlay.content.transition?.easing) * 0.92;
+  }
+
+  const opacity = clamp(
+    (overlay.content.style?.opacity ?? 1) *
+      clamp(introOpacity, 0, 1) *
+      clamp(outroOpacity, 0, 1),
+    0,
+    1,
+  );
+  const filterBlur =
+    mix(
+      overlay.content.animation?.preset === "blur-in" ? 10 : 0,
+      0,
+      applyMotionEasing(introProgress, overlay.content.animation?.easing),
+    ) +
+    mix(
+      0,
+      transitionPreset === "blur-dissolve" ? 10 : transitionPreset === "zoom-dissolve" ? 1.5 : 0,
+      applyMotionEasing(outroProgress, overlay.content.transition?.easing),
+    );
+  const clipRightInset =
+    transitionPreset === "wipe"
+      ? mix(0, 100, applyMotionEasing(outroProgress, overlay.content.transition?.easing))
+      : 0;
+  const active =
+    normalized >= overlay.timing.start &&
+    normalized < overlay.timing.end + 0.0001 &&
+    opacity > 0.001;
+
+  return {
+    active,
+    opacity,
+    transform: getOverlayTransform(
+      overlay,
+      section.runtimeProfile.overlayEntrance,
+      introProgress,
+      outroProgress,
+    ),
+    filter: filterBlur > 0.05 ? `blur(${Number(filterBlur.toFixed(3))}px)` : "blur(0px)",
+    clipPath:
+      clipRightInset > 0.05
+        ? `inset(0% ${Number(clipRightInset.toFixed(3))}% 0% 0%)`
+        : "inset(0% 0% 0% 0%)",
+  };
 }
 
 function applyOverlayCardStyles(
@@ -327,7 +550,7 @@ function applyOverlayCardStyles(
   card.style.transformOrigin = "center center";
   card.style.opacity = String(style?.opacity ?? 1);
   card.style.background =
-    background?.enabled && background.mode === "solid"
+    background?.enabled
       ? withOpacity(background.color ?? "#0d1016", background.opacity ?? 0.82)
       : "transparent";
   card.style.borderColor = withOpacity(
@@ -339,7 +562,7 @@ function applyOverlayCardStyles(
   card.style.borderRadius = `${background?.radius ?? 14}px`;
   card.style.padding = `${Math.round((background?.paddingY ?? 14) * stageScale)}px ${Math.round((background?.paddingX ?? 18) * stageScale)}px`;
   card.style.backdropFilter =
-    background?.enabled && background.mode === "solid" ? "blur(18px)" : "none";
+    background?.enabled ? "blur(18px)" : "none";
 
   if (!layout) {
     card.style.left = overlay.content.align === "center" ? "50%" : defaultLeft;
@@ -353,22 +576,12 @@ function applyOverlayContentStyles(
   overlay: OverlayDefinition,
   stageScale: number,
 ) {
-  const headline = card.querySelector<HTMLElement>('[data-text-field="headline"]');
-  const body = card.querySelector<HTMLElement>('[data-text-field="body"]');
-  const eyebrow = card.querySelector<HTMLElement>('[data-text-field="eyebrow"]');
+  const textBlock = card.querySelector<HTMLElement>('[data-text-field="text"]');
   const media = card.querySelector<HTMLElement>("[data-media-field='media']");
   const actionLink = card.querySelector<HTMLElement>("a");
 
-  if (eyebrow) {
-    eyebrow.style.fontSize = `${Math.round((overlay.content.style?.eyebrowFontSize ?? 12) * stageScale)}px`;
-  }
-
-  if (headline) {
-    headline.style.fontSize = `${Math.round((overlay.content.style?.fontSize ?? 34) * stageScale)}px`;
-  }
-
-  if (body) {
-    body.style.fontSize = `${Math.round((overlay.content.style?.bodyFontSize ?? 15) * stageScale)}px`;
+  if (textBlock) {
+    textBlock.style.fontSize = `${Math.round((overlay.content.style?.fontSize ?? 34) * stageScale)}px`;
   }
 
   if (media) {
@@ -415,19 +628,52 @@ function appendMediaElement(
   mode: "desktop" | "mobile",
 ) {
   if (!overlay.content.mediaUrl) {
+    const placeholder = document.createElement("div");
+    placeholder.dataset.mediaField = "media";
+    placeholder.style.width = "100%";
+    placeholder.style.maxWidth = `${overlay.content.layout?.width ?? (mode === "mobile" ? 260 : 420)}px`;
+    placeholder.style.height =
+      overlay.content.type === "icon"
+        ? "64px"
+        : overlay.content.type === "logo"
+          ? "80px"
+          : "220px";
+    placeholder.style.display = "flex";
+    placeholder.style.alignItems = "center";
+    placeholder.style.justifyContent = "center";
+    placeholder.style.borderRadius = overlay.content.type === "image" ? ".7rem" : "0";
+    placeholder.style.background = "rgba(128, 136, 152, 0.45)";
+    placeholder.style.border = "1px solid rgba(255,255,255,0.08)";
+    placeholder.style.marginBottom = overlay.content.text ? ".8rem" : "0";
+
+    const icon = document.createElement("div");
+    icon.innerHTML =
+      '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>';
+    icon.style.width = "52px";
+    icon.style.height = "52px";
+    icon.style.borderRadius = "999px";
+    icon.style.background = "rgba(1,1,1,0.7)";
+    icon.style.border = "1px solid rgba(255,255,255,0.12)";
+    icon.style.color = "rgba(255,255,255,0.58)";
+    icon.style.display = "flex";
+    icon.style.alignItems = "center";
+    icon.style.justifyContent = "center";
+
+    placeholder.appendChild(icon);
+    parent.appendChild(placeholder);
     return;
   }
 
   const image = document.createElement("img");
   image.src = overlay.content.mediaUrl;
-  image.alt = overlay.content.headline;
+  image.alt = overlay.content.text ?? "Overlay media";
   image.dataset.mediaField = "media";
   image.style.width = "100%";
   image.style.maxWidth = `${overlay.content.layout?.width ?? (mode === "mobile" ? 260 : 420)}px`;
   image.style.height = overlay.content.type === "icon" ? "64px" : overlay.content.type === "logo" ? "80px" : "auto";
   image.style.objectFit = overlay.content.type === "image" ? "cover" : "contain";
   image.style.borderRadius = overlay.content.type === "image" ? ".7rem" : "0";
-  image.style.marginBottom = overlay.content.headline ? ".8rem" : "0";
+  image.style.marginBottom = overlay.content.text ? ".8rem" : "0";
   parent.appendChild(image);
 }
 
@@ -459,6 +705,7 @@ function renderOverlayState(
 ) {
   const activeOverlayId = getActiveOverlayId(section.overlays, progress);
   const interactionMode = root.dataset.interactionMode ?? "scroll";
+  const allowOverlayTransitions = root.dataset.overlayTransitions === "enabled";
   root.dataset.activeOverlayId = activeOverlayId ?? "";
   const overlayMap = new Map(section.overlays.map((item) => [item.id, item] as const));
 
@@ -469,35 +716,27 @@ function renderOverlayState(
       continue;
     }
 
-    const visible = progress >= overlay.timing.start && progress < overlay.timing.end + 0.0001;
-    const nextState = visible ? "active" : "inactive";
-    const nextTransform = getOverlayTransform(
-      overlay,
-      section.runtimeProfile.overlayEntrance,
-      visible,
-    );
-    const nextTransition = interactionMode === "controlled" ? "none" : getOverlayTransitionStyle(overlay);
-    const nextFilter = visible
-      ? "blur(0px)"
-      : overlay.content.transition?.preset === "blur-dissolve" || overlay.content.animation?.preset === "blur-in"
-        ? "blur(10px)"
-        : "blur(0px)";
-    const nextClipPath =
-      visible || overlay.content.transition?.preset !== "wipe"
-        ? "inset(0% 0% 0% 0%)"
-        : "inset(0% 100% 0% 0%)";
+    const animationState = getOverlayAnimationState(overlay, section, progress);
+    const nextState = animationState.active ? "active" : "inactive";
+    const nextTransition =
+      interactionMode === "controlled"
+        ? "none"
+        : allowOverlayTransitions
+          ? getOverlayTransitionStyle(overlay)
+          : "none";
 
     if (overlayElement.dataset.state !== nextState) {
-      overlayElement.style.opacity = visible ? "1" : "0";
-      overlayElement.style.visibility = visible ? "visible" : "hidden";
-      overlayElement.style.pointerEvents = visible ? "auto" : "none";
-      overlayElement.ariaHidden = visible ? "false" : "true";
+      overlayElement.style.visibility = animationState.active ? "visible" : "hidden";
+      overlayElement.style.pointerEvents = animationState.active ? "auto" : "none";
+      overlayElement.ariaHidden = animationState.active ? "false" : "true";
       overlayElement.dataset.state = nextState;
     }
-    if (overlayElement.style.transform !== nextTransform) overlayElement.style.transform = nextTransform;
+    const nextOpacity = String(Number(animationState.opacity.toFixed(4)));
+    if (overlayElement.style.opacity !== nextOpacity) overlayElement.style.opacity = nextOpacity;
+    if (overlayElement.style.transform !== animationState.transform) overlayElement.style.transform = animationState.transform;
     if (overlayElement.style.transition !== nextTransition) overlayElement.style.transition = nextTransition;
-    if (overlayElement.style.filter !== nextFilter) overlayElement.style.filter = nextFilter;
-    if (overlayElement.style.clipPath !== nextClipPath) overlayElement.style.clipPath = nextClipPath;
+    if (overlayElement.style.filter !== animationState.filter) overlayElement.style.filter = animationState.filter;
+    if (overlayElement.style.clipPath !== animationState.clipPath) overlayElement.style.clipPath = animationState.clipPath;
   }
 }
 
@@ -506,28 +745,31 @@ function ensureOverlayRoot(
   section: ProjectSectionManifest,
   mode: "desktop" | "mobile",
   interactionMode: "scroll" | "controlled",
+  allowOverlayTransitions: boolean,
   providedRoot?: HTMLElement,
 ) {
   const overlayRoot = providedRoot ?? document.createElement("div");
   overlayRoot.className = "motionroll-overlay-root absolute inset-0 z-20";
   overlayRoot.style.pointerEvents = "none";
   overlayRoot.dataset.interactionMode = interactionMode;
+  overlayRoot.dataset.overlayTransitions =
+    interactionMode === "controlled" && !allowOverlayTransitions ? "disabled" : "enabled";
 
   if (!providedRoot) {
     container.appendChild(overlayRoot);
   }
 
   if (overlayRoot.children.length === 0) {
-    const orderedOverlays = [...section.overlays].sort(
-      (left, right) => (left.content.layer ?? 0) - (right.content.layer ?? 0),
-    );
+    const orderedOverlays = getOverlaysInStackOrder(section.overlays);
     for (const overlay of orderedOverlays) {
       const card = document.createElement("article");
       card.dataset.overlayId = overlay.id;
       card.dataset.contentType = overlay.content.type ?? "text";
       card.className = `motionroll-overlay motionroll-theme-${overlay.content.theme}`;
       card.style.transition =
-        interactionMode === "controlled" ? "none" : getOverlayTransitionStyle(overlay);
+        interactionMode === "controlled" && !allowOverlayTransitions
+          ? "none"
+          : getOverlayTransitionStyle(overlay);
       card.style.opacity = "0";
       card.style.visibility = "hidden";
       card.style.pointerEvents = "none";
@@ -539,43 +781,19 @@ function ensureOverlayRoot(
         appendMediaElement(card, overlay, mode);
       }
 
-      if (overlay.content.eyebrow) {
-        const eyebrow = appendTextElement(card, "p", overlay.content.eyebrow, {
-          margin: "0 0 .4rem",
-          fontSize: ".75rem",
-          letterSpacing: ".16em",
-          textTransform: "uppercase",
-          opacity: "0.72",
-        }, "eyebrow", overlay.content.textHtml?.eyebrow);
-        applyTextStyles(eyebrow, overlay, {
-          fontSize: ".72rem",
-          margin: "0 0 .4rem",
-          opacity: "0.72",
+      if (overlay.content.text) {
+        const textBlock = appendTextElement(card, "p", overlay.content.text, {
+          margin: "0",
+          whiteSpace: "pre-wrap",
+          fontSize: `${(overlay.content.style?.fontSize ?? (mode === "mobile" ? 20 : 34)) * (mode === "mobile" ? 0.76 : 1)}px`,
+          lineHeight: "1.1",
+        }, "text", overlay.content.textHtml);
+        applyTextStyles(textBlock, overlay, {
+          margin: "0",
+          whiteSpace: "pre-wrap",
+          lineHeight: String(overlay.content.style?.lineHeight ?? 1.08),
         });
       }
-
-      const headline = appendTextElement(card, "h3", overlay.content.headline, {
-        margin: "0 0 .6rem",
-        fontSize: `${(overlay.content.style?.fontSize ?? (mode === "mobile" ? 20 : 34)) * (mode === "mobile" ? 0.76 : 1)}px`,
-        lineHeight: "1.1",
-      }, "headline", overlay.content.textHtml?.headline);
-      applyTextStyles(headline, overlay, {
-        margin: "0 0 .6rem",
-        lineHeight: String(overlay.content.style?.lineHeight ?? 1.08),
-      });
-
-      const body = appendTextElement(card, "p", overlay.content.body, {
-        margin: "0",
-        fontSize: mode === "mobile" ? ".88rem" : ".95rem",
-        lineHeight: "1.55",
-        opacity: "0.82",
-      }, "body", overlay.content.textHtml?.body);
-      applyTextStyles(body, overlay, {
-        margin: "0",
-        fontSize: mode === "mobile" ? ".84rem" : ".95rem",
-        lineHeight: String(Math.max(overlay.content.style?.lineHeight ?? 1.08, 1.2)),
-        opacity: "0.82",
-      });
 
       const actionableHref = overlay.content.linkHref ?? overlay.content.cta?.href;
       if (actionableHref) {
@@ -602,6 +820,13 @@ function ensureOverlayRoot(
 
       overlayRoot.appendChild(card);
     }
+  }
+
+  for (const overlay of getOverlaysInStackOrder(section.overlays)) {
+    const card = overlayRoot.querySelector<HTMLElement>(`[data-overlay-id="${overlay.id}"]`);
+    if (!card) continue;
+    card.style.zIndex = String(100 + (overlay.content.layer ?? 0));
+    overlayRoot.appendChild(card);
   }
 
   syncOverlayPresentationStyles(overlayRoot, section, container, mode);
@@ -823,6 +1048,7 @@ export function createScrollSection(
     section,
     mode,
     interactionMode,
+    options.enableOverlayTransitions ?? false,
     options.overlayRoot,
   );
   const frameCache = new Map<number, HTMLImageElement>();
@@ -920,7 +1146,10 @@ export function createScrollSection(
       return;
     }
 
-    const desiredFrameIndex = progressToFrameIndex(normalized, section.progressMapping.frameRange);
+    const desiredFrameIndex = progressToFrameIndex(
+      getSequenceRangeLocalProgress(section, normalized),
+      section.progressMapping.frameRange,
+    );
     latestRequestedFrameIndex = desiredFrameIndex;
     const frame = getFrameByIndex(section.frameAssets, desiredFrameIndex);
     const frameUrl = frame ? chooseFrameUrl(frame, mode) : "";
@@ -1171,4 +1400,4 @@ export function createScrollSection(
   };
 }
 
-export { getActiveOverlayId, getFrameByIndex, progressToFrameIndex } from "./utils";
+export { getActiveOverlayId, getFrameByIndex, getOverlaysInStackOrder, progressToFrameIndex } from "./utils";

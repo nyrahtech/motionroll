@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectManifest } from "../../shared/src";
+import { frameIndexToSequenceProgress } from "../../shared/src";
 
 class FakeElement {
   tagName: string;
@@ -28,6 +29,9 @@ class FakeElement {
   }
 
   appendChild(child: FakeElement) {
+    if (child.parent) {
+      child.parent.children = child.parent.children.filter((existingChild) => existingChild !== child);
+    }
     child.parent = this;
     this.children.push(child);
     return child;
@@ -177,8 +181,7 @@ function createManifest(): ProjectManifest {
             id: "overlay-1",
             timing: { start: 0.05, end: 0.45 },
             content: {
-              headline: "First beat",
-              body: "Start here",
+              text: "First beat\n\nStart here",
               align: "start" as const,
               theme: "light" as const,
               treatment: "default" as const,
@@ -189,8 +192,7 @@ function createManifest(): ProjectManifest {
             id: "overlay-2",
             timing: { start: 0.5, end: 0.9 },
             content: {
-              headline: "Second beat",
-              body: "Move here",
+              text: "Second beat\n\nMove here",
               align: "end" as const,
               theme: "dark" as const,
               treatment: "default" as const,
@@ -329,6 +331,175 @@ describe("runtime controlled progress", () => {
     const drawCalls = ((canvas as unknown as FakeCanvasElement).context.drawImage as ReturnType<typeof vi.fn>).mock.calls;
     expect(drawCalls.length).toBeGreaterThan(0);
     expect((container as unknown as FakeElement).children.some((child) => child.tagName === "video")).toBe(false);
+  });
+
+  it("renders overlays in layer stack order even when manifest rows are out of order", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          overlays: [
+            {
+              ...section.overlays[1]!,
+              id: "overlay-top",
+              content: {
+                ...section.overlays[1]!.content,
+                layer: 2,
+              },
+            },
+            {
+              ...section.overlays[0]!,
+              id: "overlay-bottom",
+              content: {
+                ...section.overlays[0]!.content,
+                layer: 0,
+              },
+            },
+          ],
+        },
+      ],
+    }, {
+      mode: "desktop",
+      reducedMotion: false,
+      overlayRoot,
+    });
+
+    const overlayCards = (overlayRoot as unknown as FakeElement).children;
+    expect(overlayCards.map((child) => child.dataset.overlayId)).toEqual(["overlay-bottom", "overlay-top"]);
+    expect(overlayCards.map((child) => child.style.zIndex)).toEqual(["100", "102"]);
+  });
+
+  it("maps trimmed scene progress locally within the visible sequence range", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const canvas = new FakeCanvasElement() as unknown as HTMLCanvasElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: [
+            { index: 10, path: "frame-10", variants: [{ kind: "mobile" as const, url: "/frames/10-mobile.jpg" }] },
+            { index: 15, path: "frame-15", variants: [{ kind: "mobile" as const, url: "/frames/15-mobile.jpg" }] },
+            { index: 19, path: "frame-19", variants: [{ kind: "mobile" as const, url: "/frames/19-mobile.jpg" }] },
+          ],
+          frameCount: 20,
+          progressMapping: {
+            startProgress: 0,
+            endProgress: 1,
+            frameCount: 20,
+            frameRange: {
+              start: 10,
+              end: 19,
+            },
+          },
+        },
+      ],
+    }, {
+      mode: "mobile",
+      interactionMode: "controlled",
+      overlayRoot,
+      canvas,
+      initialProgress: frameIndexToSequenceProgress(10, 20),
+    });
+
+    await flushPromises();
+
+    let drawCalls = ((canvas as unknown as FakeCanvasElement).context.drawImage as ReturnType<typeof vi.fn>).mock.calls;
+    expect(drawCalls.at(-1)?.[0]?.src).toBe("/frames/10-mobile.jpg");
+
+    controller.setProgress(frameIndexToSequenceProgress(19, 20));
+    await flushPromises();
+
+    drawCalls = ((canvas as unknown as FakeCanvasElement).context.drawImage as ReturnType<typeof vi.fn>).mock.calls;
+    expect(drawCalls.at(-1)?.[0]?.src).toBe("/frames/19-mobile.jpg");
+  });
+
+  it("evaluates overlay animation styles from the current controlled progress", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(
+      container,
+      {
+        ...manifest,
+        sections: [
+          {
+            ...section,
+            frameAssets: [],
+            frameCount: 48,
+            progressMapping: {
+              startProgress: 0,
+              endProgress: 1,
+              frameCount: 48,
+              frameRange: {
+                start: 0,
+                end: 47,
+              },
+            },
+            overlays: [
+              {
+                ...section.overlays[0]!,
+                timing: { start: 0.1, end: 0.9 },
+                content: {
+                  ...section.overlays[0]!.content,
+                  animation: {
+                    preset: "slide-up",
+                    easing: "ease-out",
+                    duration: 0.4,
+                    delay: 0,
+                  },
+                  transition: {
+                    preset: "blur-dissolve",
+                    easing: "ease-in-out",
+                    duration: 0.3,
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        mode: "desktop",
+        interactionMode: "controlled",
+        reducedMotion: false,
+        overlayRoot,
+      },
+    );
+
+    const card = (overlayRoot as unknown as FakeElement).children[0];
+    expect(card).toBeDefined();
+
+    controller.setProgress(0.1);
+    expect(Number(card!.style.opacity)).toBeCloseTo(0, 3);
+
+    controller.setProgress(0.2);
+    expect(Number(card!.style.opacity)).toBeGreaterThan(0);
+    expect(Number(card!.style.opacity)).toBeLessThan(1);
+    expect(card!.style.transform).toContain("translate3d(0px,");
+
+    controller.setProgress(0.5);
+    expect(Number(card!.style.opacity)).toBeCloseTo(1, 2);
+    expect(card!.style.filter).toBe("blur(0px)");
+
+    controller.setProgress(0.84);
+    expect(Number(card!.style.opacity)).toBeLessThan(1);
+    expect(card!.style.filter).not.toBe("blur(0px)");
   });
 
   it("seeds the controlled placeholder from the current playhead frame", async () => {

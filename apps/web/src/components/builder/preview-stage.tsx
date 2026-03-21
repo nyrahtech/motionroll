@@ -5,20 +5,17 @@ import type { ProjectManifest } from "@motionroll/shared";
 import { RuntimePreview } from "./runtime-preview";
 
 export function PreviewStage({
-  manifest, mode, reducedMotion, playheadProgress, durationSeconds,
-  isPlaying, selectedOverlayId, onModeChange, onReducedMotionChange,
+  manifest, mode, playheadProgress,
+  isPlaying, selectedOverlayId, onModeChange,
   onPlayheadChange, onPlayToggle, onSelectOverlay,
   onOverlayLayoutChange, onInlineTextChange, onOverlayStyleChange, onDuplicateOverlay, onDeleteOverlay,
 }: {
   manifest: ProjectManifest;
   mode: "desktop" | "mobile";
-  reducedMotion: boolean;
   playheadProgress: number;
-  durationSeconds: number;
   isPlaying: boolean;
   selectedOverlayId?: string;
   onModeChange: (mode: "desktop" | "mobile") => void;
-  onReducedMotionChange: (value: boolean) => void;
   onPlayheadChange: (value: number) => void;
   onPlayToggle: () => void;
   onSelectOverlay: (overlayId: string) => void;
@@ -35,7 +32,7 @@ export function PreviewStage({
   ) => void;
   onInlineTextChange: (
     overlayId: string,
-    field: "eyebrow" | "headline" | "body",
+    field: "text",
     value: string,
     htmlValue?: string,
   ) => void;
@@ -85,12 +82,10 @@ export function PreviewStage({
           <RuntimePreview
             manifest={manifest}
             mode={mode}
-            reducedMotion={reducedMotion}
             isPlaying={isPlaying}
             playheadProgress={playheadProgress}
             onPlayheadChange={onPlayheadChange}
             onModeChange={onModeChange}
-            onReducedMotionChange={onReducedMotionChange}
             onPlayToggle={onPlayToggle}
             showControls={false}
             selectedOverlayId={selectedOverlayId}

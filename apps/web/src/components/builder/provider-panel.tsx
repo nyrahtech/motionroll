@@ -4,10 +4,16 @@ import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { MediaFrame } from "@/components/motionroll/media-frame";
-import { StatusPill } from "@/components/motionroll/surfaces";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { EditorPanel } from "./editor-shell";
 
 type ProviderName = "runway" | "luma" | "sora" | "other";
@@ -17,10 +23,21 @@ type ProviderAsset = {
   previewUrl: string;
 };
 
-const selectClassName =
-  "focus-ring flex h-9 w-full rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--panel-bg-muted)] px-3 py-2 text-sm text-[var(--foreground)]";
+const placeholderAssets = Array.from({ length: 2 }, (_, index) => ({
+  id: `placeholder-${index}`,
+  title: `Asset ${index + 1}`,
+}));
 
-export function ProviderPanel({ projectId }: { projectId: string }) {
+const fieldLabelClassName =
+  "text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]";
+
+export function ProviderPanel({
+  projectId,
+  embedded = false,
+}: {
+  projectId: string;
+  embedded?: boolean;
+}) {
   const form = useForm({
     defaultValues: {
       provider: "runway" as ProviderName,
@@ -28,10 +45,9 @@ export function ProviderPanel({ projectId }: { projectId: string }) {
       apiKey: "",
     },
   });
-  const [message, setMessage] = useState(
-    "",
-  );
+  const [message, setMessage] = useState("");
   const [assets, setAssets] = useState<ProviderAsset[]>([]);
+  const provider = form.watch("provider");
 
   async function connect() {
     const values = form.getValues();
@@ -75,39 +91,56 @@ export function ProviderPanel({ projectId }: { projectId: string }) {
     setMessage(data.message ?? "");
   }
 
-  return (
-    <EditorPanel
-      title="Import AI scene"
-      badge={<Badge variant="accent">Runway · Luma · Sora</Badge>}
-    >
+  const content = (
+    <>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-2">
-          <span className="field-label">Provider</span>
-          <select className={selectClassName} {...form.register("provider")}>
-            <option value="runway">Runway</option>
-            <option value="luma">Luma</option>
-            <option value="sora">Sora</option>
-            <option value="other">Other</option>
-          </select>
+          <span className={fieldLabelClassName}>Provider</span>
+          <Select
+            value={provider}
+            onValueChange={(value) =>
+              form.setValue("provider", value as ProviderName, { shouldDirty: true })
+            }
+          >
+            <SelectTrigger className="rounded-[12px]" size="default">
+              <SelectValue placeholder="Provider" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="runway">Runway</SelectItem>
+              <SelectItem value="luma">Luma</SelectItem>
+              <SelectItem value="sora">Sora</SelectItem>
+              <SelectItem value="other">Other</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label className="space-y-2">
-          <span className="field-label">Account label</span>
-          <Input {...form.register("accountLabel")} />
+          <span className={fieldLabelClassName}>Account label</span>
+          <Input className="h-9 rounded-[12px]" {...form.register("accountLabel")} />
         </label>
       </div>
-      <label className="space-y-2">
-        <span className="field-label">Credential placeholder</span>
-        <Input placeholder="Paste API key or token" {...form.register("apiKey")} />
-      </label>
-      <div className="flex flex-wrap gap-3">
-        <Button type="button" variant="secondary" onClick={connect}>
-          Connect account
-        </Button>
-        <Button type="button" variant="quiet" onClick={loadAssets}>
-          List generated assets
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <label className="space-y-2">
+          <span className={fieldLabelClassName}>Token</span>
+          <Input
+            className="h-9 rounded-[12px]"
+            placeholder="Paste API key or token"
+            {...form.register("apiKey")}
+          />
+        </label>
+        <Button type="button" variant="secondary" className="h-9 px-4" onClick={connect}>
+          Connect
         </Button>
       </div>
-      {message ? <p className="text-xs" style={{ color: "var(--foreground-muted)" }}>{message}</p> : null}
+      <div className="flex flex-wrap gap-3">
+        <Button type="button" variant="quiet" onClick={loadAssets}>
+          List assets
+        </Button>
+      </div>
+      {message ? (
+        <p className="text-xs" style={{ color: "var(--foreground-muted)" }}>
+          {message}
+        </p>
+      ) : null}
       {assets.length > 0 ? (
         <div className="space-y-3">
           {assets.map((asset) => (
@@ -122,7 +155,7 @@ export function ProviderPanel({ projectId }: { projectId: string }) {
                   aspectClassName="aspect-[5/4]"
                   overlay={
                     <div className="absolute inset-x-3 top-3 flex justify-between gap-2">
-                      <Badge variant="quiet">Provider preview</Badge>
+                      <Badge variant="quiet">Preview</Badge>
                     </div>
                   }
                 />
@@ -138,14 +171,47 @@ export function ProviderPanel({ projectId }: { projectId: string }) {
                   </div>
                   <Button type="button" size="sm" onClick={() => importAsset(asset.externalId)}>
                     <Sparkles className="h-4 w-4" />
-                    Import into project
+                    Import
                   </Button>
                 </div>
               </div>
             </div>
           ))}
         </div>
-      ) : null}
+      ) : (
+        <div className="space-y-3">
+          <p className="text-xs" style={{ color: "var(--foreground-muted)" }}>
+            Connect a provider and list assets to fill these slots.
+          </p>
+          {placeholderAssets.map((asset) => (
+            <div
+              key={asset.id}
+              className="rounded-[var(--radius-md)] border border-dashed border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.02)] p-3"
+            >
+              <div className="grid gap-3 sm:grid-cols-[132px,minmax(0,1fr)]">
+                <div className="aspect-[5/4] rounded-[var(--radius-sm)] bg-[rgba(255,255,255,0.04)]" />
+                <div className="flex min-w-0 flex-col justify-between gap-3">
+                  <div className="space-y-2">
+                    <div className="h-4 w-32 rounded-full bg-[rgba(255,255,255,0.08)]" />
+                    <div className="h-3 w-24 rounded-full bg-[rgba(255,255,255,0.05)]" />
+                  </div>
+                  <div className="h-8 w-24 rounded-[10px] bg-[rgba(255,255,255,0.05)]" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  if (embedded) {
+    return <div className="space-y-3">{content}</div>;
+  }
+
+  return (
+    <EditorPanel title="Import AI scene" badge={<Badge variant="accent">Runway · Luma · Sora</Badge>}>
+      {content}
     </EditorPanel>
   );
 }

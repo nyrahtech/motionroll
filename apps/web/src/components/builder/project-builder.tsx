@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   clampProgress,
+  frameIndexToSequenceProgress,
   normalizeTimingRange,
   type FontFamily,
   type OverlayDefinition,
@@ -11,7 +12,7 @@ import {
   type PresetId,
   type TransitionPreset,
 } from "@motionroll/shared";
-import { SidebarPanel } from "./editor-sidebar";
+import { SidebarPanel, type SidebarContext } from "./editor-sidebar";
 import { TopBar } from "./editor-top-bar";
 import { PreviewStage } from "./preview-stage";
 import { TimelinePanel } from "./timeline-panel";
@@ -22,8 +23,6 @@ import {
   type TimelineSelection,
   type TimelineTrackModel,
 } from "./timeline-model";
-import { UploadPanel } from "./upload-panel";
-import { ProviderPanel } from "./provider-panel";
 import type { EditorContainerProps } from "./editor-types";
 import {
   getLocalProjectDraft,
@@ -32,7 +31,7 @@ import {
   type LocalProjectDraftRecord,
 } from "@/lib/local-project-db";
 import { buildProjectDraftDocument } from "@/lib/project-draft";
-import { getPrimarySourceAsset, getRenderableAssetPreview } from "@/lib/project-assets";
+import { getPrimarySourceAsset } from "@/lib/project-assets";
 
 type HydratedOverlayDefinition = OverlayDefinition & {
   content: OverlayDefinition["content"] & {
@@ -64,7 +63,7 @@ type HistoryState = {
 
 function createDefaultOverlay(
   id: string,
-  type: "headline" | "subheadline" | "text" | "image" | "logo" | "icon" | "moment",
+  type: "text" | "image" | "logo" | "icon" | "moment",
   playhead: number,
   mediaUrl?: string,
 ): HydratedOverlayDefinition {
@@ -80,29 +79,13 @@ function createDefaultOverlay(
     id,
     timing,
     content: {
-      type:
-        type === "headline" || type === "subheadline" || type === "moment"
-          ? "text"
-          : type,
-      eyebrow: type === "text" ? "New content" : undefined,
-      headline:
-        type === "headline"
-          ? "New headline"
-          : type === "subheadline"
-            ? "Supporting subheadline"
-            : type === "moment"
-              ? "Moment highlight"
-              : type === "image"
-                ? "Image callout"
-                : type === "logo"
-                  ? "Logo mark"
-                  : type === "icon"
-                    ? "Icon detail"
-                    : "Text block",
-      body:
+      type: type === "moment" ? "text" : type,
+      text:
         type === "image" || type === "logo" || type === "icon"
-          ? "Swap this media and refine its timing."
-          : "Edit the copy inline in preview or in the sidebar.",
+          ? undefined
+          : type === "moment"
+            ? "Moment highlight"
+            : "New text block",
       mediaUrl,
       align: "start",
       theme: "dark",
@@ -116,8 +99,8 @@ function createDefaultOverlay(
       },
       style: {
         fontFamily: "Inter",
-        fontWeight: type === "headline" ? 700 : 600,
-        fontSize: type === "headline" ? 46 : type === "subheadline" ? 28 : 34,
+        fontWeight: type === "moment" ? 700 : 600,
+        fontSize: type === "moment" ? 40 : 34,
         lineHeight: 1.08,
         letterSpacing: 0,
         textAlign: "start",
@@ -126,14 +109,12 @@ function createDefaultOverlay(
         maxWidth: type === "image" ? 360 : 420,
         italic: false,
         underline: false,
-        eyebrowFontSize: 12,
-        bodyFontSize: 15,
         textTransform: "none",
         buttonLike: false,
       },
       background: {
         enabled: false,
-        mode: "transparent",
+        mode: "solid",
         color: "#0d1016",
         opacity: 0.82,
         radius: 14,
@@ -157,21 +138,40 @@ function createDefaultOverlay(
   };
 }
 
+function normalizeTextHtml(input: unknown) {
+  if (typeof input === "string") {
+    return input;
+  }
+
+  if (input && typeof input === "object") {
+    const legacy = input as {
+      text?: string;
+      eyebrow?: string;
+      headline?: string;
+      body?: string;
+    };
+    const parts = [legacy.text, legacy.eyebrow, legacy.headline, legacy.body]
+      .map((value) => value?.trim())
+      .filter((value): value is string => Boolean(value));
+    return parts.length > 0 ? parts.join("<br><br>") : undefined;
+  }
+
+  return undefined;
+}
+
 function hydrateOverlay(overlay: OverlayDefinition): HydratedOverlayDefinition {
   return {
     ...overlay,
     content: {
       type: overlay.content.type ?? "text",
-      eyebrow: overlay.content.eyebrow,
-      headline: overlay.content.headline,
-      body: overlay.content.body,
+      text: overlay.content.text,
       cta: overlay.content.cta,
       align: overlay.content.align ?? "start",
       theme: overlay.content.theme ?? "light",
       treatment: overlay.content.treatment ?? "default",
       mediaUrl: overlay.content.mediaUrl,
       linkHref: overlay.content.linkHref,
-      textHtml: overlay.content.textHtml,
+      textHtml: normalizeTextHtml(overlay.content.textHtml),
       layer: overlay.content.layer ?? 0,
       layout: {
         x: overlay.content.layout?.x ?? 0.08,
@@ -183,8 +183,6 @@ function hydrateOverlay(overlay: OverlayDefinition): HydratedOverlayDefinition {
         fontFamily: overlay.content.style?.fontFamily ?? "Inter",
         fontWeight: overlay.content.style?.fontWeight ?? 600,
         fontSize: overlay.content.style?.fontSize ?? 34,
-        eyebrowFontSize: overlay.content.style?.eyebrowFontSize ?? 12,
-        bodyFontSize: overlay.content.style?.bodyFontSize ?? 15,
         lineHeight: overlay.content.style?.lineHeight ?? 1.08,
         letterSpacing: overlay.content.style?.letterSpacing ?? 0,
         textAlign: overlay.content.style?.textAlign ?? overlay.content.align ?? "start",
@@ -198,7 +196,7 @@ function hydrateOverlay(overlay: OverlayDefinition): HydratedOverlayDefinition {
       },
       background: {
         enabled: overlay.content.background?.enabled ?? false,
-        mode: overlay.content.background?.mode ?? "transparent",
+        mode: overlay.content.background?.enabled ? "solid" : "transparent",
         color: overlay.content.background?.color ?? "#0d1016",
         opacity: overlay.content.background?.opacity ?? 0.82,
         radius: overlay.content.background?.radius ?? 14,
@@ -409,6 +407,18 @@ function buildOverlayId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+function clampPlayheadToSceneRange(
+  playhead: number,
+  frameRangeStart: number,
+  frameRangeEnd: number,
+  frameCount: number,
+) {
+  const safeFrameCount = Math.max(frameCount, 1);
+  const rangeStart = frameIndexToSequenceProgress(frameRangeStart, safeFrameCount);
+  const rangeEnd = frameIndexToSequenceProgress(frameRangeEnd, safeFrameCount);
+  return clampProgress(Math.min(Math.max(playhead, rangeStart), rangeEnd));
+}
+
 export function ProjectEditor({ project, projects, manifest }: EditorContainerProps) {
   const initialRemoteDraft = buildProjectDraftDocument(project, manifest);
   const [projectState, setProjectState] = useState(project);
@@ -419,7 +429,6 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
   const [remoteSyncState, setRemoteSyncState] = useState<"idle" | "syncing" | "synced" | "error">("synced");
   const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(false);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
-  const [reducedMotion, setReducedMotion] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(0.24);
   const [selection, setSelection] = useState<TimelineSelection>(
@@ -427,7 +436,9 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       ? { clipId: `layer-${manifest.sections[0].overlays[0].id}`, trackType: "layer" }
       : { clipId: "section-range", trackType: "section" },
   );
-  const [showImportTools, setShowImportTools] = useState(false);
+  const [activeSidebarContext, setActiveSidebarContext] = useState<SidebarContext>(
+    manifest.sections[0]?.overlays[0] ? "edit" : "insert",
+  );
   const playbackRafRef = useRef<number | null>(null);
   const playbackLastTickRef = useRef<number | null>(null);
   const playheadRef = useRef(playhead);
@@ -470,16 +481,6 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     hasUnsyncedChanges,
     hasUnpublishedChanges,
   } as const;
-  const defaultMediaUrl = useMemo(() => {
-    const poster = projectState.assets.find((asset) => asset.kind === "poster");
-    if (poster) {
-      return getRenderableAssetPreview(poster, projectState.assets);
-    }
-    return projectState.assets[0]
-      ? getRenderableAssetPreview(projectState.assets[0], projectState.assets)
-      : undefined;
-  }, [projectState.assets]);
-
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
@@ -489,8 +490,30 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
   }, [playhead]);
 
   useEffect(() => {
+    const nextPlayhead = clampPlayheadToSceneRange(
+      playheadRef.current,
+      draft.frameRangeStart,
+      draft.frameRangeEnd,
+      frameCount,
+    );
+    if (Math.abs(nextPlayhead - playheadRef.current) < 0.0005) {
+      return;
+    }
+
+    setIsPlaying(false);
+    playheadRef.current = nextPlayhead;
+    setPlayhead(nextPlayhead);
+  }, [draft.frameRangeEnd, draft.frameRangeStart, frameCount]);
+
+  useEffect(() => {
     hasUnsyncedChangesRef.current = hasUnsyncedChanges;
   }, [hasUnsyncedChanges]);
+
+  useEffect(() => {
+    if (activeSidebarContext === "edit" && !selectedOverlay) {
+      setActiveSidebarContext("insert");
+    }
+  }, [activeSidebarContext, selectedOverlay]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -1065,6 +1088,12 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
 
   function handleSelectionChange(nextSelection: TimelineSelection) {
     setSelection(nextSelection);
+    setActiveSidebarContext((current) => {
+      if (nextSelection?.trackType === "layer") {
+        return "edit";
+      }
+      return current === "edit" ? "insert" : current;
+    });
   }
 
   function handleClipTimingChange(clipId: string, timing: { start: number; end: number }) {
@@ -1100,6 +1129,7 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
   function selectOverlay(overlayId: string) {
     if (!overlayId) {
       setSelection({ clipId: "section-range", trackType: "section" });
+      setActiveSidebarContext((current) => (current === "edit" ? "insert" : current));
       return;
     }
 
@@ -1109,11 +1139,13 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
         ? current
         : nextSelection,
     );
+    setActiveSidebarContext("edit");
   }
 
   function addOverlay(type: string) {
     if (type === "video") {
-      setShowImportTools((current) => !current);
+      setSelection({ clipId: "section-range", trackType: "section" });
+      setActiveSidebarContext("upload");
       return;
     }
 
@@ -1128,11 +1160,10 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       overlayId,
       contentType,
       playheadRef.current,
-      contentType === "text" ? undefined : defaultMediaUrl,
+      undefined,
     );
     if (normalizedType === "moment") {
-      overlay.content.eyebrow = "Moment";
-      overlay.content.headline = "New section beat";
+      overlay.content.text = "Moment\n\nNew section beat";
       overlay.content.transition = {
         preset: "wipe",
         easing: "ease-in-out",
@@ -1184,7 +1215,7 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
         ),
         content: {
           ...source.content,
-          headline: `${source.content.headline} Copy`,
+          text: `${source.content.text ?? "Text block"} Copy`,
         },
       });
 
@@ -1242,32 +1273,47 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
   }
 
   function handleOverlayStyleQuickChange(overlayId: string, changes: Record<string, unknown>) {
-    // recordHistory=false: live edits (color picker drag, font size input)
-    // fire on every pointermove. Skipping pushHistory avoids structuredClone
-    // + setHistory on each tick, which was the main source of lag here.
-    updateDraft((current) => ({
-      ...current,
-      overlays: current.overlays.map((overlay) =>
-        overlay.id === overlayId
-          ? {
-              ...overlay,
-              content: {
-                ...overlay.content,
-                style: {
-                  ...overlay.content.style,
-                  ...(changes.fontFamily !== undefined ? { fontFamily: String(changes.fontFamily) as FontFamily } : {}),
-                  ...(changes.fontWeight !== undefined ? { fontWeight: Number(changes.fontWeight) } : {}),
-                  ...(changes.fontSize !== undefined ? { fontSize: Number(changes.fontSize) } : {}),
-                  ...(changes.color !== undefined ? { color: String(changes.color) } : {}),
-                  ...(changes.italic !== undefined ? { italic: Boolean(changes.italic) } : {}),
-                  ...(changes.underline !== undefined ? { underline: Boolean(changes.underline) } : {}),
-                  ...(changes.textAlign !== undefined ? { textAlign: changes.textAlign as "start" | "center" | "end" } : {}),
-                },
-              },
-            }
-          : overlay,
-      ),
-    }), false);
+    setDraft((current) => {
+      let didChange = false;
+      const overlays = current.overlays.map((overlay) => {
+        if (overlay.id !== overlayId) {
+          return overlay;
+        }
+
+        didChange = true;
+        return {
+          ...overlay,
+          content: {
+            ...overlay.content,
+            style: {
+              ...overlay.content.style,
+              ...(changes.fontFamily !== undefined ? { fontFamily: String(changes.fontFamily) as FontFamily } : {}),
+              ...(changes.fontWeight !== undefined ? { fontWeight: Number(changes.fontWeight) } : {}),
+              ...(changes.fontSize !== undefined ? { fontSize: Number(changes.fontSize) } : {}),
+              ...(changes.color !== undefined ? { color: String(changes.color) } : {}),
+              ...(changes.italic !== undefined ? { italic: Boolean(changes.italic) } : {}),
+              ...(changes.underline !== undefined ? { underline: Boolean(changes.underline) } : {}),
+              ...(changes.textAlign !== undefined ? { textAlign: changes.textAlign as "start" | "center" | "end" } : {}),
+            },
+            background: {
+              ...overlay.content.background,
+              ...(changes.backgroundColor !== undefined ? { color: String(changes.backgroundColor) } : {}),
+              ...(changes.backgroundBorderColor !== undefined ? { borderColor: String(changes.backgroundBorderColor) } : {}),
+            },
+          },
+        };
+      });
+
+      if (!didChange) {
+        return current;
+      }
+
+      const nextDraft = { ...current, overlays };
+      draftRef.current = nextDraft;
+      setHasUnsyncedChanges(true);
+      setRemoteSyncState("idle");
+      return nextDraft;
+    });
   }
 
   function handleSetClipTransitionPreset(clipId: string, preset?: string) {
@@ -1294,8 +1340,8 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     }));
   }
 
-  function handleMoveClipToLayer(clipId: string, targetLayer: number) {
-    const clip = findClipById(timelineTracks, clipId);
+  function handleCommitClipMove(move: { clipId: string; start: number; end: number; targetLayer?: number }) {
+    const clip = findClipById(timelineTracks, move.clipId);
     const overlayId = clip?.metadata?.overlayId;
     if (!overlayId) {
       return;
@@ -1309,15 +1355,62 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
           overlay.id === overlayId
             ? {
                 ...overlay,
+                timing: {
+                  start: move.start,
+                  end: move.end,
+                },
                 content: {
                   ...overlay.content,
-                  layer: targetLayer,
+                  layer: move.targetLayer ?? overlay.content.layer ?? 0,
                 },
               }
             : overlay,
         ),
       ),
     }));
+  }
+
+  function handleMoveClipToLayer(clipId: string, targetLayer: number) {
+    const clip = findClipById(timelineTracks, clipId);
+    if (!clip) {
+      return;
+    }
+
+    handleCommitClipMove({
+      clipId,
+      start: clip.start,
+      end: clip.end,
+      targetLayer,
+    });
+  }
+
+  function handleMoveClipToNewLayer(clipId: string) {
+    const clip = findClipById(timelineTracks, clipId);
+    const overlayId = clip?.metadata?.overlayId;
+    if (!overlayId) {
+      return;
+    }
+
+    updateDraft((current) => {
+      const targetLayer = current.layerCount;
+      return {
+        ...current,
+        layerCount: targetLayer + 1,
+        overlays: normalizeOverlayLayers(
+          current.overlays.map((overlay) =>
+            overlay.id === overlayId
+              ? {
+                  ...overlay,
+                  content: {
+                    ...overlay.content,
+                    layer: targetLayer,
+                  },
+                }
+              : overlay,
+          ),
+        ),
+      };
+    });
   }
 
   function handleReorderOverlays(fromIndex: number, toIndex: number) {
@@ -1385,29 +1478,28 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
         scrubStrength={draft.scrubStrength}
         sectionHeightVh={draft.sceneHeight}
         saveStatus={saveStatus}
-        canUndo={history.past.length > 0}
-        canRedo={history.future.length > 0}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
         onProjectTitleChange={(value) => updateDraft((current) => ({ ...current, title: value }))}
         onSectionTitleChange={(value) => updateDraft((current) => ({ ...current, sceneName: value }))}
         onFrameRangeChange={(field, value) =>
-          updateDraft((current) => ({
-            ...current,
-            frameRangeStart: field === "start" ? Math.max(0, value) : current.frameRangeStart,
-            frameRangeEnd:
-              field === "end" ? Math.max(value, current.frameRangeStart + 1) : current.frameRangeEnd,
-          }))
+          updateDraft((current) => {
+            const nextFrameRangeStart =
+              field === "start" ? Math.max(0, value) : current.frameRangeStart;
+            const requestedFrameRangeEnd =
+              field === "end" ? Math.max(value, nextFrameRangeStart + 1) : current.frameRangeEnd;
+            return {
+              ...current,
+              frameRangeStart: nextFrameRangeStart,
+              frameRangeEnd: Math.max(requestedFrameRangeEnd, nextFrameRangeStart + 1),
+            };
+          })
         }
         onSectionFieldChange={(field, value) => updateDraft((current) => ({
                 ...current,
                 ...(field === "scrubStrength" ? { scrubStrength: value } : { sceneHeight: value }),
               }))}
         previewMode={previewMode}
-        reducedMotion={reducedMotion}
         isPlaying={isPlaying}
         onPreviewModeChange={setPreviewMode}
-        onReducedMotionChange={setReducedMotion}
         onRetrySync={async () => {
           await flushRemoteSync();
         }}
@@ -1419,10 +1511,15 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
 
         {/* Left sidebar */}
         <SidebarPanel
-          overlays={draft.overlays}
+          projectId={projectState.id}
+          activeContext={activeSidebarContext}
           selectedOverlay={selectedOverlay}
-          selectedClip={selectedClip}
-          selection={selection}
+          onContextChange={(context) => {
+            if (context === "upload" || context === "ai") {
+              setSelection({ clipId: "section-range", trackType: "section" });
+            }
+            setActiveSidebarContext(context);
+          }}
           onOverlayFieldChange={(field, value) => {
             updateSelectedOverlay((overlay) => {
               const hydrated = hydrateOverlay(overlay);
@@ -1442,19 +1539,13 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                 timing: nextTiming,
                 content: {
                   ...hydrated.content,
-                  eyebrow: field === "eyebrow" ? value : hydrated.content.eyebrow,
-                  headline: field === "headline" ? value : hydrated.content.headline,
-                  body: field === "body" ? value : hydrated.content.body,
-                  mediaUrl: field === "mediaUrl" ? value : hydrated.content.mediaUrl,
-                  linkHref: field === "linkHref" ? value : hydrated.content.linkHref,
+                  text: field === "text" ? String(value) : hydrated.content.text,
+                  mediaUrl: field === "mediaUrl" ? String(value) : hydrated.content.mediaUrl,
+                  linkHref: field === "linkHref" ? String(value) : hydrated.content.linkHref,
                   align:
                     field === "align"
                       ? (value as OverlayDefinition["content"]["align"])
                       : hydrated.content.align,
-                  theme:
-                    field === "theme"
-                      ? (value as OverlayDefinition["content"]["theme"])
-                      : hydrated.content.theme,
                   type:
                     field === "type"
                       ? (value as HydratedOverlayDefinition["content"]["type"])
@@ -1462,8 +1553,14 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                   cta:
                     field === "ctaLabel" || field === "ctaHref"
                       ? {
-                          label: field === "ctaLabel" ? value : hydrated.content.cta?.label ?? "",
-                          href: field === "ctaHref" ? value : hydrated.content.cta?.href ?? "",
+                          label:
+                            field === "ctaLabel"
+                              ? String(value)
+                              : hydrated.content.cta?.label ?? "",
+                          href:
+                            field === "ctaHref"
+                              ? String(value)
+                              : hydrated.content.cta?.href ?? "",
                         }
                       : hydrated.content.cta,
                 },
@@ -1476,7 +1573,6 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
               const nextBackground = {
                 ...hydrated.content.background,
                 enabled: field === "backgroundEnabled" ? Boolean(value) : hydrated.content.background.enabled,
-                mode: field === "backgroundMode" ? (value as "transparent" | "solid") : hydrated.content.background.mode,
                 color: field === "backgroundColor" ? String(value) : hydrated.content.background.color,
                 opacity: field === "backgroundOpacity" ? Number(value) : hydrated.content.background.opacity,
                 radius: field === "backgroundRadius" ? Number(value) : hydrated.content.background.radius,
@@ -1485,6 +1581,14 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                 borderColor: field === "backgroundBorderColor" ? String(value) : hydrated.content.background.borderColor,
                 borderOpacity: field === "backgroundBorderOpacity" ? Number(value) : hydrated.content.background.borderOpacity,
               };
+              const backgroundEnabled =
+                field === "backgroundEnabled"
+                  ? Boolean(value)
+                  : field === "backgroundOpacity"
+                    ? Number(value) > 0
+                    : field === "backgroundColor"
+                      ? nextBackground.opacity > 0
+                      : hydrated.content.background.enabled;
               return {
                 ...hydrated,
                 content: {
@@ -1494,9 +1598,13 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                       ? hydrated.content.style
                       : {
                           ...hydrated.content.style,
-                          ...(field === "layer" ? {} : { [field]: value }),
-                        },
-                  background: nextBackground,
+                        ...(field === "layer" ? {} : { [field]: value }),
+                      },
+                  background: {
+                    ...nextBackground,
+                    enabled: backgroundEnabled,
+                    mode: backgroundEnabled ? "solid" : "transparent",
+                  },
                   layout:
                     field === "width" || field === "height" || field === "x" || field === "y"
                       ? { ...hydrated.content.layout, [field]: Number(value) }
@@ -1504,6 +1612,12 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                 },
               };
             });
+          }}
+          onOverlayStyleLiveChange={(field, value) => {
+            if (!selectedOverlay) {
+              return;
+            }
+            handleOverlayStyleQuickChange(selectedOverlay.id, { [field]: value });
           }}
           onOverlayAnimationChange={(field, value) => {
             updateSelectedOverlay((overlay) => {
@@ -1529,16 +1643,7 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
               };
             });
           }}
-          onSelectOverlay={(overlayId) => selectOverlay(overlayId)}
           onAddContent={addOverlay}
-          extraAddContent={
-            showImportTools ? (
-              <div className="space-y-3">
-                <UploadPanel projectId={projectState.id} />
-                <ProviderPanel projectId={projectState.id} />
-              </div>
-            ) : null
-          }
         />
 
         {/* Canvas + Timeline column */}
@@ -1548,13 +1653,10 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
             <PreviewStage
               manifest={editorManifest}
               mode={previewMode}
-              reducedMotion={reducedMotion}
               playheadProgress={playhead}
-              durationSeconds={durationSeconds}
               isPlaying={isPlaying}
               selectedOverlayId={selectedOverlayId}
               onModeChange={setPreviewMode}
-              onReducedMotionChange={setReducedMotion}
               onPlayheadChange={(value) => {
                 const nextPlayhead = clampProgress(value);
                 setIsPlaying(false);
@@ -1604,8 +1706,6 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                               style: {
                                 ...hydrated.content.style,
                                 fontSize: Number(styleChanges?.fontSize ?? Math.max(10, Math.round(hydrated.content.style.fontSize * contentScale))),
-                                eyebrowFontSize: Number(styleChanges?.eyebrowFontSize ?? Math.max(8, Math.round(hydrated.content.style.eyebrowFontSize * contentScale))),
-                                bodyFontSize: Number(styleChanges?.bodyFontSize ?? Math.max(10, Math.round(hydrated.content.style.bodyFontSize * contentScale))),
                                 maxWidth: Number(styleChanges?.maxWidth ?? Math.max(80, Math.round((hydrated.content.style.maxWidth ?? nextLayout.width ?? 420) * scaleX))),
                               },
                               background: {
@@ -1631,10 +1731,7 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                           content: {
                             ...overlay.content,
                             [field]: value,
-                            textHtml: {
-                              ...overlay.content.textHtml,
-                              [field]: htmlValue || undefined,
-                            },
+                            textHtml: htmlValue || undefined,
                           },
                         }
                       : overlay,
@@ -1658,7 +1755,11 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
               playhead={playhead}
               durationSeconds={durationSeconds}
               isPlaying={isPlaying}
+              canUndo={history.past.length > 0}
+              canRedo={history.future.length > 0}
               onPlayToggle={() => setIsPlaying((current) => !current)}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
               onPlayheadChange={(value) => {
                 const nextPlayhead = clampProgress(value);
                 setIsPlaying(false);
@@ -1667,12 +1768,14 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
               }}
               onSelectionChange={handleSelectionChange}
               onClipTimingChange={handleClipTimingChange}
-              onMoveClipToLayer={handleMoveClipToLayer}
+              onCommitClipMove={handleCommitClipMove}
               onAddLayer={handleAddLayer}
               onDeleteLayer={handleDeleteLayer}
               onAddAtPlayhead={() => addOverlay("text")}
               onDuplicateClip={handleDuplicateClip}
               onDeleteClip={handleDeleteClip}
+              onMoveClipToLayer={handleMoveClipToLayer}
+              onMoveClipToNewLayer={handleMoveClipToNewLayer}
               onReorderTracks={handleReorderOverlays}
               onSetClipTransitionPreset={handleSetClipTransitionPreset}
             />

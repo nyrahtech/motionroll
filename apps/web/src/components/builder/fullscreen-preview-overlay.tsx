@@ -1,22 +1,18 @@
 "use client";
 
-import { MonitorSmartphone, MonitorUp, MoonStar, Shrink } from "lucide-react";
+import { MonitorSmartphone, MonitorUp, Shrink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 export function FullscreenPreviewOverlay({
   mode,
-  reducedMotion,
   title,
   onModeChange,
-  onReducedMotionToggle,
   onExit,
 }: {
   mode: "desktop" | "mobile";
-  reducedMotion: boolean;
   title: string;
   onModeChange: (mode: "desktop" | "mobile") => void;
-  onReducedMotionToggle: () => void;
   onExit: () => void;
 }) {
   return (
@@ -45,15 +41,6 @@ export function FullscreenPreviewOverlay({
           >
             <MonitorSmartphone className="h-4 w-4" />
             Mobile
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={reducedMotion ? "secondary" : "quiet"}
-            onClick={onReducedMotionToggle}
-          >
-            <MoonStar className="h-4 w-4" />
-            Reduced motion
           </Button>
           <Button type="button" size="sm" variant="secondary" onClick={onExit}>
             <Shrink className="h-4 w-4" />

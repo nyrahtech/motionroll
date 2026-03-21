@@ -28,9 +28,10 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm whitespace-nowrap outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-9 data-[size=sm]:h-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        "border-[var(--editor-border)] bg-[var(--editor-shell)] text-[var(--editor-text)]",
-        "focus:border-[var(--editor-accent)] focus:ring-1 focus:ring-[var(--editor-accent)]",
+        "flex w-full items-center justify-between gap-2 rounded-[var(--radius-sm)] border px-3 text-sm whitespace-nowrap outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-9 data-[size=sm]:h-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.035)] text-[var(--foreground)]",
+        "hover:border-[rgba(255,255,255,0.1)]",
+        "focus:border-[rgba(205,239,255,0.45)] focus:ring-1 focus:ring-[rgba(205,239,255,0.18)]",
         "data-[placeholder]:text-[var(--editor-text-dim)]",
         className,
       )}

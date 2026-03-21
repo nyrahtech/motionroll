@@ -66,8 +66,7 @@ const updateProjectSchema = z.object({
       }),
     )
     .optional(),
-  headline: z.string().min(1).optional(),
-  body: z.string().min(1).optional(),
+  text: z.string().min(1).optional(),
   ctaLabel: z.string().optional(),
   ctaHref: z.string().optional(),
 });
@@ -165,11 +164,10 @@ export async function PATCH(
         },
         text: {
           ...section.commonConfig.text,
-          headline:
-            primaryOverlay?.content.headline ??
-            body.headline ??
-            section.commonConfig.text.headline,
-          body: primaryOverlay?.content.body ?? body.body ?? section.commonConfig.text.body,
+          content:
+            primaryOverlay?.content.text ??
+            body.text ??
+            section.commonConfig.text.content,
         },
         cta: {
           label:

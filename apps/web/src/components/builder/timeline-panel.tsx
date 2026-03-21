@@ -5,6 +5,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Ellipsis,
+  RotateCcw,
+  RotateCw,
   GripVertical,
   Pause,
   Play,
@@ -13,7 +15,7 @@ import {
   SkipForward,
   Trash2,
 } from "lucide-react";
-import { clampProgress } from "@motionroll/shared";
+import { clampProgress, progressToFrameBoundaryIndex } from "@motionroll/shared";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,7 +24,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { TimelineClipModel, TimelineSelection, TimelineTrackModel, TimelineTrackType } from "./timeline-model";
+import { Button } from "@/components/ui/button";
+import { getTimelineFrameStripForProgressRange, getTimelineTimeLabel, type TimelineClipModel, type TimelineSelection, type TimelineTrackModel, type TimelineTrackType } from "./timeline-model";
+import { getClipInsertionIndex, getLayerDragGhostPosition, resolveLayerTrackIndexFromPointer, type LayerRowGeometry } from "./timeline-drag-preview";
 
 type TimelinePanelProps = {
   tracks: TimelineTrackModel[];
@@ -30,16 +34,22 @@ type TimelinePanelProps = {
   playhead: number;
   durationSeconds: number;
   isPlaying: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
   onPlayToggle: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
   onPlayheadChange: (value: number) => void;
   onSelectionChange: (selection: TimelineSelection) => void;
   onClipTimingChange: (clipId: string, timing: { start: number; end: number }) => void;
-  onMoveClipToLayer: (clipId: string, targetLayer: number) => void;
+  onCommitClipMove: (move: { clipId: string; start: number; end: number; targetLayer?: number }) => void;
   onAddLayer: () => void;
   onDeleteLayer: (layerRowIndex: number) => void;
   onAddAtPlayhead: () => void;
   onDuplicateClip: (clipId: string) => void;
   onDeleteClip: (clipId: string) => void;
+  onMoveClipToLayer: (clipId: string, layerIndex: number) => void;
+  onMoveClipToNewLayer: (clipId: string) => void;
   onReorderTracks: (fromIndex: number, toIndex: number) => void;
   onSetClipTransitionPreset: (clipId: string, preset?: string) => void;
 };
@@ -61,6 +71,7 @@ type ClipDragState =
 type TrackReorderState =
   | {
       fromIndex: number;
+      pointerOffsetX: number;
       pointerOffsetY: number;
       startX: number;
       startY: number;
@@ -89,13 +100,69 @@ type ClipGhostState =
     }
   | null;
 
+type ClipMovePreviewState =
+  | {
+      draggedClipId: string;
+      sourceTrackIndex: number;
+      sourceLayerId: number | null;
+      targetTrackIndex: number;
+      targetLayerId: number | null;
+      targetStart: number;
+      targetEnd: number;
+      targetIndex: number;
+      isCrossLayerMove: boolean;
+      isSnapped: boolean;
+    }
+  | null;
+
+type ClipTimingPreviewState =
+  | {
+      clipId: string;
+      start: number;
+      end: number;
+    }
+  | null;
+
 type ClipDragMode = "move" | "resize-start" | "resize-end" | null;
 
 const LABEL_W = 168;
 const PX_PER_SEC = 118;
 const MIN_CLIP_PROGRESS = 0.04;
+const DRAG_START_THRESHOLD = 5;
 const EDGE_SCROLL_THRESHOLD = 88;
 const EDGE_SCROLL_MAX_STEP = 18;
+const FRAME_STRIP_TARGET_TILE_WIDTH = 72;
+const FRAME_STRIP_MIN_SAMPLES = 4;
+const FRAME_STRIP_MAX_SAMPLES = 18;
+
+function isResizeMode(mode: ClipDragMode) {
+  return mode === "resize-start" || mode === "resize-end";
+}
+
+function getFrameStripSampleCount(
+  width: number,
+  frameCount?: number,
+  clipStart?: number,
+  clipEnd?: number,
+) {
+  if (width < 180) {
+    return 0;
+  }
+  const derivedSampleCount = Math.ceil(width / FRAME_STRIP_TARGET_TILE_WIDTH);
+  const visibleFrameCount =
+    typeof frameCount === "number" &&
+    typeof clipStart === "number" &&
+    typeof clipEnd === "number"
+      ? Math.abs(
+          progressToFrameBoundaryIndex(clipEnd, frameCount) -
+            progressToFrameBoundaryIndex(clipStart, frameCount),
+        ) + 1
+      : 0;
+  return Math.max(
+    FRAME_STRIP_MIN_SAMPLES,
+    Math.min(FRAME_STRIP_MAX_SAMPLES, Math.max(derivedSampleCount, visibleFrameCount)),
+  );
+}
 
 function formatTime(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
@@ -111,21 +178,27 @@ function formatFrame(progress: number, durationSeconds: number) {
 }
 
 function PlaybackStrip({
-  playhead, duration, isPlaying, onFrameChange, onTogglePlay,
+  playhead, duration, isPlaying, canUndo, canRedo, onFrameChange, onTogglePlay, onUndo, onRedo,
 }: {
   playhead: number; duration: number; isPlaying: boolean;
-  onFrameChange: (p: number) => void; onTogglePlay: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onFrameChange: (p: number) => void;
+  onTogglePlay: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
 }) {
   const currentSec = playhead * duration;
   const ib = "flex h-8 w-8 items-center justify-center rounded-md text-[var(--editor-text-dim)] transition-colors hover:bg-[var(--editor-hover)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]";
   return (
     <div className="grid h-12 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b px-4" style={{ background: "var(--editor-panel)", borderColor: "var(--editor-border)" }}>
-      <div className="flex min-w-0 items-center gap-2 text-xs tabular-nums" style={{ color: "var(--editor-text-dim)" }}>
-        <span className="font-medium" style={{ color: "var(--editor-text)" }}>{formatTime(currentSec)}</span>
-        <span>/ {formatTime(duration)}</span>
-        <span className="ml-1 rounded px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(103,232,249,0.08)", color: "var(--editor-accent)" }}>
-          frame {formatFrame(playhead, duration)}
-        </span>
+      <div className="flex min-w-0 items-center gap-1.5 justify-self-start">
+        <button type="button" onClick={onUndo} disabled={!canUndo} className={ib} title="Undo">
+          <RotateCcw className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={onRedo} disabled={!canRedo} className={ib} title="Redo">
+          <RotateCw className="h-4 w-4" />
+        </button>
       </div>
       <div className="flex items-center gap-1 justify-self-center">
         <button type="button" onClick={() => onFrameChange(0)} className={ib}><SkipBack className="h-4 w-4" /></button>
@@ -136,15 +209,23 @@ function PlaybackStrip({
         <button type="button" onClick={() => onFrameChange(Math.min(1, playhead + 1 / Math.max(duration * 24, 1)))} className={ib}><ChevronRight className="h-4 w-4" /></button>
         <button type="button" onClick={() => onFrameChange(1)} className={ib}><SkipForward className="h-4 w-4" /></button>
       </div>
-      <div />
+      <div className="flex min-w-0 items-center justify-self-end gap-2 text-xs tabular-nums" style={{ color: "var(--editor-text-dim)" }}>
+        <span className="font-medium" style={{ color: "var(--editor-text)" }}>{formatTime(currentSec)}</span>
+        <span>/ {formatTime(duration)}</span>
+        <span className="ml-1 rounded px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(103,232,249,0.08)", color: "var(--editor-accent)" }}>
+          frame {formatFrame(playhead, duration)}
+        </span>
+      </div>
     </div>
   );
 }
 
 export function TimelinePanel({
-  tracks, selection, playhead, durationSeconds, isPlaying,
-  onPlayToggle, onPlayheadChange, onSelectionChange,
-  onClipTimingChange, onMoveClipToLayer, onAddLayer, onDeleteLayer, onAddAtPlayhead, onDuplicateClip, onDeleteClip,
+  tracks, selection, playhead, durationSeconds, isPlaying, canUndo, canRedo,
+  onPlayToggle, onUndo, onRedo, onPlayheadChange, onSelectionChange,
+  onClipTimingChange, onCommitClipMove, onAddLayer, onDeleteLayer, onAddAtPlayhead, onDuplicateClip, onDeleteClip,
+  onMoveClipToLayer,
+  onMoveClipToNewLayer,
   onReorderTracks, onSetClipTransitionPreset,
 }: TimelinePanelProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -157,17 +238,74 @@ export function TimelinePanel({
   const autoScrollRafRef = useRef<number | null>(null);
   const autoScrollDriverRef = useRef<(() => void) | null>(null);
   const suppressClickUntilRef = useRef(0);
+  const moveDragActivatedRef = useRef(false);
+  const clipMovePreviewRef = useRef<ClipMovePreviewState>(null);
+  const clipTimingPreviewRef = useRef<ClipTimingPreviewState>(null);
   const [dropTrackIndex, setDropTrackIndex] = useState<number | null>(null);
   const [draggingClipId, setDraggingClipId] = useState<string | null>(null);
   const [draggingClipMode, setDraggingClipMode] = useState<ClipDragMode>(null);
   const [draggingTrackIndex, setDraggingTrackIndex] = useState<number | null>(null);
   const [dragGhost, setDragGhost] = useState<DragGhostState>(null);
   const [clipGhost, setClipGhost] = useState<ClipGhostState>(null);
+  const [clipMovePreview, setClipMovePreview] = useState<ClipMovePreviewState>(null);
+  const [clipTimingPreview, setClipTimingPreview] = useState<ClipTimingPreviewState>(null);
+  const [recentlyAddedTrackId, setRecentlyAddedTrackId] = useState<string | null>(null);
+  const [deletingTrackId, setDeletingTrackId] = useState<string | null>(null);
+  const previousLayerTrackIdsRef = useRef<string[]>([]);
   const totalW = Math.max(960, Math.round(durationSeconds * PX_PER_SEC));
   const playheadX = LABEL_W + playhead * totalW;
   const rulerTicks = Math.max(6, Math.ceil(durationSeconds));
   const sceneTrack = tracks.find((t) => t.type === "section");
   const layerTracks = tracks.filter((t) => t.type === "layer");
+  const draggedClip = draggingClipId
+    ? layerTracks.flatMap((track) => track.clips).find((clip) => clip.id === draggingClipId)
+    : undefined;
+  const frameStripCache = React.useMemo(() => {
+    const cache = new Map<string, string[]>();
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        const previewTiming = clipTimingPreview?.clipId === clip.id ? clipTimingPreview : null;
+        const clipStart = previewTiming?.start ?? clip.start;
+        const clipEnd = previewTiming?.end ?? clip.end;
+        const width = Math.max(14, (clipEnd - clipStart) * totalW);
+        const sampleCount = getFrameStripSampleCount(
+          width,
+          clip.metadata?.frameStripSource?.frameCount,
+          clipStart,
+          clipEnd,
+        );
+        const frameStrip = clip.metadata?.frameStripSource
+          ? getTimelineFrameStripForProgressRange(
+              clip.metadata.frameStripSource,
+              clipStart,
+              clipEnd,
+              sampleCount,
+            )
+          : clip.metadata?.frameStrip;
+        if (frameStrip?.length) {
+          cache.set(clip.id, frameStrip);
+        }
+      }
+    }
+    return cache;
+  }, [clipTimingPreview, totalW, tracks]);
+
+  useEffect(() => {
+    const previousIds = previousLayerTrackIdsRef.current;
+    const nextIds = layerTracks.map((track) => track.id);
+    if (previousIds.length === 0) {
+      previousLayerTrackIdsRef.current = nextIds;
+      return;
+    }
+    const addedTrackId = nextIds.find((id) => !previousIds.includes(id));
+    if (addedTrackId) {
+      setRecentlyAddedTrackId(addedTrackId);
+      const timeoutId = window.setTimeout(() => setRecentlyAddedTrackId((current) => current === addedTrackId ? null : current), 480);
+      previousLayerTrackIdsRef.current = nextIds;
+      return () => window.clearTimeout(timeoutId);
+    }
+    previousLayerTrackIdsRef.current = nextIds;
+  }, [layerTracks]);
 
   function suppressPostDragClick() {
     suppressClickUntilRef.current = performance.now() + 220;
@@ -175,6 +313,37 @@ export function TimelinePanel({
 
   function shouldSuppressClick() {
     return performance.now() < suppressClickUntilRef.current;
+  }
+
+  function syncDropTrackIndex(nextTrackIndex: number | null) {
+    dropTrackIndexRef.current = nextTrackIndex;
+    setDropTrackIndex(nextTrackIndex);
+  }
+
+  function syncClipMovePreview(nextPreview: ClipMovePreviewState) {
+    clipMovePreviewRef.current = nextPreview;
+    setClipMovePreview(nextPreview);
+  }
+
+  function syncClipTimingPreview(nextPreview: ClipTimingPreviewState) {
+    clipTimingPreviewRef.current = nextPreview;
+    setClipTimingPreview(nextPreview);
+  }
+
+  function getLayerRowGeometry(): LayerRowGeometry[] {
+    return layerTracks.flatMap((_, trackIndex) => {
+      const node = rowRefs.current[`layer-${trackIndex}`];
+      if (!node) {
+        return [];
+      }
+
+      const rect = node.getBoundingClientRect();
+      return [{
+        trackIndex,
+        top: rect.top,
+        bottom: rect.bottom,
+      }];
+    });
   }
 
   useEffect(() => {
@@ -217,12 +386,7 @@ export function TimelinePanel({
   }
 
   function detectDropTrackIndex(clientY: number) {
-    for (const [key, node] of Object.entries(rowRefs.current)) {
-      if (!node || !key.startsWith("layer-")) continue;
-      const rect = node.getBoundingClientRect();
-      if (clientY >= rect.top && clientY <= rect.bottom) return Number(key.replace("layer-", ""));
-    }
-    return null;
+    return resolveLayerTrackIndexFromPointer(clientY, getLayerRowGeometry());
   }
 
   function getEdgeScrollStep(distanceToEdge: number) {
@@ -293,16 +457,18 @@ export function TimelinePanel({
   }
 
   function resetDragVisualState() {
-    dropTrackIndexRef.current = null;
     pointerClientRef.current = null;
     autoScrollDriverRef.current = null;
+    moveDragActivatedRef.current = false;
     stopAutoScroll();
-    setDropTrackIndex(null);
+    syncDropTrackIndex(null);
     setDraggingClipId(null);
     setDraggingClipMode(null);
     setDraggingTrackIndex(null);
     setDragGhost(null);
     setClipGhost(null);
+    syncClipMovePreview(null);
+    syncClipTimingPreview(null);
   }
 
   function updatePlayheadFromPointer(clientX: number) {
@@ -313,6 +479,9 @@ export function TimelinePanel({
   }
 
   function handlePlayheadPointerDown(e: React.PointerEvent) {
+    if (clipDragStateRef.current || trackReorderStateRef.current) {
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     const trackAreaNode = trackAreaRef.current;
@@ -343,11 +512,6 @@ export function TimelinePanel({
     window.addEventListener("pointerup", onUp);
   }
 
-  function seekFromPointer(clientX: number) {
-    if (clipDragStateRef.current || trackReorderStateRef.current) return;
-    updatePlayheadFromPointer(clientX);
-  }
-
   function updateClipDragFromPointer(clientX: number, clientY: number) {
     const state = clipDragStateRef.current;
     const trackArea = trackAreaRef.current;
@@ -360,64 +524,161 @@ export function TimelinePanel({
     let nextEnd = state.initialEnd;
     if (state.type === "move") {
       const dur = state.initialEnd - state.initialStart;
-      nextStart = snap(state.initialStart + delta);
+      const rawStart = clampProgress(state.initialStart + delta);
+      nextStart = snap(rawStart);
       nextEnd = nextStart + dur;
       if (nextEnd > 1) { nextEnd = 1; nextStart = Math.max(0, nextEnd - dur); }
-      const candidate = detectDropTrackIndex(clientY);
-      dropTrackIndexRef.current = candidate ?? null;
-      setDropTrackIndex(candidate ?? null);
+      const candidateTrackIndex = detectDropTrackIndex(clientY);
+      const targetTrackIndex =
+        candidateTrackIndex
+        ?? clipMovePreviewRef.current?.targetTrackIndex
+        ?? state.layerTrackIndex
+        ?? null;
+      const targetTrack = typeof targetTrackIndex === "number" ? layerTracks[targetTrackIndex] : undefined;
+      const sourceTrack =
+        typeof state.layerTrackIndex === "number" ? layerTracks[state.layerTrackIndex] : undefined;
+
+      if (typeof targetTrackIndex === "number") {
+        syncDropTrackIndex(targetTrackIndex);
+        syncClipMovePreview({
+          draggedClipId: state.clipId,
+          sourceTrackIndex: state.layerTrackIndex ?? targetTrackIndex,
+          sourceLayerId: sourceTrack?.metadata?.layerIndex ?? null,
+          targetTrackIndex,
+          targetLayerId: targetTrack?.metadata?.layerIndex ?? null,
+          targetStart: clampProgress(nextStart),
+          targetEnd: clampProgress(nextEnd),
+          targetIndex: getClipInsertionIndex(nextStart, targetTrack?.clips ?? [], state.clipId),
+          isCrossLayerMove: sourceTrack?.metadata?.layerIndex !== targetTrack?.metadata?.layerIndex,
+          isSnapped: Math.abs(nextStart - rawStart) > 0.0005,
+        });
+      }
     } else if (state.type === "resize-start") {
       nextStart = snap(Math.min(state.initialEnd - MIN_CLIP_PROGRESS, state.initialStart + delta));
     } else {
       nextEnd = snap(Math.max(state.initialStart + MIN_CLIP_PROGRESS, state.initialEnd + delta));
     }
 
-    setClipGhost((current) =>
-      current
-        ? {
-            ...current,
-            left: rect.left + nextStart * rect.width,
-            top: clientY - 20,
-            width: Math.max(14, (nextEnd - nextStart) * rect.width),
-          }
-        : current,
-    );
-
-    onClipTimingChange(state.clipId, { start: clampProgress(nextStart), end: clampProgress(nextEnd) });
+    if (state.type === "move") {
+      setClipGhost((current) =>
+        current
+          ? {
+              ...current,
+              left: rect.left + nextStart * rect.width,
+              top: clientY - 20,
+              width: Math.max(14, (nextEnd - nextStart) * rect.width),
+            }
+          : current,
+      );
+    } else {
+      setClipGhost(null);
+      syncDropTrackIndex(null);
+      syncClipMovePreview(null);
+      syncClipTimingPreview({
+        clipId: state.clipId,
+        start: clampProgress(nextStart),
+        end: clampProgress(nextEnd),
+      });
+    }
   }
 
-  function updateTrackGhostPosition(clientY: number) {
-    setDragGhost((current) =>
-      current && trackReorderStateRef.current
-        ? { ...current, top: clientY - trackReorderStateRef.current.pointerOffsetY }
-        : current
-    );
+  function updateTrackGhostPosition(clientX: number, clientY: number) {
+    const reorderState = trackReorderStateRef.current;
+    const scrollNode = scrollRef.current;
+    if (!reorderState || !scrollNode) {
+      return;
+    }
+
+    const containerRect = scrollNode.getBoundingClientRect();
+    setDragGhost((ghost) => (
+      ghost
+        ? (() => {
+            const nextPosition = getLayerDragGhostPosition({
+              clientX,
+              clientY,
+              containerRect: {
+                left: containerRect.left,
+                top: containerRect.top,
+                width: containerRect.width,
+                height: containerRect.height,
+              },
+              scrollLeft: scrollNode.scrollLeft,
+              scrollTop: scrollNode.scrollTop,
+              pointerOffsetX: reorderState.pointerOffsetX,
+              pointerOffsetY: reorderState.pointerOffsetY,
+              ghostWidth: ghost.width,
+              ghostHeight: ghost.height,
+            });
+
+            return {
+              ...ghost,
+              left: nextPosition.left,
+              top: nextPosition.top,
+            };
+          })()
+        : ghost
+    ));
   }
 
-  function updateTrackReorderFromPointer(clientY: number) {
+  function updateTrackReorderFromPointer(clientX: number, clientY: number) {
     const state = trackReorderStateRef.current;
     if (!state) return;
     const candidate = detectDropTrackIndex(clientY);
-    dropTrackIndexRef.current = candidate ?? state.fromIndex;
-    setDropTrackIndex(candidate ?? state.fromIndex);
-    updateTrackGhostPosition(clientY);
+    syncDropTrackIndex(candidate ?? state.fromIndex);
+    updateTrackGhostPosition(clientX, clientY);
+  }
+
+  function activateClipMoveDrag(
+    clip: TimelineClipModel,
+    layerTrackIndex: number | undefined,
+    pointerX: number,
+    pointerY: number,
+  ) {
+    moveDragActivatedRef.current = true;
+    const rowNode =
+      typeof layerTrackIndex === "number" ? rowRefs.current[`layer-${layerTrackIndex}`] : null;
+    const trackAreaRect = trackAreaRef.current?.getBoundingClientRect();
+    const rowRect = rowNode?.getBoundingClientRect();
+    const ghostTop = rowRect ? rowRect.top + 8 : pointerY - 20;
+    const ghostLeft = trackAreaRect ? trackAreaRect.left + clip.start * trackAreaRect.width : pointerX;
+    const ghostWidth = trackAreaRect
+      ? Math.max(14, (clip.end - clip.start) * trackAreaRect.width)
+      : 140;
+    const transitionLabel = clip.metadata?.transitionPreset?.replace(/-/g, " ") ?? null;
+
+    setDraggingClipId(clip.id);
+    setDraggingClipMode("move");
+    setClipGhost({
+      label: clip.label ?? clip.id,
+      top: ghostTop,
+      left: ghostLeft,
+      width: ghostWidth,
+      contentType: clip.metadata?.contentType,
+      transitionLabel,
+    });
+
+    if (typeof layerTrackIndex === "number") {
+      const sourceTrack = layerTracks[layerTrackIndex];
+      syncDropTrackIndex(layerTrackIndex);
+      syncClipMovePreview({
+        draggedClipId: clip.id,
+        sourceTrackIndex: layerTrackIndex,
+        sourceLayerId: sourceTrack?.metadata?.layerIndex ?? null,
+        targetTrackIndex: layerTrackIndex,
+        targetLayerId: sourceTrack?.metadata?.layerIndex ?? null,
+        targetStart: clip.start,
+        targetEnd: clip.end,
+        targetIndex: getClipInsertionIndex(clip.start, sourceTrack?.clips ?? [], clip.id),
+        isCrossLayerMove: false,
+        isSnapped: false,
+      });
+    }
   }
 
   function beginClipDrag(e: React.MouseEvent, type: Exclude<ClipDragState, null>["type"], clip: TimelineClipModel, layerTrackIndex?: number) {
     e.preventDefault();
     e.stopPropagation();
     onSelectionChange({ clipId: clip.id, trackType: clip.trackType });
-
-    const rowNode =
-      typeof layerTrackIndex === "number" ? rowRefs.current[`layer-${layerTrackIndex}`] : null;
-    const trackAreaRect = trackAreaRef.current?.getBoundingClientRect();
-    const rowRect = rowNode?.getBoundingClientRect();
-    const ghostTop = rowRect ? rowRect.top + 8 : e.clientY - 20;
-    const ghostLeft = trackAreaRect ? trackAreaRect.left + clip.start * trackAreaRect.width : e.clientX;
-    const ghostWidth = trackAreaRect
-      ? Math.max(14, (clip.end - clip.start) * trackAreaRect.width)
-      : 140;
-    const transitionLabel = clip.metadata?.transitionPreset?.replace(/-/g, " ") ?? null;
 
     clipDragStateRef.current = {
       type,
@@ -430,19 +691,30 @@ export function TimelinePanel({
       initialEnd: clip.end,
       layerTrackIndex,
     };
-    setDraggingClipId(clip.id);
-    setDraggingClipMode(type);
-    setClipGhost({
-      label: clip.label ?? clip.id,
-      top: ghostTop,
-      left: ghostLeft,
-      width: ghostWidth,
-      contentType: clip.metadata?.contentType,
-      transitionLabel,
-    });
-    if (typeof layerTrackIndex === "number" && type === "move") {
-      setDropTrackIndex(layerTrackIndex);
-      dropTrackIndexRef.current = layerTrackIndex;
+    moveDragActivatedRef.current = false;
+    if (type === "move") {
+      setDraggingClipId(null);
+      setDraggingClipMode(null);
+      setClipGhost(null);
+      syncDropTrackIndex(null);
+      syncClipMovePreview(null);
+    } else {
+      setDraggingClipId(clip.id);
+      setDraggingClipMode(type);
+      setClipGhost(null);
+      syncDropTrackIndex(null);
+      syncClipMovePreview(null);
+      syncClipTimingPreview({
+        clipId: clip.id,
+        start: clip.start,
+        end: clip.end,
+      });
+      setDragGhost(null);
+      setDraggingTrackIndex(null);
+    }
+    if (type !== "move") {
+      syncDropTrackIndex(null);
+      syncClipMovePreview(null);
     }
     pointerClientRef.current = { x: e.clientX, y: e.clientY };
     autoScrollDriverRef.current = () => {
@@ -454,6 +726,20 @@ export function TimelinePanel({
 
     const handleMove = (me: MouseEvent) => {
       pointerClientRef.current = { x: me.clientX, y: me.clientY };
+      const state = clipDragStateRef.current;
+      if (!state) {
+        return;
+      }
+      if (
+        state.type === "move" &&
+        !moveDragActivatedRef.current &&
+        (Math.abs(me.clientX - state.startX) > DRAG_START_THRESHOLD || Math.abs(me.clientY - state.startY) > DRAG_START_THRESHOLD)
+      ) {
+        activateClipMoveDrag(clip, layerTrackIndex, me.clientX, me.clientY);
+      }
+      if (state.type === "move" && !moveDragActivatedRef.current) {
+        return;
+      }
       updateClipDragFromPointer(me.clientX, me.clientY);
     };
 
@@ -464,22 +750,40 @@ export function TimelinePanel({
         !!state &&
         !!pointer &&
         (Math.abs(pointer.x - state.startX) > 4 || Math.abs(pointer.y - state.startY) > 4);
-      if (
-        state?.type === "move" &&
-        dropTrackIndexRef.current != null
-      ) {
-        const targetTrack = layerTracks[dropTrackIndexRef.current];
-        const targetLayer = targetTrack?.metadata?.layerIndex;
-        const sourceTrack =
-          typeof state.layerTrackIndex === "number" ? layerTracks[state.layerTrackIndex] : undefined;
-        const sourceLayer = sourceTrack?.metadata?.layerIndex;
-        if (typeof targetLayer === "number" && targetLayer !== sourceLayer) {
-          onMoveClipToLayer(state.clipId, targetLayer);
+      const movePreview = clipMovePreviewRef.current;
+      if (didDrag && state?.type === "move" && movePreview) {
+        const timingChanged =
+          Math.abs(movePreview.targetStart - state.initialStart) > 0.0005
+          || Math.abs(movePreview.targetEnd - state.initialEnd) > 0.0005;
+        if (timingChanged || movePreview.isCrossLayerMove) {
+          onCommitClipMove({
+            clipId: state.clipId,
+            start: movePreview.targetStart,
+            end: movePreview.targetEnd,
+            targetLayer: movePreview.targetLayerId ?? undefined,
+          });
+        }
+      }
+      if (didDrag && state && state.type !== "move") {
+        const timingPreview = clipTimingPreviewRef.current;
+        if (
+          timingPreview &&
+          timingPreview.clipId === state.clipId &&
+          (
+            Math.abs(timingPreview.start - state.initialStart) > 0.0005 ||
+            Math.abs(timingPreview.end - state.initialEnd) > 0.0005
+          )
+        ) {
+          onClipTimingChange(state.clipId, {
+            start: timingPreview.start,
+            end: timingPreview.end,
+          });
         }
       }
       if (didDrag) {
         suppressPostDragClick();
       }
+      moveDragActivatedRef.current = false;
       clipDragStateRef.current = null;
       resetDragVisualState();
       window.removeEventListener("mousemove", handleMove);
@@ -491,40 +795,62 @@ export function TimelinePanel({
   }
 
   function beginTrackReorder(e: React.MouseEvent, fromIndex: number) {
+    if (isResizeMode(clipDragStateRef.current?.type ?? null) || isResizeMode(draggingClipMode)) {
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     const rowNode = rowRefs.current[`layer-${fromIndex}`];
     const rowRect = rowNode?.getBoundingClientRect();
+    const scrollNode = scrollRef.current;
+    const scrollRect = scrollNode?.getBoundingClientRect();
     trackReorderStateRef.current = {
       fromIndex,
+      pointerOffsetX: rowRect ? e.clientX - rowRect.left : 24,
       pointerOffsetY: rowRect ? e.clientY - rowRect.top : 20,
       startX: e.clientX,
       startY: e.clientY,
     };
     setDraggingTrackIndex(fromIndex);
-    setDropTrackIndex(fromIndex);
-    dropTrackIndexRef.current = fromIndex;
+    syncDropTrackIndex(fromIndex);
     pointerClientRef.current = { x: e.clientX, y: e.clientY };
-    if (rowRect) {
+    if (rowRect && scrollNode && scrollRect) {
+      const ghostWidth = Math.min(rowRect.width, scrollRect.width);
+      const ghostPosition = getLayerDragGhostPosition({
+        clientX: e.clientX,
+        clientY: e.clientY,
+        containerRect: {
+          left: scrollRect.left,
+          top: scrollRect.top,
+          width: scrollRect.width,
+          height: scrollRect.height,
+        },
+        scrollLeft: scrollNode.scrollLeft,
+        scrollTop: scrollNode.scrollTop,
+        pointerOffsetX: rowRect ? e.clientX - rowRect.left : 24,
+        pointerOffsetY: rowRect ? e.clientY - rowRect.top : 20,
+        ghostWidth,
+        ghostHeight: rowRect.height,
+      });
       setDragGhost({
         kind: "layer",
         label: layerTracks[fromIndex]?.label ?? `Layer ${fromIndex + 1}`,
-        left: rowRect.left,
-        top: rowRect.top,
-        width: rowRect.width,
+        left: ghostPosition.left,
+        top: ghostPosition.top,
+        width: ghostWidth,
         height: rowRect.height,
       });
     }
     autoScrollDriverRef.current = () => {
       const pointer = pointerClientRef.current;
       if (!pointer) return;
-      updateTrackReorderFromPointer(pointer.y);
+      updateTrackReorderFromPointer(pointer.x, pointer.y);
     };
     startAutoScroll();
 
     const handleMove = (me: MouseEvent) => {
       pointerClientRef.current = { x: me.clientX, y: me.clientY };
-      updateTrackReorderFromPointer(me.clientY);
+      updateTrackReorderFromPointer(me.clientX, me.clientY);
     };
 
     const handleUp = () => {
@@ -588,34 +914,37 @@ export function TimelinePanel({
     return (
       <div className="relative h-14" style={{ width: totalW }}>
         {track.clips.map((clip) => {
-          const left = clip.start * totalW;
-          const width = Math.max(14, (clip.end - clip.start) * totalW);
+          const previewTiming = clipTimingPreview?.clipId === clip.id ? clipTimingPreview : null;
+          const clipStart = previewTiming?.start ?? clip.start;
+          const clipEnd = previewTiming?.end ?? clip.end;
+          const left = clipStart * totalW;
+          const width = Math.max(14, (clipEnd - clipStart) * totalW);
           const isSelected = selection?.clipId === clip.id;
-          const frameStrip = opts?.frameStrip ? clip.metadata?.frameStrip : undefined;
+          const frameStrip = opts?.frameStrip ? frameStripCache.get(clip.id) : undefined;
           const transitionLabel = clip.metadata?.transitionPreset?.replace(/-/g, " ") ?? null;
-          const isDragging = draggingClipId === clip.id;
+          const isMoveDragging = draggingClipId === clip.id && draggingClipMode === "move";
           const clipStackIndex = track.clips.findIndex((entry) => entry.id === clip.id);
-          const stackZIndex = track.type === "section" ? 2 : isDragging ? 40 : isSelected ? 30 : 10 + clipStackIndex;
+          const stackZIndex = track.type === "section" ? 2 : isMoveDragging ? 40 : isSelected ? 30 : 10 + clipStackIndex;
           const isDraggable = opts?.draggable ?? track.type !== "section";
           return (
             <Fragment key={clip.id}>
               <div
                 tabIndex={0}
-                className="motionroll-clip group absolute top-2 h-10 select-none rounded-md border transition-[background,border-color,box-shadow,transform,opacity] duration-150 hover:-translate-y-[1px] hover:border-[rgba(255,255,255,0.14)]"
+                className="motionroll-clip group absolute top-3 h-10 select-none rounded-md border transition-[background,border-color,box-shadow,transform,opacity] duration-150 hover:-translate-y-[1px] hover:border-[rgba(255,255,255,0.14)]"
                 style={{
                   left,
                   width,
                   zIndex: stackZIndex,
                   background: frameStrip ? "#0c1118" : isSelected ? "rgba(103,232,249,0.18)" : opts?.tint ?? "rgba(255,255,255,0.05)",
                   borderColor: isSelected ? "var(--editor-accent)" : "rgba(255,255,255,0.08)",
-                  boxShadow: isDragging
+                  boxShadow: isMoveDragging
                     ? "0 0 0 1px rgba(103,232,249,0.45), 0 12px 30px rgba(0,0,0,0.28)"
                     : isSelected
                       ? "0 0 0 1px rgba(103,232,249,0.25), 0 8px 24px rgba(0,0,0,0.22)"
                       : "inset 0 1px 0 rgba(255,255,255,0.02)",
                   color: "var(--editor-text)",
-                  opacity: isDragging ? 0.24 : 1,
-                  transform: isDragging ? "translateY(-1px) scale(1.01)" : undefined,
+                  opacity: isMoveDragging ? 0.24 : 1,
+                  transform: isMoveDragging ? "translateY(-1px) scale(1.01)" : undefined,
                 }}
                 onClick={(ev) => {
                   if (shouldSuppressClick()) {
@@ -653,17 +982,44 @@ export function TimelinePanel({
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent>
-                      <DropdownMenuLabel>Overlay transition</DropdownMenuLabel>
-                      {(["fade", "crossfade", "wipe", "zoom-dissolve", "blur-dissolve"] as const).map((p) => (
-                        <DropdownMenuItem key={p} onClick={() => onSetClipTransitionPreset(clip.id, p)}>
-                          {p.replace(/-/g, " ")}
-                        </DropdownMenuItem>
-                      ))}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => onSetClipTransitionPreset(clip.id, undefined)}>Clear transition</DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => onDuplicateClip(clip.id)}>Duplicate</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => onDeleteClip(clip.id)}>Delete</DropdownMenuItem>
+                      {track.type === "section" ? (
+                        <>
+                          <DropdownMenuLabel>Scene</DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => onPlayheadChange(clip.start)}>Jump to start</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => onPlayheadChange(clip.end)}>Jump to end</DropdownMenuItem>
+                        </>
+                      ) : (
+                        <>
+                          <DropdownMenuLabel>Animation</DropdownMenuLabel>
+                          {(["fade", "crossfade", "wipe", "zoom-dissolve", "blur-dissolve"] as const).map((p) => (
+                            <DropdownMenuItem key={p} onClick={() => onSetClipTransitionPreset(clip.id, p)}>
+                              {p.replace(/-/g, " ")}
+                            </DropdownMenuItem>
+                          ))}
+                          <DropdownMenuItem onClick={() => onSetClipTransitionPreset(clip.id, undefined)}>None</DropdownMenuItem>
+                          {layerTracks.length > 1 ? <DropdownMenuSeparator /> : null}
+                          <DropdownMenuItem onClick={() => onMoveClipToNewLayer(clip.id)}>
+                            Move to New layer
+                          </DropdownMenuItem>
+                          {layerTracks
+                            .filter((layerTrack) => layerTrack.id !== track.id)
+                            .map((layerTrack) => (
+                              <DropdownMenuItem
+                                key={`${clip.id}-${layerTrack.id}`}
+                                onClick={() => {
+                                  if (typeof layerTrack.metadata?.layerIndex === "number") {
+                                    onMoveClipToLayer(clip.id, layerTrack.metadata.layerIndex);
+                                  }
+                                }}
+                              >
+                                Move to {layerTrack.label}
+                              </DropdownMenuItem>
+                            ))}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => onDuplicateClip(clip.id)}>Duplicate</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => onDeleteClip(clip.id)}>Delete</DropdownMenuItem>
+                        </>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -693,39 +1049,40 @@ export function TimelinePanel({
         .timeline-scroll::-webkit-scrollbar-track{background:transparent}
         .timeline-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
         .motionroll-clip:focus-visible{outline:none;box-shadow:0 0 0 1px rgba(103,232,249,.55),0 0 0 3px rgba(103,232,249,.12)}
+        @keyframes timeline-layer-added{0%{opacity:0;transform:translateY(8px)}55%{opacity:1;transform:translateY(-1px)}100%{opacity:1;transform:translateY(0)}}
+        @keyframes timeline-layer-removing{0%{opacity:1;max-height:56px}100%{opacity:0;max-height:0}}
       `}</style>
 
-      <PlaybackStrip playhead={playhead} duration={durationSeconds} isPlaying={isPlaying} onFrameChange={onPlayheadChange} onTogglePlay={onPlayToggle} />
+      <PlaybackStrip
+        playhead={playhead}
+        duration={durationSeconds}
+        isPlaying={isPlaying}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onFrameChange={onPlayheadChange}
+        onTogglePlay={onPlayToggle}
+        onUndo={onUndo}
+        onRedo={onRedo}
+      />
 
       <div
         ref={scrollRef}
         className="timeline-scroll relative min-h-0 flex-1 overflow-auto"
-        onClick={(e) => {
-          if (shouldSuppressClick()) {
-            e.preventDefault();
-            e.stopPropagation();
-            return;
-          }
-          const target = e.target as HTMLElement;
-          if (!target.closest(".motionroll-clip")) seekFromPointer(e.clientX);
-        }}
       >
         <div className="relative" style={{ minWidth: totalW + LABEL_W }}>
           <div
-            className="sticky top-0 z-10 flex border-b"
+            className="sticky top-0 z-[44] flex border-b"
             style={{ background: "var(--editor-panel-elevated)", borderColor: "var(--editor-border)" }}
           >
             <div
               className="sticky left-0 z-20 flex h-8 shrink-0 items-center border-r px-3"
               style={{ width: LABEL_W, borderColor: "var(--editor-border)", background: "var(--editor-panel-elevated)" }}
             >
-              <button
+              <Button
                 type="button"
-                className="flex h-6 items-center gap-1.5 rounded px-1.5 text-[12px] font-medium normal-case tracking-normal transition-colors hover:bg-[rgba(255,255,255,0.05)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]"
-                style={{
-                  background: "transparent",
-                  color: "var(--editor-text-dim)",
-                }}
+                variant="quiet"
+                size="sm"
+                className="h-7 gap-1.5 px-2 active:scale-[0.98] active:bg-[rgba(255,255,255,0.08)] active:text-white"
                 onClick={(ev) => {
                   ev.stopPropagation();
                   onAddLayer();
@@ -738,12 +1095,13 @@ export function TimelinePanel({
                   <Plus className="h-3 w-3" />
                 </span>
                 Layer
-              </button>
+              </Button>
             </div>
             <div
               ref={trackAreaRef}
               className="relative h-8 flex-1 cursor-ew-resize"
               title="Click or drag to scrub"
+              onPointerDown={handlePlayheadPointerDown}
             >
               {Array.from({ length: rulerTicks + 1 }).map((_, i) => {
                 const x = (i / Math.max(durationSeconds, 1)) * totalW;
@@ -754,6 +1112,12 @@ export function TimelinePanel({
                   </div>
                 );
               })}
+              <div
+                className="pointer-events-auto absolute inset-y-0 z-[46] w-5 -translate-x-1/2 cursor-ew-resize"
+                style={{ left: playhead * totalW }}
+                onPointerDown={handlePlayheadPointerDown}
+                title="Drag to scrub"
+              />
             </div>
           </div>
 
@@ -774,13 +1138,19 @@ export function TimelinePanel({
             const isDraggingRow = draggingTrackIndex === originalIndex;
             const isLayerReorderDrag = dragGhost !== null;
             const isBlockMoveDrag = draggingClipMode === "move" && draggingClipId !== null && !isLayerReorderDrag;
-            const draggedClipTrack = isBlockMoveDrag
-              ? layerTracks.find((layerTrack) => layerTrack.clips.some((clip) => clip.id === draggingClipId))
-              : undefined;
-            const showBlockDropZone =
-              isBlockMoveDrag &&
-              isDropTarget &&
-              draggedClipTrack?.metadata?.layerIndex !== track.metadata?.layerIndex;
+            const isRecentlyAdded = recentlyAddedTrackId === track.id;
+            const isDeleting = deletingTrackId === track.id;
+            const movePreviewForTrack =
+              isBlockMoveDrag && clipMovePreview?.targetTrackIndex === originalIndex
+                ? clipMovePreview
+                : null;
+            const previewLeft = movePreviewForTrack ? movePreviewForTrack.targetStart * totalW : 0;
+            const previewWidth = movePreviewForTrack
+              ? Math.max(18, (movePreviewForTrack.targetEnd - movePreviewForTrack.targetStart) * totalW)
+              : 0;
+            const previewTimeLabel = movePreviewForTrack
+              ? getTimelineTimeLabel(movePreviewForTrack.targetStart, durationSeconds)
+              : null;
             const showInsertionCue =
               isLayerReorderDrag &&
               draggingTrackIndex != null &&
@@ -795,9 +1165,16 @@ export function TimelinePanel({
                 style={{
                   borderColor: "var(--editor-border)",
                   background: isDropTarget ? "rgba(103,232,249,0.05)" : "transparent",
-                  opacity: (isLayerReorderDrag && draggingTrackIndex != null && !isDraggingRow) ? 0.94 : 1,
+                  opacity: isDeleting ? 0 : (isLayerReorderDrag && draggingTrackIndex != null && !isDraggingRow) ? 0.94 : 1,
                   transform: isLayerReorderDrag && isDraggingRow ? "translateX(4px)" : undefined,
                   boxShadow: isLayerReorderDrag && isDraggingRow ? "inset 0 0 0 1px rgba(103,232,249,0.35), 0 10px 24px rgba(0,0,0,0.18)" : undefined,
+                  animation: isDeleting
+                    ? "timeline-layer-removing 140ms ease forwards"
+                    : isRecentlyAdded
+                      ? "timeline-layer-added 220ms ease"
+                      : undefined,
+                  pointerEvents: isDeleting ? "none" : undefined,
+                  overflow: isDeleting ? "hidden" : undefined,
                 }}
               >
                 {showInsertionCue ? (
@@ -839,7 +1216,11 @@ export function TimelinePanel({
                     aria-label={`Delete ${track.label}`}
                     onClick={(ev) => {
                       ev.stopPropagation();
-                      onDeleteLayer(originalIndex);
+                      setDeletingTrackId(track.id);
+                      window.setTimeout(() => {
+                        onDeleteLayer(originalIndex);
+                        setDeletingTrackId((current) => current === track.id ? null : current);
+                      }, 140);
                     }}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -859,25 +1240,53 @@ export function TimelinePanel({
                         ? "Dragging layer"
                         : showInsertionCue
                           ? "Drop here"
-                          : showBlockDropZone
-                            ? "Move block here"
+                          : movePreviewForTrack
+                            ? movePreviewForTrack.isCrossLayerMove
+                              ? `Drop at ${previewTimeLabel}`
+                              : `Preview at ${previewTimeLabel}`
                             : `Layer ${originalIndex + 1}`}
                     </span>
                   </div>
                 </div>
                 <div className="relative min-w-0 flex-1">
-                  {showBlockDropZone ? (
+                  {movePreviewForTrack ? (
                     <div className="pointer-events-none absolute inset-0 z-[11] p-2">
                       <div
-                        className="flex h-full items-center justify-center rounded-md border border-dashed text-[10px] font-medium uppercase tracking-[0.14em]"
+                        className="absolute top-3 h-10 overflow-hidden rounded-md border border-dashed"
                         style={{
+                          left: previewLeft,
+                          width: previewWidth,
                           borderColor: "rgba(103,232,249,0.58)",
                           background: "rgba(103,232,249,0.08)",
-                          color: "var(--editor-accent)",
                           boxShadow: "inset 0 0 0 1px rgba(103,232,249,0.18), 0 0 18px rgba(103,232,249,0.12)",
                         }}
                       >
-                        Drop block into {track.label}
+                        <div
+                          className="absolute inset-y-1 left-0 w-px"
+                          style={{ background: "rgba(103,232,249,0.72)", boxShadow: "0 0 10px rgba(103,232,249,0.3)" }}
+                        />
+                        <div
+                          className="absolute inset-y-1 right-0 w-px"
+                          style={{ background: "rgba(103,232,249,0.72)", boxShadow: "0 0 10px rgba(103,232,249,0.3)" }}
+                        />
+                        <div className="flex h-full items-center justify-between gap-2 px-2">
+                          <div className="min-w-0">
+                            <span className="block truncate text-xs font-medium text-[var(--editor-accent)]">
+                              {draggedClip?.label ?? movePreviewForTrack.draggedClipId}
+                            </span>
+                            <span className="block truncate text-[10px] uppercase tracking-[0.1em]" style={{ color: "rgba(103,232,249,0.78)" }}>
+                              {movePreviewForTrack.isCrossLayerMove ? `Move to ${track.label}` : `Drop at ${previewTimeLabel}`}
+                            </span>
+                          </div>
+                          {movePreviewForTrack.isSnapped ? (
+                            <span
+                              className="rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em]"
+                              style={{ background: "rgba(103,232,249,0.14)", color: "var(--editor-accent)" }}
+                            >
+                              Snapped
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   ) : null}
@@ -888,10 +1297,8 @@ export function TimelinePanel({
           })}
 
           <div
-            className="pointer-events-auto absolute top-0 bottom-0 z-[12] w-5 -translate-x-1/2 cursor-ew-resize"
+            className="pointer-events-none absolute top-0 bottom-0 z-[12] w-5 -translate-x-1/2"
             style={{ left: playheadX }}
-            onPointerDown={handlePlayheadPointerDown}
-            title="Drag to scrub"
           >
             <div
               className="pointer-events-none absolute bottom-0 left-1/2 top-0 w-px -translate-x-1/2"
@@ -910,7 +1317,7 @@ export function TimelinePanel({
 
         {dragGhost ? (
           <div
-            className="pointer-events-none fixed z-[28] overflow-hidden rounded-md border"
+            className="pointer-events-none absolute z-[28] overflow-hidden rounded-md border"
             style={{
               top: dragGhost.top,
               left: dragGhost.left,

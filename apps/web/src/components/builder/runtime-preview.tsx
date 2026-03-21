@@ -15,13 +15,11 @@ const DESIGN_STAGE_HEIGHT = 810;
 type RuntimePreviewProps = {
   manifest: ProjectManifest;
   mode?: "desktop" | "mobile";
-  reducedMotion?: boolean;
   standalone?: boolean;
   isPlaying?: boolean;
   playheadProgress?: number;
   onPlayheadChange?: (progress: number) => void;
   onModeChange?: (mode: "desktop" | "mobile") => void;
-  onReducedMotionChange?: (value: boolean) => void;
   onPlayToggle?: () => void;
   onSelectOverlay?: (overlayId: string) => void;
   onOverlayLayoutChange?: (
@@ -37,7 +35,7 @@ type RuntimePreviewProps = {
   ) => void;
   onInlineTextChange?: (
     overlayId: string,
-    field: "eyebrow" | "headline" | "body",
+    field: "text",
     value: string,
     htmlValue?: string,
   ) => void;
@@ -53,12 +51,11 @@ type RuntimePreviewProps = {
 export function RuntimePreview({
   manifest,
   mode: controlledMode,
-  reducedMotion: controlledReducedMotion,
   standalone = false,
+  isPlaying = false,
   playheadProgress,
   onPlayheadChange,
   onModeChange,
-  onReducedMotionChange,
   onPlayToggle,
   onSelectOverlay,
   onOverlayLayoutChange,
@@ -87,14 +84,12 @@ export function RuntimePreview({
 
   // ── State ──────────────────────────────────────────────────────────────
   const [internalMode, setInternalMode] = useState<"desktop" | "mobile">("desktop");
-  const [internalReducedMotion, setInternalReducedMotion] = useState(false);
   const [renderManifest, setRenderManifest] = useState(manifest);
   const renderManifestSignatureRef = useRef(JSON.stringify(manifest));
   const manifestSignature = useMemo(() => JSON.stringify(manifest), [manifest]);
 
   // ── Derived ────────────────────────────────────────────────────────────
   const mode = controlledMode ?? internalMode;
-  const reducedMotion = controlledReducedMotion ?? internalReducedMotion;
   const isControlledRuntime = typeof playheadProgress === "number";
   const section = renderManifest.sections[0];
   const hasRenderableMedia =
@@ -129,7 +124,7 @@ export function RuntimePreview({
     const s = renderManifest.sections[0];
     return JSON.stringify({
       mode,
-      reducedMotion,
+      isPlaying,
       isControlledRuntime,
       hasRenderableMedia,
       frameCount: s?.frameCount ?? 0,
@@ -144,16 +139,19 @@ export function RuntimePreview({
       // syncOverlayPresentationStyles, so the runtime must hold current values.
       overlayGeometry: s?.overlays.map((o) => ({
         id: o.id,
+        layer: o.content.layer ?? 0,
         x: o.content.layout?.x,
         y: o.content.layout?.y,
         w: o.content.layout?.width,
         h: o.content.layout?.height,
         align: o.content.align,
+        animationPreset: o.content.animation?.preset,
+        transitionPreset: o.content.transition?.preset,
         ts: o.timing.start,
         te: o.timing.end,
       })),
     });
-  }, [mode, reducedMotion, isControlledRuntime, hasRenderableMedia, renderManifest]);
+  }, [hasRenderableMedia, isControlledRuntime, isPlaying, mode, renderManifest]);
 
   // ── Interaction gate ───────────────────────────────────────────────────
   function setInteracting(active: boolean) {
@@ -211,9 +209,8 @@ export function RuntimePreview({
       const isActive = child.dataset.state === "active";
 
       for (const field of Array.from(child.querySelectorAll<HTMLElement>("[data-text-field]"))) {
-        const name = field.dataset.textField as "eyebrow" | "headline" | "body" | undefined;
-        const editable =
-          isSelected && isActive && (name === "eyebrow" || name === "headline" || name === "body");
+        const name = field.dataset.textField as "text" | undefined;
+        const editable = isSelected && isActive && name === "text";
         field.spellcheck = false;
         field.contentEditable = editable ? "true" : "false";
         if (editable && name) {
@@ -239,17 +236,12 @@ export function RuntimePreview({
     scheduleWireInteractivity();
   }, [selectedOverlayId, renderManifest, isControlledRuntime]);
 
-  useEffect(() => {
-    if (!isControlledRuntime) return;
-    scheduleWireInteractivity();
-  }, [playheadProgress, isControlledRuntime]);
-
   // ── Heavy effect: full runtime restart (structural changes only) ────────
   //
   // Depends on `restartKey`, NOT `renderManifest`. Overlay-only manifest
   // changes (layout, style, text) do not change the restart key and will
   // never trigger this effect. Only frame assets, fallback URLs, mode,
-  // reducedMotion, and similar structural fields cause a restart.
+  // playback mode and similar structural fields cause a restart.
   useEffect(() => {
     if (!isControlledRuntime || !hasRenderableMedia) return;
     const node = mountNodeRef.current;
@@ -263,9 +255,9 @@ export function RuntimePreview({
     controllerRef.current = createScrollSection(node, renderManifest, {
       initialProgress: playheadProgress ?? 0,
       mode,
-      reducedMotion,
       interactionMode: "controlled",
       allowWheelScrub: false,
+      enableOverlayTransitions: isPlaying,
       onProgressChange: (progress) => {
         lastInternalProgressRef.current = progress;
         onPlayheadChangeRef.current?.(progress);
@@ -315,6 +307,7 @@ export function RuntimePreview({
       const cW = Math.max(container.clientWidth, 1);
       const cH = Math.max(container.clientHeight, 1);
       const scale = Math.max(0.35, Math.min(cW / DESIGN_STAGE_WIDTH, cH / DESIGN_STAGE_HEIGHT));
+      const overlayRoot = container.querySelector(".motionroll-overlay-root");
 
       function withOpacity(hex: string, opacity: number) {
         const v = hex.replace("#", "").trim();
@@ -324,6 +317,19 @@ export function RuntimePreview({
         const g = parseInt(norm.slice(2, 4), 16);
         const b = parseInt(norm.slice(4, 6), 16);
         return `rgba(${r},${g},${b},${opacity})`;
+      }
+
+      if (overlayRoot instanceof HTMLElement) {
+        const orderedOverlays = [...sec.overlays].sort(
+          (left, right) => (left.content.layer ?? 0) - (right.content.layer ?? 0),
+        );
+
+        for (const overlay of orderedOverlays) {
+          const card = overlayRoot.querySelector<HTMLElement>(`[data-overlay-id="${overlay.id}"]`);
+          if (!card) continue;
+          card.style.zIndex = String(100 + (overlay.content.layer ?? 0));
+          overlayRoot.appendChild(card);
+        }
       }
 
       for (const overlay of sec.overlays) {
@@ -344,10 +350,10 @@ export function RuntimePreview({
         card.style.minHeight = layout?.height ? `${Math.round(layout.height * scale)}px` : "";
         card.style.height    = layout?.height ? `${Math.round(layout.height * scale)}px` : "";
         card.style.maxWidth  = `${Math.round((style?.maxWidth ?? layout?.width ?? 420) * scale)}px`;
+        card.style.zIndex    = String(100 + (overlay.content.layer ?? 0));
         card.style.transform = overlay.content.align === "center"
           ? "translate3d(-50%,-50%,0)"
           : "translate3d(0,0,0)";
-        card.style.transition = "";
 
         if (!layout) {
           card.style.left   = overlay.content.align === "center" ? "50%" : `${Math.round(32 * scale)}px`;
@@ -362,10 +368,10 @@ export function RuntimePreview({
         card.style.borderWidth    = bg?.enabled ? "1px" : "0";
         card.style.borderStyle    = "solid";
         card.style.borderColor    = withOpacity(bg?.borderColor ?? "#d6f6ff", bg?.borderOpacity ?? 0);
-        card.style.background     = bg?.enabled && bg.mode === "solid"
+        card.style.background     = bg?.enabled
           ? withOpacity(bg.color ?? "#0d1016", bg.opacity ?? 0.82)
           : "transparent";
-        card.style.backdropFilter = bg?.enabled && bg.mode === "solid" ? "blur(18px)" : "none";
+        card.style.backdropFilter = bg?.enabled ? "blur(18px)" : "none";
 
         // Text styles
         const textAlign = style?.textAlign === "start" ? "left"
@@ -382,14 +388,15 @@ export function RuntimePreview({
           textTransform:  (style?.textTransform ?? "none") as string,
         };
 
-        const headline = card.querySelector<HTMLElement>('[data-text-field="headline"]');
-        if (headline) Object.assign(headline.style, { ...sharedText, fontSize: `${Math.round((style?.fontSize ?? 34) * scale)}px`, lineHeight: String(style?.lineHeight ?? 1.08) });
-
-        const eyebrow = card.querySelector<HTMLElement>('[data-text-field="eyebrow"]');
-        if (eyebrow) Object.assign(eyebrow.style, { ...sharedText, fontSize: `${Math.round((style?.eyebrowFontSize ?? 12) * scale)}px`, opacity: "0.72" });
-
-        const body = card.querySelector<HTMLElement>('[data-text-field="body"]');
-        if (body) Object.assign(body.style, { ...sharedText, fontSize: `${Math.round((style?.bodyFontSize ?? 15) * scale)}px` });
+        const textBlock = card.querySelector<HTMLElement>('[data-text-field="text"]');
+        if (textBlock) {
+          Object.assign(textBlock.style, {
+            ...sharedText,
+            fontSize: `${Math.round((style?.fontSize ?? 34) * scale)}px`,
+            lineHeight: String(style?.lineHeight ?? 1.08),
+            whiteSpace: "pre-wrap",
+          });
+        }
 
         // Media / action link
         const media = card.querySelector<HTMLElement>("[data-media-field='media']");
@@ -407,6 +414,7 @@ export function RuntimePreview({
         }
       }
 
+      controllerRef.current.setProgress(controllerRef.current.getProgress());
       scheduleWireInteractivity();
     }); // end requestAnimationFrame
 
@@ -431,13 +439,12 @@ export function RuntimePreview({
     }
     controllerRef.current = createScrollSection(node, renderManifest, {
       mode,
-      reducedMotion,
       interactionMode: "scroll",
       allowWheelScrub: false,
     });
 
     return () => controllerRef.current?.destroy();
-  }, [hasRenderableMedia, isControlledRuntime, mode, reducedMotion, renderManifest]);
+  }, [hasRenderableMedia, isControlledRuntime, mode, renderManifest]);
 
   // ── Auto-deselect when playhead leaves the overlay's timing window ────
   useEffect(() => {
@@ -472,7 +479,6 @@ export function RuntimePreview({
           <div className="flex flex-wrap gap-2">
             <Badge variant="quiet">Live preview</Badge>
             <Badge>{mode}</Badge>
-            {reducedMotion ? <Badge variant="quiet">Reduced motion</Badge> : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -488,17 +494,6 @@ export function RuntimePreview({
               onClick={() => { setInternalMode("mobile"); onModeChange?.("mobile"); }}
             >
               Mobile
-            </Button>
-            <Button
-              variant={reducedMotion ? "secondary" : "quiet"}
-              size="sm"
-              onClick={() => {
-                const next = !reducedMotion;
-                setInternalReducedMotion(next);
-                onReducedMotionChange?.(next);
-              }}
-            >
-              Reduced motion
             </Button>
             {onPlayToggle ? (
               <Button variant="quiet" size="sm" onClick={onPlayToggle}>

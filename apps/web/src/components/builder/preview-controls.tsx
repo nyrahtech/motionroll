@@ -1,27 +1,23 @@
 "use client";
 
-import { Maximize2, MonitorSmartphone, MonitorUp, MoonStar, Pause, Play } from "lucide-react";
+import { Maximize2, MonitorSmartphone, MonitorUp, Pause, Play } from "lucide-react";
 import { getTimelineTimeLabel } from "./timeline-model";
 
 export function PreviewControls({
   mode,
-  reducedMotion,
   playhead,
   durationSeconds,
   isPlaying,
   onModeChange,
-  onReducedMotionChange,
   onSeek,
   onPlayToggle,
   onFullscreen,
 }: {
   mode: "desktop" | "mobile";
-  reducedMotion: boolean;
   playhead: number;
   durationSeconds: number;
   isPlaying: boolean;
   onModeChange: (mode: "desktop" | "mobile") => void;
-  onReducedMotionChange: (value: boolean) => void;
   onSeek: (progress: number) => void;
   onPlayToggle: () => void;
   onFullscreen: () => void;
@@ -56,13 +52,6 @@ export function PreviewControls({
             className={`focus-ring rounded-[6px] p-1 ${mode === "mobile" ? "bg-[rgba(255,255,255,0.05)] text-white" : ""}`}
           >
             <MonitorSmartphone className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onReducedMotionChange(!reducedMotion)}
-            className={`focus-ring rounded-[6px] p-1 ${reducedMotion ? "bg-[rgba(255,255,255,0.05)] text-white" : ""}`}
-          >
-            <MoonStar className="h-4 w-4" />
           </button>
           <button
             type="button"

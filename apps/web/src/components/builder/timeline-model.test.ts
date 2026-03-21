@@ -3,6 +3,7 @@ import type { ProjectManifest } from "@motionroll/shared";
 import {
   deriveTimelineTracks,
   getFrameRangeFromClip,
+  getTimelineFrameStripForProgressRange,
   getTimelineProgressFromPointer,
   getTimelineStepProgress,
   getTimelineZoomWidth,
@@ -97,12 +98,12 @@ describe("timeline-model", () => {
               {
                 id: "top",
                 timing: { start: 0.2, end: 0.5 },
-                content: { headline: "Top", body: "Layer", align: "start", theme: "dark", treatment: "default", layer: 1 },
+                content: { text: "Top\n\nLayer", align: "start", theme: "dark", treatment: "default", layer: 1 },
               },
               {
                 id: "bottom",
                 timing: { start: 0.1, end: 0.4 },
-                content: { headline: "Bottom", body: "Layer", align: "start", theme: "light", treatment: "default", layer: 0 },
+                content: { text: "Bottom\n\nLayer", align: "start", theme: "light", treatment: "default", layer: 0 },
               },
             ],
             moments: [],
@@ -226,6 +227,99 @@ describe("timeline-model", () => {
     expect(frameStrip[0]).toBe("/frames/10.jpg");
     expect(frameStrip[Math.floor(frameStrip.length / 2)]).toBe("/frames/15.jpg");
     expect(frameStrip.at(-1)).toBe("/frames/19.jpg");
+  });
+
+  it("can resample scene thumbnails from a live resized range", () => {
+    const tracks = deriveTimelineTracks(
+      {
+        version: "1.0.0",
+        generatedAt: new Date(0).toISOString(),
+        selectedPreset: "product-reveal",
+        project: {
+          id: "11111111-1111-1111-1111-111111111111",
+          slug: "demo",
+          title: "Demo",
+          ownerId: "local",
+          publishVersion: 1,
+          previewUrl: "/projects/demo/preview",
+        },
+        publishTarget: {
+          slug: "demo",
+          targetType: "hosted_embed",
+          version: 1,
+          previewUrl: "/projects/demo/preview",
+          isReady: true,
+        },
+        sections: [
+          {
+            id: "22222222-2222-2222-2222-222222222222",
+            presetId: "product-reveal",
+            title: "Section",
+            frameAssets: [
+              {
+                index: 10,
+                path: "frame-10",
+                variants: [{ kind: "desktop", url: "/frames/10.jpg" }],
+              },
+              {
+                index: 15,
+                path: "frame-15",
+                variants: [{ kind: "desktop", url: "/frames/15.jpg" }],
+              },
+              {
+                index: 19,
+                path: "frame-19",
+                variants: [{ kind: "desktop", url: "/frames/19.jpg" }],
+              },
+            ],
+            frameCount: 20,
+            progressMapping: {
+              startProgress: 0,
+              endProgress: 1,
+              frameCount: 20,
+              frameRange: { start: 10, end: 19 },
+            },
+            overlays: [],
+            moments: [],
+            transitions: [],
+            fallback: {
+              posterUrl: "/poster.png",
+              mobileBehavior: "poster",
+              reducedMotionBehavior: "poster",
+            },
+            motion: {
+              sectionHeightVh: 220,
+              scrubStrength: 1,
+              easing: "linear",
+              pin: true,
+              preloadWindow: 4,
+            },
+            presetConfig: {},
+            runtimeProfile: {
+              presetId: "product-reveal",
+              kind: "product-reveal",
+              sequenceStrategy: "spotlight",
+              chromeLabel: "Preview",
+              previewDescription: "Demo",
+              overlayEntrance: "fade-up",
+              highlightMetricLabel: "Spotlight",
+            },
+          },
+        ],
+      },
+      8,
+    );
+
+    const frameStripSource = tracks[0]?.clips[0]?.metadata?.frameStripSource;
+    expect(frameStripSource).toBeDefined();
+    const resizedStrip = getTimelineFrameStripForProgressRange(
+      frameStripSource!,
+      tracks[0]!.clips[0]!.start,
+      0.8,
+    );
+
+    expect(resizedStrip[0]).toBe("/frames/10.jpg");
+    expect(resizedStrip.at(-1)).toBe("/frames/15.jpg");
   });
 
   it("matches thumbnail variants to the active preview mode", () => {

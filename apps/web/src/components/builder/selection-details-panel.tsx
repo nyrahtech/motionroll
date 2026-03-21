@@ -84,13 +84,8 @@ export function SelectionDetailsPanel({
             {isText || isStep ? (
               <>
                 <label className="space-y-1.5">
-                  <span className="field-label">{isStep ? "Step title" : "Headline"}</span>
-                  <Input {...form.register("headline")} />
-                </label>
-
-                <label className="space-y-1.5">
-                  <span className="field-label">Body</span>
-                  <Textarea {...form.register("body")} />
+                  <span className="field-label">Text</span>
+                  <Textarea {...form.register("text")} />
                 </label>
               </>
             ) : null}

@@ -31,7 +31,7 @@ export function InspectorPane({
   form: UseFormReturn<EditorFormValues>;
   selectedOverlay?: {
     id: string;
-    content: { headline: string };
+    content: { text?: string };
   };
   preset: {
     id: string;
@@ -74,12 +74,8 @@ export function InspectorPane({
                   <Input {...form.register("sectionTitle")} />
                 </label>
                 <label className="space-y-2">
-                  <span className="field-label">Headline</span>
-                  <Input {...form.register("headline")} />
-                </label>
-                <label className="space-y-2">
-                  <span className="field-label">Body</span>
-                  <Textarea {...form.register("body")} />
+                  <span className="field-label">Text</span>
+                  <Textarea {...form.register("text")} />
                 </label>
               </div>
             </InspectorGroup>
@@ -103,7 +99,7 @@ export function InspectorPane({
             {selectedOverlay ? (
               <InspectorGroup
                 title="Selected overlay"
-                description={`Adjust timing for "${selectedOverlay.content.headline}".`}
+                description={`Adjust timing for "${selectedOverlay.content.text ?? "Text"}".`}
               >
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-2">

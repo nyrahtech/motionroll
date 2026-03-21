@@ -101,25 +101,30 @@ export function normalizeFrameRange(
 
 export function normalizeOverlayRows(overlays: OverlayRow[]) {
   return [...overlays]
-    .map((overlay, index, rows) => ({
+    .map((overlay, index) => ({
       ...overlay,
+      sourceIndex: index,
       content: {
         ...overlay.content,
         treatment: overlay.content.treatment ?? "default",
-        layer: rows.length - index - 1,
+        layer: Math.max(0, overlay.content.layer ?? 0),
       },
       timing: {
         start: Math.min(Math.max(overlay.timing.start, 0), 1),
         end: Math.min(Math.max(overlay.timing.end, 0), 1),
       },
     }))
+    .sort((left, right) =>
+      (left.content.layer ?? 0) - (right.content.layer ?? 0) || left.sourceIndex - right.sourceIndex,
+    )
     .map((overlay) => ({
       ...overlay,
       timing: {
         start: Math.min(overlay.timing.start, overlay.timing.end),
         end: Math.max(overlay.timing.end, overlay.timing.start),
       },
-    }));
+    }))
+    .map(({ sourceIndex: _sourceIndex, ...overlay }) => overlay);
 }
 
 function pickFrameVariantUrl(

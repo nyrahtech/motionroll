@@ -1,4 +1,4 @@
-import type { OverlayDefinition, PresetId } from "@motionroll/shared";
+import { OverlayDefinitionSchema, type OverlayDefinition, type PresetId } from "@motionroll/shared";
 import motionrollDemoMetadata from "../../public/motionroll_demo_sequence/metadata.json";
 
 export type DemoProjectSeed = {
@@ -26,9 +26,7 @@ export type DemoProjectSeed = {
     reducedMotion: "poster" | "video" | "sequence";
   };
   commonText: {
-    kicker: string;
-    headline: string;
-    body: string;
+    content: string;
   };
   cta: {
     label: string;
@@ -54,6 +52,14 @@ const motionrollDemoSteps = [
   "Publish the section",
 ];
 
+function buildTextContent(...parts: string[]) {
+  return parts.map((part) => part.trim()).filter(Boolean).join("\n\n");
+}
+
+function toOverlay(overlay: unknown): OverlayDefinition {
+  return OverlayDefinitionSchema.parse(overlay);
+}
+
 const motionrollDemoOverlays: OverlayDefinition[] = motionrollDemoSteps.map((step, index) => {
   const starts = [0.08, 0.29, 0.52, 0.76];
   const ends = [0.22, 0.43, 0.66, 0.92];
@@ -64,13 +70,11 @@ const motionrollDemoOverlays: OverlayDefinition[] = motionrollDemoSteps.map((ste
     "Ship the hosted section when preview, fullscreen, and publish all line up on the same frame mapping.",
   ];
 
-  return {
+  return toOverlay({
     id: `motionroll-step-${index + 1}`,
     timing: { start: starts[index] ?? 0, end: ends[index] ?? 1 },
     content: {
-      eyebrow: `Step ${index + 1}`,
-      headline: step,
-      body: bodies[index] ?? "",
+      text: buildTextContent(`Step ${index + 1}`, step, bodies[index] ?? ""),
       align: index % 2 === 0 ? "start" : "end",
       theme: "dark",
       treatment: "default",
@@ -79,7 +83,7 @@ const motionrollDemoOverlays: OverlayDefinition[] = motionrollDemoSteps.map((ste
           ? { label: "Start editing", href: "#editor" }
           : undefined,
     },
-  };
+  });
 });
 
 export const demoProjectSeeds: DemoProjectSeed[] = [
@@ -109,9 +113,11 @@ export const demoProjectSeeds: DemoProjectSeed[] = [
       reducedMotion: "sequence",
     },
     commonText: {
-      kicker: "MotionRoll Demo",
-      headline: "Scroll stories that actually move",
-      body: "MotionRoll turns video into polished, scroll-driven web sections you can edit, time, and publish in one place.",
+      content: buildTextContent(
+        "MotionRoll Demo",
+        "Scroll stories that actually move",
+        "MotionRoll turns video into polished, scroll-driven web sections you can edit, time, and publish in one place.",
+      ),
     },
     cta: {
       label: "Start editing",
@@ -139,9 +145,11 @@ export const demoProjectSeeds: DemoProjectSeed[] = [
       "/demo/product-reveal/frame-2.png",
     ],
     commonText: {
-      kicker: "Aether launch",
-      headline: "Introduce the hardware first, then let the copy land with intent.",
-      body: "This demo is tuned for launch-style storytelling: a clear hero motion, deliberate feature callouts, and a hosted publish flow that feels production-facing.",
+      content: buildTextContent(
+        "Aether launch",
+        "Introduce the hardware first, then let the copy land with intent.",
+        "This demo is tuned for launch-style storytelling: a clear hero motion, deliberate feature callouts, and a hosted publish flow that feels production-facing.",
+      ),
     },
     cta: {
       label: "Reserve a preview",
@@ -151,43 +159,49 @@ export const demoProjectSeeds: DemoProjectSeed[] = [
     scrubStrength: 0.8,
     frameRangeEnd: 2,
     overlays: [
-      {
+      toOverlay({
         id: "hero-reveal",
         timing: { start: 0.04, end: 0.24 },
         content: {
-          eyebrow: "Aether One",
-          headline: "A launch-style reveal with the object carrying the first beat.",
-          body: "The copy stays quiet until the motion earns it, which makes the opening feel intentional instead of overloaded.",
+          text: buildTextContent(
+            "Aether One",
+            "A launch-style reveal with the object carrying the first beat.",
+            "The copy stays quiet until the motion earns it, which makes the opening feel intentional instead of overloaded.",
+          ),
           align: "start",
           theme: "light",
           treatment: "default",
         },
-      },
-      {
+      }),
+      toOverlay({
         id: "finish-detail",
         timing: { start: 0.34, end: 0.58 },
         content: {
-          eyebrow: "Finish and form",
-          headline: "Use the mid-sequence to point at a material or form detail.",
-          body: "This is the kind of preset you use when a product page needs Apple-style confidence without hand-built animation logic.",
+          text: buildTextContent(
+            "Finish and form",
+            "Use the mid-sequence to point at a material or form detail.",
+            "This is the kind of preset you use when a product page needs Apple-style confidence without hand-built animation logic.",
+          ),
           align: "center",
           theme: "accent",
           treatment: "default",
         },
-      },
-      {
+      }),
+      toOverlay({
         id: "launch-cta",
         timing: { start: 0.7, end: 0.92 },
         content: {
-          eyebrow: "Publish anywhere",
-          headline: "The same project can ship as a hosted preview or a script embed.",
-          body: "Hosted publish is the real path in MotionRoll v1, so the manifest and runtime stay aligned.",
+          text: buildTextContent(
+            "Publish anywhere",
+            "The same project can ship as a hosted preview or a script embed.",
+            "Hosted publish is the real path in MotionRoll v1, so the manifest and runtime stay aligned.",
+          ),
           cta: { label: "Open publish", href: "#publish" },
           align: "end",
           theme: "dark",
           treatment: "default",
         },
-      },
+      }),
     ],
   },
   {
@@ -207,9 +221,11 @@ export const demoProjectSeeds: DemoProjectSeed[] = [
       "/demo/feature-walkthrough/frame-2.png",
     ],
     commonText: {
-      kicker: "Cascade workspace",
-      headline: "Walk the viewer through one focused product flow instead of showing the whole app.",
-      body: "This demo shows how the Feature Walkthrough preset can explain a workflow with measured pacing, scoped overlays, and a clearer ending beat.",
+      content: buildTextContent(
+        "Cascade workspace",
+        "Walk the viewer through one focused product flow instead of showing the whole app.",
+        "This demo shows how the Feature Walkthrough preset can explain a workflow with measured pacing, scoped overlays, and a clearer ending beat.",
+      ),
     },
     cta: {
       label: "View workflow",
@@ -219,43 +235,49 @@ export const demoProjectSeeds: DemoProjectSeed[] = [
     scrubStrength: 0.95,
     frameRangeEnd: 2,
     overlays: [
-      {
+      toOverlay({
         id: "step-one",
         timing: { start: 0.05, end: 0.24 },
         content: {
-          eyebrow: "Step 01",
-          headline: "Start by orienting the user before you explain the detail.",
-          body: "The first chapter frames the workflow so the rest of the section can feel guided, not chaotic.",
+          text: buildTextContent(
+            "Step 01",
+            "Start by orienting the user before you explain the detail.",
+            "The first chapter frames the workflow so the rest of the section can feel guided, not chaotic.",
+          ),
           align: "start",
           theme: "light",
           treatment: "default",
         },
-      },
-      {
+      }),
+      toOverlay({
         id: "step-two",
         timing: { start: 0.34, end: 0.56 },
         content: {
-          eyebrow: "Step 02",
-          headline: "Call out the active region when the motion reaches it.",
-          body: "Feature Walkthrough works best when the copy matches a real focus shift, not when every beat says everything at once.",
+          text: buildTextContent(
+            "Step 02",
+            "Call out the active region when the motion reaches it.",
+            "Feature Walkthrough works best when the copy matches a real focus shift, not when every beat says everything at once.",
+          ),
           align: "end",
           theme: "accent",
           treatment: "default",
         },
-      },
-      {
+      }),
+      toOverlay({
         id: "step-three",
         timing: { start: 0.68, end: 0.9 },
         content: {
-          eyebrow: "Step 03",
-          headline: "End on outcome, not on interface chrome.",
-          body: "The last beat reinforces what changed for the user and prepares the section for a publish-ready handoff.",
+          text: buildTextContent(
+            "Step 03",
+            "End on outcome, not on interface chrome.",
+            "The last beat reinforces what changed for the user and prepares the section for a publish-ready handoff.",
+          ),
           cta: { label: "See Editor", href: "#editor" },
           align: "start",
           theme: "dark",
           treatment: "default",
         },
-      },
+      }),
     ],
   },
   {
@@ -275,9 +297,11 @@ export const demoProjectSeeds: DemoProjectSeed[] = [
       "/demo/device-spin/frame-2.png",
     ],
     commonText: {
-      kicker: "Orbit speaker",
-      headline: "A compact device spin that makes form, edge detail, and finish easy to sell.",
-      body: "This demo is intentionally simple: a controlled turntable-style motion with copy that supports the object instead of competing with it.",
+      content: buildTextContent(
+        "Orbit speaker",
+        "A compact device spin that makes form, edge detail, and finish easy to sell.",
+        "This demo is intentionally simple: a controlled turntable-style motion with copy that supports the object instead of competing with it.",
+      ),
     },
     cta: {
       label: "Inspect design",
@@ -287,43 +311,49 @@ export const demoProjectSeeds: DemoProjectSeed[] = [
     scrubStrength: 0.9,
     frameRangeEnd: 2,
     overlays: [
-      {
+      toOverlay({
         id: "spin-open",
         timing: { start: 0.06, end: 0.28 },
         content: {
-          eyebrow: "Silhouette first",
-          headline: "Lead with the object shape before the material details take over.",
-          body: "This is a strong preset for premium accessories, speakers, wearables, and industrial design stories.",
+          text: buildTextContent(
+            "Silhouette first",
+            "Lead with the object shape before the material details take over.",
+            "This is a strong preset for premium accessories, speakers, wearables, and industrial design stories.",
+          ),
           align: "start",
           theme: "light",
           treatment: "default",
         },
-      },
-      {
+      }),
+      toOverlay({
         id: "spin-mid",
         timing: { start: 0.42, end: 0.68 },
         content: {
-          eyebrow: "Material detail",
-          headline: "Use the middle beat to surface the finish and edge treatment.",
-          body: "A short, clean source clip is often enough to communicate product craft when the runtime mapping is stable.",
+          text: buildTextContent(
+            "Material detail",
+            "Use the middle beat to surface the finish and edge treatment.",
+            "A short, clean source clip is often enough to communicate product craft when the runtime mapping is stable.",
+          ),
           align: "end",
           theme: "accent",
           treatment: "default",
         },
-      },
-      {
+      }),
+      toOverlay({
         id: "spin-close",
         timing: { start: 0.76, end: 0.94 },
         content: {
-          eyebrow: "Ready to publish",
-          headline: "Turn a small motion study into a section that can ship anywhere.",
-          body: "The hosted path is primary, and script embed is there when you need a custom placement.",
+          text: buildTextContent(
+            "Ready to publish",
+            "Turn a small motion study into a section that can ship anywhere.",
+            "The hosted path is primary, and script embed is there when you need a custom placement.",
+          ),
           cta: { label: "Open demo", href: "#demo" },
           align: "end",
           theme: "dark",
           treatment: "default",
         },
-      },
+      }),
     ],
   },
 ];

@@ -3,7 +3,7 @@
 /**
  * OverlayManipulator
  *
- * All seven moving parts — card, outline, 4 corner handles, drag button,
+ * All moving parts — card, outline, 4 corner handles, drag handle,
  * toolbar wrapper — are moved via direct DOM style writes on every pointermove.
  * React state (box) only sets the initial position and the final committed
  * position after pointerup. Nothing goes through React's scheduler during
@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RefObject, PointerEvent as ReactPointerEvent } from "react";
 import { clampProgress } from "@motionroll/shared";
 import type { OverlayDefinition } from "@motionroll/shared";
+import { Move } from "lucide-react";
 import { InlineTextToolbar } from "./inline-text-toolbar";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -22,11 +23,18 @@ const DESIGN_WIDTH = 1440;
 const DESIGN_HEIGHT = 810;
 const MIN_DIM = 80;
 const HANDLE_HALF = 6; // half of 12px handle size
+const DRAG_HANDLE_OFFSET = 8;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Box = { left: number; top: number; width: number; height: number };
 type Corner = "nw" | "ne" | "sw" | "se";
+type LiveResizeTargets = {
+  text: HTMLElement | null;
+  media: HTMLElement | null;
+  actionLink: HTMLElement | null;
+  isButtonLike: boolean;
+};
 
 export type OverlayManipulatorProps = {
   overlay: OverlayDefinition;
@@ -103,7 +111,7 @@ function boxToLayout(box: Box, overlay: OverlayDefinition, container: HTMLElemen
 function toolbarPos(box: Box, cW: number, cH: number) {
   const tbW = 320;
   const tbH = 44;
-  const left = Math.max(8, Math.min(box.left + box.width / 2 - tbW / 2, cW - tbW - 8));
+  const left = Math.max(8, Math.min(box.left, cW - tbW - 8));
   const aboveTop = box.top - tbH - 8;
   const belowTop = box.top + box.height + 8;
   const top = aboveTop >= 8 ? aboveTop : Math.min(belowTop, cH - tbH - 8);
@@ -134,8 +142,6 @@ function getResizeStyleChanges(
     scaleY,
     styleChanges: {
       fontSize: Math.max(10, Math.round((baseStyle?.fontSize ?? 34) * contentScale)),
-      eyebrowFontSize: Math.max(8, Math.round((baseStyle?.eyebrowFontSize ?? 12) * contentScale)),
-      bodyFontSize: Math.max(10, Math.round((baseStyle?.bodyFontSize ?? 15) * contentScale)),
       maxWidth: Math.max(80, Math.round((baseStyle?.maxWidth ?? baseLayout?.width ?? 420) * scaleX)),
     },
     backgroundChanges: {
@@ -150,6 +156,15 @@ function getResizeStyleChanges(
     actionMarginTop: Math.max(8, Math.round(16 * contentScale)),
     actionPaddingY: Math.max(6, Math.round(9 * paddingScaleY)),
     actionPaddingX: Math.max(8, Math.round(14 * paddingScaleX)),
+  };
+}
+
+function getLiveResizeTargets(card: HTMLElement, overlay: OverlayDefinition): LiveResizeTargets {
+  return {
+    text: card.querySelector<HTMLElement>('[data-text-field="text"]'),
+    media: card.querySelector<HTMLElement>("[data-media-field='media']"),
+    actionLink: card.querySelector<HTMLElement>("a"),
+    isButtonLike: Boolean(overlay.content.style?.buttonLike),
   };
 }
 
@@ -170,6 +185,7 @@ export function OverlayManipulator({
 }: OverlayManipulatorProps) {
   // React state — only used for initial render and post-commit re-sync.
   const [box, setBox] = useState<Box | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   // Ref always holds the latest box; closures read from here, not state.
   const boxRef = useRef<Box | null>(null);
 
@@ -179,6 +195,7 @@ export function OverlayManipulator({
   const handleNeRef  = useRef<HTMLDivElement | null>(null);
   const handleSwRef  = useRef<HTMLDivElement | null>(null);
   const handleSeRef  = useRef<HTMLDivElement | null>(null);
+  const dragHandleRef = useRef<HTMLButtonElement | null>(null);
   const toolbarWrapRef = useRef<HTMLDivElement | null>(null);
 
   // ── Apply box to all DOM elements synchronously ───────────────────────
@@ -213,6 +230,11 @@ export function OverlayManipulator({
       handleSeRef.current.style.top  = `${b.top  + b.height - HANDLE_HALF}px`;
     }
 
+    if (dragHandleRef.current) {
+      dragHandleRef.current.style.left = `${b.left + DRAG_HANDLE_OFFSET}px`;
+      dragHandleRef.current.style.top = `${b.top + DRAG_HANDLE_OFFSET}px`;
+    }
+
     // Toolbar wrapper
     if (toolbarWrapRef.current && cW && cH) {
       const tb = toolbarPos(b, cW, cH);
@@ -242,46 +264,37 @@ export function OverlayManipulator({
     card.style.transition = "none";
   }
 
-  function applyLiveResizeStyles(card: HTMLElement, nextBox: Box, initialBox: Box) {
+  function applyLiveResizeStyles(
+    card: HTMLElement,
+    nextBox: Box,
+    initialBox: Box,
+    targets: LiveResizeTargets,
+  ) {
     const resize = getResizeStyleChanges(overlay, initialBox, nextBox);
-    const baseStyle = overlay.content.style;
     const stageScale = containerRef.current ? getStageScale(containerRef.current) : 1;
 
     card.style.maxWidth = `${Math.round(resize.styleChanges.maxWidth * stageScale)}px`;
     card.style.padding = `${Math.round(resize.backgroundChanges.paddingY * stageScale)}px ${Math.round(resize.backgroundChanges.paddingX * stageScale)}px`;
     card.style.borderRadius = `${Math.round(resize.backgroundChanges.radius * stageScale)}px`;
 
-    const headline = card.querySelector<HTMLElement>('[data-text-field="headline"]');
-    if (headline) {
-      headline.style.fontSize = `${Math.round(resize.styleChanges.fontSize * stageScale)}px`;
+    if (targets.text) {
+      targets.text.style.fontSize = `${Math.round(resize.styleChanges.fontSize * stageScale)}px`;
     }
 
-    const eyebrow = card.querySelector<HTMLElement>('[data-text-field="eyebrow"]');
-    if (eyebrow) {
-      eyebrow.style.fontSize = `${Math.round(resize.styleChanges.eyebrowFontSize * stageScale)}px`;
-    }
-
-    const body = card.querySelector<HTMLElement>('[data-text-field="body"]');
-    if (body) {
-      body.style.fontSize = `${Math.round(resize.styleChanges.bodyFontSize * stageScale)}px`;
-    }
-
-    const media = card.querySelector<HTMLElement>("[data-media-field='media']");
-    if (media) {
-      media.style.maxWidth = `${Math.round(resize.mediaMaxWidth * stageScale)}px`;
+    if (targets.media) {
+      targets.media.style.maxWidth = `${Math.round(resize.mediaMaxWidth * stageScale)}px`;
       if (overlay.content.type === "icon") {
-        media.style.height = `${Math.round(resize.iconHeight * stageScale)}px`;
+        targets.media.style.height = `${Math.round(resize.iconHeight * stageScale)}px`;
       } else if (overlay.content.type === "logo") {
-        media.style.height = `${Math.round(resize.logoHeight * stageScale)}px`;
+        targets.media.style.height = `${Math.round(resize.logoHeight * stageScale)}px`;
       }
     }
 
-    const actionLink = card.querySelector<HTMLElement>("a");
-    if (actionLink) {
-      actionLink.style.fontSize = `${Math.round(resize.actionFontSize * stageScale)}px`;
-      actionLink.style.marginTop = `${Math.round(resize.actionMarginTop * stageScale)}px`;
-      if (baseStyle?.buttonLike) {
-        actionLink.style.padding = `${Math.round(resize.actionPaddingY * stageScale)}px ${Math.round(resize.actionPaddingX * stageScale)}px`;
+    if (targets.actionLink) {
+      targets.actionLink.style.fontSize = `${Math.round(resize.actionFontSize * stageScale)}px`;
+      targets.actionLink.style.marginTop = `${Math.round(resize.actionMarginTop * stageScale)}px`;
+      if (targets.isButtonLike) {
+        targets.actionLink.style.padding = `${Math.round(resize.actionPaddingY * stageScale)}px ${Math.round(resize.actionPaddingX * stageScale)}px`;
       }
     }
   }
@@ -376,6 +389,7 @@ export function OverlayManipulator({
 
     e.preventDefault();
     e.stopPropagation();
+    setIsDragging(true);
     onInteractingChange(true);
 
     const initialBox: Box = startBox;
@@ -399,6 +413,7 @@ export function OverlayManipulator({
       cleanup();
       const nextBox = boxRef.current;
       if (!nextBox) {
+        setIsDragging(false);
         onInteractingChange(false);
         return;
       }
@@ -406,10 +421,12 @@ export function OverlayManipulator({
       // Keep card at final pixel position — the manifest-driven overlay-sync
       // effect in runtime-preview will restore fractional styles once committed.
       setBox(nextBox);
+      setIsDragging(false);
       onInteractingChange(false);
     }
 
     function cleanup() {
+      setIsDragging(false);
       document.body.style.userSelect = "";
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -436,15 +453,19 @@ export function OverlayManipulator({
 
     const initialBox: Box = startBox;
     const card = getCard();
+    const resizeTargets = card ? getLiveResizeTargets(card, overlay) : null;
     moveAll(initialBox, card);
 
     const startX = e.clientX;
     const startY = e.clientY;
     const cRect = container.getBoundingClientRect();
+    let latestClientX = startX;
+    let latestClientY = startY;
+    let resizeRaf: number | null = null;
 
-    function onMove(ev: PointerEvent) {
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
+    function applyResizeFrame(clientX: number, clientY: number) {
+      const dx = clientX - startX;
+      const dy = clientY - startY;
       let { left, top, width, height } = initialBox;
 
       if (corner === "nw") {
@@ -468,12 +489,28 @@ export function OverlayManipulator({
 
       const nextBox = { left, top, width, height };
       moveAll(nextBox, card);
-      if (card) {
-        applyLiveResizeStyles(card, nextBox, initialBox);
+      if (card && resizeTargets) {
+        applyLiveResizeStyles(card, nextBox, initialBox, resizeTargets);
+      }
+    }
+
+    function onMove(ev: PointerEvent) {
+      latestClientX = ev.clientX;
+      latestClientY = ev.clientY;
+      if (resizeRaf === null) {
+        resizeRaf = requestAnimationFrame(() => {
+          resizeRaf = null;
+          applyResizeFrame(latestClientX, latestClientY);
+        });
       }
     }
 
     function onUp() {
+      if (resizeRaf !== null) {
+        cancelAnimationFrame(resizeRaf);
+        resizeRaf = null;
+      }
+      applyResizeFrame(latestClientX, latestClientY);
       cleanup();
       const nextBox = boxRef.current;
       if (!nextBox) {
@@ -494,6 +531,10 @@ export function OverlayManipulator({
 
     function cleanup() {
       document.body.style.userSelect = "";
+      if (resizeRaf !== null) {
+        cancelAnimationFrame(resizeRaf);
+        resizeRaf = null;
+      }
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", cleanup);
@@ -552,7 +593,26 @@ export function OverlayManipulator({
         );
       })}
 
-      {/* Toolbar wrapper — drag handle is inside the toolbar, no separate Drag button */}
+      <button
+        ref={dragHandleRef}
+        type="button"
+        onPointerDown={handleDragPointerDown}
+        className="focus-ring absolute z-[34] flex h-8 w-8 items-center justify-center rounded-md border transition-colors"
+        style={{
+          left: box.left + DRAG_HANDLE_OFFSET,
+          top: box.top + DRAG_HANDLE_OFFSET,
+          cursor: "grab",
+          borderColor: isDragging ? "rgba(205,239,255,0.28)" : "rgba(255,255,255,0.06)",
+          background: "var(--editor-panel-elevated)",
+          color: isDragging ? "var(--editor-accent)" : "var(--foreground-muted)",
+        }}
+        title="Drag overlay"
+        aria-label="Drag overlay"
+      >
+        <Move className="h-3.5 w-3.5" />
+      </button>
+
+      {/* Toolbar wrapper */}
       <div
         ref={toolbarWrapRef}
         className="absolute z-[35]"
@@ -570,7 +630,6 @@ export function OverlayManipulator({
           textAlign={(selectedStyle?.textAlign as "start" | "center" | "end") ?? "start"}
           isTextStyle={isTextStyle}
           onChange={onStyleChange}
-          onDragStart={handleDragPointerDown}
           onDuplicate={onDuplicate}
           onDelete={onDelete}
         />

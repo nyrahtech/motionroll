@@ -534,17 +534,56 @@ select:disabled {
   border-left-color: rgba(205, 239, 255, 0.5);
 }
 
+.motionroll-uppy {
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .motionroll-uppy .uppy-DragDrop-container {
   min-height: 132px;
-  border-radius: 10px;
-  border: 1px dashed rgba(205, 239, 255, 0.18);
+  border-radius: 12px;
+  border: 0;
   background: rgba(255, 255, 255, 0.02);
   color: var(--foreground-soft);
 }
 
+.motionroll-uppy .uppy-DragDrop-label {
+  color: var(--foreground-soft) !important;
+  font-size: 0.82rem !important;
+  font-weight: 500 !important;
+}
+
 .motionroll-uppy .uppy-DragDrop-container:hover {
-  border-color: rgba(205, 239, 255, 0.38);
   background: rgba(205, 239, 255, 0.05);
+}
+
+.motionroll-uppy .uppy-Dashboard-inner,
+.motionroll-uppy .uppy-DashboardContent-bar,
+.motionroll-uppy .uppy-Dashboard-AddFiles,
+.motionroll-uppy .uppy-StatusBar {
+  background: transparent !important;
+  color: var(--foreground) !important;
+}
+
+.motionroll-uppy .uppy-Dashboard-inner {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.motionroll-uppy .uppy-Dashboard-AddFiles,
+.motionroll-uppy .uppy-Dashboard-browse,
+.motionroll-uppy .uppy-Dashboard-note,
+.motionroll-uppy .uppy-Dashboard-dropFilesHereHint {
+  color: var(--foreground-soft) !important;
+}
+
+.motionroll-uppy .uppy-c-icon,
+.motionroll-uppy .uppy-DashboardContent-back,
+.motionroll-uppy .uppy-StatusBar-actionBtn {
+  color: var(--foreground) !important;
+  fill: currentColor !important;
 }
 
 

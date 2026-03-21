@@ -120,10 +120,9 @@ export function buildSectionValuesFromDraft<
     };
   const existingText =
     (section?.commonConfig as {
-      text?: { headline: string; body: string };
+      text?: { content: string };
     })?.text ?? {
-      headline: draft.overlays[0]?.content.headline ?? "Primary headline",
-      body: draft.overlays[0]?.content.body ?? "",
+      content: draft.overlays[0]?.content.text ?? "Primary text block",
     };
   const existingCta =
     (section?.commonConfig as {

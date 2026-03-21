@@ -100,8 +100,7 @@ describe("buildSectionManifest", () => {
           overlayKey: "chapter-1",
           timing: { start: 0.03, end: 0.18 },
           content: {
-            headline: "Set the tone",
-            body: "Open the story with a stronger chapter card.",
+            text: "Set the tone\n\nOpen the story with a stronger chapter card.",
             align: "start",
             theme: "accent",
             treatment: "default",
@@ -138,5 +137,58 @@ describe("buildSectionManifest", () => {
     expect(manifest.fallback.firstFrameUrl).toBe("https://example.com/frame-0.jpg");
     expect(manifest.frameCount).toBe(180);
     expect(manifest.overlays[0]?.content.treatment).toBe("default");
+  });
+
+  it("preserves explicit layer ordering for runtime stacking", () => {
+    const manifest = buildSectionManifest({
+      section: {
+        id: "3517be83-7f3c-4600-af7e-6385d4469114",
+        presetId: "product-reveal",
+        title: "Layered section",
+        commonConfig: {
+          sectionHeightVh: 240,
+          scrubStrength: 1,
+          frameRange: { start: 0, end: 1 },
+          fallbackBehavior: {
+            mobile: "poster",
+            reducedMotion: "poster",
+          },
+          motion: {
+            easing: "linear",
+            pin: true,
+            preloadWindow: 4,
+          },
+        },
+        presetConfig: {},
+      },
+      overlays: [
+        {
+          overlayKey: "top",
+          timing: { start: 0.1, end: 0.8 },
+          content: {
+            text: "Top\n\nOn top",
+            align: "start",
+            theme: "light",
+            treatment: "default",
+            layer: 3,
+          },
+        },
+        {
+          overlayKey: "bottom",
+          timing: { start: 0.1, end: 0.8 },
+          content: {
+            text: "Bottom\n\nBehind",
+            align: "start",
+            theme: "dark",
+            treatment: "default",
+            layer: 0,
+          },
+        },
+      ],
+      assets: [],
+    });
+
+    expect(manifest.overlays.map((overlay) => overlay.id)).toEqual(["bottom", "top"]);
+    expect(manifest.overlays.map((overlay) => overlay.content.layer)).toEqual([0, 3]);
   });
 });

@@ -9,6 +9,14 @@ import {
 
 export type TimelineTrackType = "section" | "layer";
 
+export type TimelineFrameStripSource = {
+  frames: Array<{
+    index: number;
+    url: string;
+  }>;
+  frameCount: number;
+};
+
 export type TimelineClipModel = {
   id: string;
   trackType: TimelineTrackType;
@@ -20,8 +28,8 @@ export type TimelineClipModel = {
     overlayId?: string;
     theme?: string;
     frameStrip?: string[];
-    eyebrow?: string;
-    body?: string;
+    frameStripSource?: TimelineFrameStripSource;
+    text?: string;
     transitionPreset?: string;
     contentType?: string;
     layerIndex?: number;
@@ -174,36 +182,10 @@ const timelineVariantPreferenceMap: Record<"desktop" | "mobile", string[]> = {
   mobile: ["mobile", "tablet", "desktop", "original"],
 };
 
-function getNearestFrameAsset(
-  frameAssets: ProjectManifest["sections"][number]["frameAssets"],
-  desiredIndex: number,
-) {
-  if (frameAssets.length === 0) {
-    return null;
-  }
-
-  const exact = frameAssets.find((frame) => frame.index === desiredIndex);
-  if (exact) {
-    return exact;
-  }
-
-  return [...frameAssets].sort(
-    (left, right) =>
-      Math.abs(left.index - desiredIndex) - Math.abs(right.index - desiredIndex) ||
-      left.index - right.index,
-  )[0] ?? null;
-}
-
-function getTimelineFrameUrl(
-  frameAssets: ProjectManifest["sections"][number]["frameAssets"],
-  desiredIndex: number,
+function getTimelineFrameAssetUrl(
+  frameAsset: ProjectManifest["sections"][number]["frameAssets"][number],
   mode: "desktop" | "mobile",
 ) {
-  const frameAsset = getNearestFrameAsset(frameAssets, desiredIndex);
-  if (!frameAsset) {
-    return null;
-  }
-
   for (const kind of timelineVariantPreferenceMap[mode]) {
     const variant = frameAsset.variants.find((item) => item.kind === kind && item.url.length > 0);
     if (variant) {
@@ -211,22 +193,81 @@ function getTimelineFrameUrl(
     }
   }
 
+  return frameAsset.variants[0]?.url ?? null;
+}
+
+function getTimelineFrameStripSource(
+  section: ProjectManifest["sections"][number],
+  mode: "desktop" | "mobile",
+): TimelineFrameStripSource {
+  return {
+    frames: section.frameAssets.flatMap((frameAsset) => {
+      const url = getTimelineFrameAssetUrl(frameAsset, mode);
+      return url ? [{ index: frameAsset.index, url }] : [];
+    }),
+    frameCount: Math.max(section.frameCount, 1),
+  };
+}
+
+function getTimelineFrameUrl(
+  frameSource: TimelineFrameStripSource,
+  desiredIndex: number,
+) {
+  if (frameSource.frames.length === 0) {
+    return null;
+  }
+
+  const exact = frameSource.frames.find((frame) => frame.index === desiredIndex);
+  if (exact) {
+    return exact.url;
+  }
+
+  const sorted = [...frameSource.frames].sort((left, right) => left.index - right.index);
   return (
-    frameAsset.variants[0]?.url ??
+    sorted.find((frame) => frame.index > desiredIndex)?.url ??
+    [...sorted].reverse().find((frame) => frame.index < desiredIndex)?.url ??
+    sorted[0]?.url ??
     null
   );
+}
+
+function getFrameRangeForProgressRange(
+  startProgress: number,
+  endProgress: number,
+  frameCount: number,
+) {
+  return {
+    start: progressToFrameBoundaryIndex(startProgress, frameCount),
+    end: progressToFrameBoundaryIndex(endProgress, frameCount),
+  };
+}
+
+export function getTimelineFrameStripForProgressRange(
+  frameSource: TimelineFrameStripSource,
+  startProgress: number,
+  endProgress: number,
+  sampleCount = 8,
+) {
+  const frameRange = getFrameRangeForProgressRange(startProgress, endProgress, frameSource.frameCount);
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const progress =
+      sampleCount <= 1
+        ? 0
+        : index / (sampleCount - 1);
+    const frameIndex = progressToFrameIndex(progress, frameRange);
+    return getTimelineFrameUrl(frameSource, frameIndex);
+  }).filter((url): url is string => Boolean(url));
 }
 
 function getFrameStrip(
   section: ProjectManifest["sections"][number],
   mode: "desktop" | "mobile",
-  sampleCount = 18,
+  sampleCount = 8,
 ) {
-  return Array.from({ length: sampleCount }, (_, index) => {
-    const progress = sampleCount <= 1 ? 0 : index / Math.max(sampleCount - 1, 1);
-    const frameIndex = progressToFrameIndex(progress, section.progressMapping.frameRange);
-    return getTimelineFrameUrl(section.frameAssets, frameIndex, mode);
-  }).filter((url): url is string => Boolean(url));
+  const frameSource = getTimelineFrameStripSource(section, mode);
+  const rangeStart = frameIndexToSequenceProgress(section.progressMapping.frameRange.start, frameSource.frameCount);
+  const rangeEnd = frameIndexToSequenceProgress(section.progressMapping.frameRange.end, frameSource.frameCount);
+  return getTimelineFrameStripForProgressRange(frameSource, rangeStart, rangeEnd, sampleCount);
 }
 
 function createOverlayClip(
@@ -234,18 +275,21 @@ function createOverlayClip(
   index: number,
   layerIndex: number,
 ): TimelineClipModel {
+  const label =
+    overlay.content.text?.split(/\r?\n/).find((line: string) => line.trim().length > 0) ??
+    `Layer ${String(index + 1).padStart(2, "0")}`;
+
   return {
     id: `layer-${overlay.id}`,
     trackType: "layer",
-    label: overlay.content.headline || overlay.content.eyebrow || `Layer ${String(index + 1).padStart(2, "0")}`,
+    label,
     start: overlay.timing.start,
     end: overlay.timing.end,
     tint: "accent",
     metadata: {
       overlayId: overlay.id,
       theme: overlay.content.theme,
-      eyebrow: overlay.content.eyebrow,
-      body: overlay.content.body,
+      text: overlay.content.text,
       transitionPreset: overlay.content.transition?.preset,
       contentType: overlay.content.type ?? "text",
       layerIndex,
@@ -284,6 +328,7 @@ export function deriveTimelineTracks(
     tint: "muted",
     metadata: {
       frameStrip: getFrameStrip(section, mode),
+      frameStripSource: getTimelineFrameStripSource(section, mode),
     },
   };
 

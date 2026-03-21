@@ -15,8 +15,7 @@ describe("publish readiness", () => {
               reducedMotion: "poster",
             },
             text: {
-              headline: "Hello",
-              body: "World",
+              content: "Hello\n\nWorld",
             },
           },
         },
@@ -45,8 +44,7 @@ describe("publish readiness", () => {
                 reducedMotion: "poster",
               },
               text: {
-                headline: "Hello",
-                body: "World",
+                content: "Hello\n\nWorld",
               },
             },
           },

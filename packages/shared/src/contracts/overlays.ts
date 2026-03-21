@@ -67,8 +67,6 @@ export const OverlayStyleSchema = z.object({
   fontFamily: FontFamilySchema.default("Inter"),
   fontWeight: z.number().int().min(300).max(800).default(600),
   fontSize: z.number().min(12).max(120).default(34),
-  eyebrowFontSize: z.number().min(8).max(60).default(12),
-  bodyFontSize: z.number().min(8).max(72).default(15),
   lineHeight: z.number().min(0.8).max(2.4).default(1.08),
   letterSpacing: z.number().min(-0.08).max(0.3).default(0),
   textAlign: OverlayAlignSchema.default("start"),
@@ -122,18 +120,51 @@ export const OverlayTimingSchema = z.object({
 });
 export type OverlayTiming = z.infer<typeof OverlayTimingSchema>;
 
-export const OverlayContentSchema = z.object({
-  type: ContentTypeSchema.optional(),
+function joinLegacyTextParts(parts: Array<string | undefined>) {
+  const values = parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part));
+  return values.length > 0 ? values.join("\n\n") : undefined;
+}
+
+function joinLegacyHtmlParts(parts: Array<string | undefined>) {
+  const values = parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part));
+  return values.length > 0 ? values.join("<br><br>") : undefined;
+}
+
+const LegacyTextHtmlSchema = z.object({
   eyebrow: z.string().min(1).optional(),
-  headline: z.string().min(1),
-  body: z.string().min(1),
-  textHtml: z
-    .object({
-      eyebrow: z.string().min(1).optional(),
-      headline: z.string().min(1).optional(),
-      body: z.string().min(1).optional(),
-    })
-    .optional(),
+  headline: z.string().min(1).optional(),
+  body: z.string().min(1).optional(),
+});
+
+const OverlayStyleInputSchema = z.object({
+  fontFamily: FontFamilySchema.default("Inter"),
+  fontWeight: z.number().int().min(300).max(800).default(600),
+  fontSize: z.number().min(12).max(120).optional(),
+  eyebrowFontSize: z.number().min(8).max(60).optional(),
+  bodyFontSize: z.number().min(8).max(72).optional(),
+  lineHeight: z.number().min(0.8).max(2.4).default(1.08),
+  letterSpacing: z.number().min(-0.08).max(0.3).default(0),
+  textAlign: OverlayAlignSchema.default("start"),
+  color: z.string().default("#f6f7fb"),
+  opacity: z.number().min(0).max(1).default(1),
+  maxWidth: z.number().min(140).max(1400).default(420),
+  italic: z.boolean().default(false),
+  underline: z.boolean().default(false),
+  textTransform: TextTransformSchema.default("none"),
+  buttonLike: z.boolean().default(false),
+});
+
+const OverlayContentInputSchema = z.object({
+  type: ContentTypeSchema.optional(),
+  text: z.string().min(1).optional(),
+  textHtml: z.union([z.string().min(1), LegacyTextHtmlSchema]).optional(),
+  eyebrow: z.string().min(1).optional(),
+  headline: z.string().min(1).optional(),
+  body: z.string().min(1).optional(),
   cta: CtaConfigSchema.optional(),
   align: OverlayAlignSchema.default("start"),
   theme: OverlayThemeSchema.default("light"),
@@ -141,17 +172,91 @@ export const OverlayContentSchema = z.object({
   mediaUrl: z.string().min(1).optional(),
   linkHref: z.string().min(1).optional(),
   layout: OverlayLayoutSchema.optional(),
-  style: OverlayStyleSchema.optional(),
+  style: OverlayStyleInputSchema.optional(),
   background: OverlayBackgroundSchema.optional(),
   animation: OverlayAnimationSchema.optional(),
   transition: OverlayTransitionSchema.optional(),
   layer: z.number().int().min(0).max(999).optional(),
 });
-export type OverlayContent = z.infer<typeof OverlayContentSchema>;
+
+export const OverlayContentSchema = OverlayContentInputSchema.transform((content) => {
+  const normalizedText =
+    content.text?.trim() ||
+    joinLegacyTextParts([content.eyebrow, content.headline, content.body]);
+  const normalizedHtml =
+    typeof content.textHtml === "string"
+      ? content.textHtml
+      : joinLegacyHtmlParts([
+          content.textHtml?.eyebrow,
+          content.textHtml?.headline,
+          content.textHtml?.body,
+        ]);
+
+  return {
+    ...(content.type ? { type: content.type } : {}),
+    ...(normalizedText ? { text: normalizedText } : {}),
+    ...(normalizedHtml ? { textHtml: normalizedHtml } : {}),
+    ...(content.cta ? { cta: content.cta } : {}),
+    align: content.align,
+    theme: content.theme,
+    treatment: content.treatment,
+    ...(content.mediaUrl ? { mediaUrl: content.mediaUrl } : {}),
+    ...(content.linkHref ? { linkHref: content.linkHref } : {}),
+    ...(content.layout ? { layout: content.layout } : {}),
+    ...(content.style
+      ? {
+          style: {
+            fontFamily: content.style.fontFamily,
+            fontWeight: content.style.fontWeight,
+            fontSize:
+              content.style.fontSize ??
+              content.style.bodyFontSize ??
+              content.style.eyebrowFontSize ??
+              34,
+            lineHeight: content.style.lineHeight,
+            letterSpacing: content.style.letterSpacing,
+            textAlign: content.style.textAlign,
+            color: content.style.color,
+            opacity: content.style.opacity,
+            maxWidth: content.style.maxWidth,
+            italic: content.style.italic,
+            underline: content.style.underline,
+            textTransform: content.style.textTransform,
+            buttonLike: content.style.buttonLike,
+          },
+        }
+      : {}),
+    ...(content.background ? { background: content.background } : {}),
+    ...(content.animation ? { animation: content.animation } : {}),
+    ...(content.transition ? { transition: content.transition } : {}),
+    ...(typeof content.layer === "number" ? { layer: content.layer } : {}),
+  };
+});
+export type OverlayContent = {
+  type?: ContentType;
+  text?: string;
+  textHtml?: string;
+  cta?: CtaConfig;
+  align: OverlayAlign;
+  theme: OverlayTheme;
+  treatment: OverlayTreatment;
+  mediaUrl?: string;
+  linkHref?: string;
+  layout?: OverlayLayout;
+  style?: OverlayStyle;
+  background?: OverlayBackground;
+  animation?: OverlayAnimation;
+  transition?: OverlayTransition;
+  layer?: number;
+};
 
 export const OverlayDefinitionSchema = z.object({
   id: z.string().min(1),
   timing: OverlayTimingSchema,
   content: OverlayContentSchema,
 });
-export type OverlayDefinition = z.infer<typeof OverlayDefinitionSchema>;
+export type OverlayDefinition = {
+  id: string;
+  timing: OverlayTiming;
+  content: OverlayContent;
+};

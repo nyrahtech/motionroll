@@ -35,6 +35,26 @@ export const PresetControlSchema = z.object({
 });
 export type PresetControl = z.infer<typeof PresetControlSchema>;
 
+function joinTextParts(parts: Array<string | undefined>) {
+  const values = parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part));
+  return values.length > 0 ? values.join("\n\n") : "";
+}
+
+const CommonSectionTextSchema = z
+  .object({
+    content: z.string().default("").optional(),
+    kicker: z.string().default("").optional(),
+    headline: z.string().default("").optional(),
+    body: z.string().default("").optional(),
+  })
+  .transform((text) => ({
+    content:
+      text.content?.trim() ??
+      joinTextParts([text.kicker, text.headline, text.body]),
+  }));
+
 export const CommonSectionSettingsSchema = z.object({
   sectionHeightVh: z.number().min(100).max(600),
   scrubStrength: z.number().min(0.05).max(4),
@@ -51,11 +71,7 @@ export const CommonSectionSettingsSchema = z.object({
     pin: z.boolean(),
     preloadWindow: z.number().int().min(2).max(40),
   }),
-  text: z.object({
-    kicker: z.string().default(""),
-    headline: z.string().default(""),
-    body: z.string().default(""),
-  }),
+  text: CommonSectionTextSchema,
   cta: z.object({
     label: z.string().default(""),
     href: z.string().default(""),
@@ -138,14 +154,8 @@ const commonControls: PresetControl[] = [
     ],
   },
   {
-    id: "text.headline",
-    label: "Headline",
-    type: "text",
-    group: "common",
-  },
-  {
-    id: "text.body",
-    label: "Body",
+    id: "text.content",
+    label: "Text",
     type: "textarea",
     group: "common",
   },
@@ -203,9 +213,7 @@ const baseCommonDefaults = {
     preloadWindow: 8,
   },
   text: {
-    kicker: "",
-    headline: "",
-    body: "",
+    content: "",
   },
   cta: {
     label: "",
@@ -213,7 +221,7 @@ const baseCommonDefaults = {
   },
 };
 
-export const presetDefinitions: PresetDefinition[] = [
+const presetDefinitionInputs = [
   {
     id: "scroll-sequence",
     label: "Scroll Sequence",
@@ -734,6 +742,10 @@ export const presetDefinitions: PresetDefinition[] = [
     ],
   },
 ];
+
+export const presetDefinitions: PresetDefinition[] = presetDefinitionInputs.map((preset) =>
+  PresetDefinitionSchema.parse(preset),
+);
 
 export const presetDefinitionMap = new Map(
   presetDefinitions.map((preset) => [preset.id, preset]),

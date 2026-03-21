@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getActiveOverlayId, getFrameByIndex, progressToFrameIndex } from "../src/utils";
+import { getActiveOverlayId, getFrameByIndex, getOverlaysInStackOrder, progressToFrameIndex } from "../src/utils";
 
 describe("progressToFrameIndex", () => {
   it("maps progress to the configured frame range", () => {
@@ -18,8 +18,7 @@ describe("getActiveOverlayId", () => {
             id: "intro",
             timing: { start: 0, end: 0.2 },
             content: {
-              headline: "Intro",
-              body: "Intro body",
+              text: "Intro\n\nIntro body",
               align: "start",
               theme: "light",
               treatment: "default",
@@ -29,8 +28,7 @@ describe("getActiveOverlayId", () => {
             id: "detail",
             timing: { start: 0.4, end: 0.6 },
             content: {
-              headline: "Detail",
-              body: "Detail body",
+              text: "Detail\n\nDetail body",
               align: "end",
               theme: "dark",
               treatment: "default",
@@ -50,8 +48,7 @@ describe("getActiveOverlayId", () => {
             id: "headline",
             timing: { start: 0.2, end: 0.7 },
             content: {
-              headline: "Headline",
-              body: "Body",
+              text: "Headline\n\nBody",
               align: "start",
               theme: "light",
               treatment: "default",
@@ -62,8 +59,7 @@ describe("getActiveOverlayId", () => {
             id: "cta",
             timing: { start: 0.55, end: 0.85 },
             content: {
-              headline: "CTA",
-              body: "CTA body",
+              text: "CTA\n\nCTA body",
               align: "end",
               theme: "dark",
               treatment: "default",
@@ -84,8 +80,7 @@ describe("getActiveOverlayId", () => {
             id: "bottom",
             timing: { start: 0.2, end: 0.8 },
             content: {
-              headline: "Bottom",
-              body: "Body",
+              text: "Bottom\n\nBody",
               align: "start",
               theme: "light",
               treatment: "default",
@@ -96,8 +91,7 @@ describe("getActiveOverlayId", () => {
             id: "top",
             timing: { start: 0.2, end: 0.8 },
             content: {
-              headline: "Top",
-              body: "Body",
+              text: "Top\n\nBody",
               align: "start",
               theme: "dark",
               treatment: "default",
@@ -108,6 +102,35 @@ describe("getActiveOverlayId", () => {
         0.5,
       ),
     ).toBe("top");
+  });
+});
+
+describe("getOverlaysInStackOrder", () => {
+  it("orders overlays from back to front using explicit layer values", () => {
+    expect(getOverlaysInStackOrder([
+      {
+        id: "top",
+        timing: { start: 0, end: 1 },
+        content: {
+          text: "Top\n\nBody",
+          align: "start",
+          theme: "light",
+          treatment: "default",
+          layer: 3,
+        },
+      },
+      {
+        id: "bottom",
+        timing: { start: 0, end: 1 },
+        content: {
+          text: "Bottom\n\nBody",
+          align: "start",
+          theme: "dark",
+          treatment: "default",
+          layer: 0,
+        },
+      },
+    ]).map((overlay) => overlay.id)).toEqual(["bottom", "top"]);
   });
 });
 

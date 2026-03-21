@@ -183,15 +183,16 @@ export function OverlayList({
   onSelect: (overlayId: string) => void;
   search: string;
 }) {
+  const getOverlayLabel = (text?: string) =>
+    text?.split(/\r?\n/).find((line) => line.trim().length > 0) ?? "Text block";
+
   const overlays = (section?.overlays ?? []).filter((overlay) => {
     if (!search.trim()) {
       return true;
     }
 
     const query = search.trim().toLowerCase();
-    return `${overlay.content.headline} ${overlay.content.eyebrow ?? ""}`
-      .toLowerCase()
-      .includes(query);
+    return (overlay.content.text ?? "").toLowerCase().includes(query);
   });
 
   return (
@@ -204,9 +205,9 @@ export function OverlayList({
           <BrowserCard
             key={overlay.id}
             active={selectedOverlayId === overlay.id}
-            title={overlay.content.headline}
+            title={getOverlayLabel(overlay.content.text)}
             subtitle={`${Math.round(overlay.timing.start * 100)}% - ${Math.round(overlay.timing.end * 100)}%`}
-            meta={<Badge variant="quiet">{overlay.content.eyebrow ?? "Headline"}</Badge>}
+            meta={<Badge variant="quiet">Text</Badge>}
             onClick={() => onSelect(overlay.id)}
           />
         ))}

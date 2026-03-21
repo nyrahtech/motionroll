@@ -30,13 +30,17 @@ export function getFrameByIndex(frameAssets: FrameAsset[], desiredIndex: number)
   );
 }
 
+export function getOverlaysInStackOrder(overlays: OverlayDefinition[]) {
+  return [...overlays].sort((left, right) => (left.content.layer ?? 0) - (right.content.layer ?? 0));
+}
+
 export function getActiveOverlayId(
   overlays: OverlayDefinition[],
   progress: number,
 ) {
   const normalizedProgress = clampProgress(progress);
-  return [...overlays]
-    .sort((left, right) => (right.content.layer ?? 0) - (left.content.layer ?? 0))
+  return [...getOverlaysInStackOrder(overlays)]
+    .reverse()
     .find(
       (overlay) =>
         normalizedProgress >= overlay.timing.start && normalizedProgress <= overlay.timing.end,

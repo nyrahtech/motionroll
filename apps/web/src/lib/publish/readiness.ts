@@ -18,8 +18,7 @@ type ProjectSnapshot = {
         reducedMotion: "poster" | "video" | "sequence";
       };
       text: {
-        headline: string;
-        body: string;
+        content: string;
       };
     };
   }>;
@@ -71,15 +70,15 @@ export function buildPublishReadinessChecks(project: ProjectSnapshot): Readiness
     },
     {
       id: "editor-copy",
-      label: "Section copy",
+      label: "Section text",
       status:
-        primarySection?.commonConfig.text.headline && primarySection.commonConfig.text.body
+        primarySection?.commonConfig.text.content
           ? "ready"
           : "blocked",
       message:
-        primarySection?.commonConfig.text.headline && primarySection.commonConfig.text.body
-          ? "Headline and body copy are set."
-          : "Add headline and body copy so the overlay content is publication-ready.",
+        primarySection?.commonConfig.text.content
+          ? "Section text is set."
+          : "Add at least one text block so the overlay content is publication-ready.",
     },
     {
       id: "frames",
