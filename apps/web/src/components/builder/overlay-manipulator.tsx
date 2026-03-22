@@ -24,6 +24,7 @@ const DESIGN_HEIGHT = 810;
 const MIN_DIM = 80;
 const HANDLE_HALF = 6; // half of 12px handle size
 const DRAG_HANDLE_OFFSET = 8;
+const DRAG_HANDLE_SIZE = 32;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -273,7 +274,7 @@ export function OverlayManipulator({
     }
 
     if (dragHandleRef.current) {
-      dragHandleRef.current.style.left = `${b.left + DRAG_HANDLE_OFFSET}px`;
+      dragHandleRef.current.style.left = `${b.left + b.width - DRAG_HANDLE_SIZE - DRAG_HANDLE_OFFSET}px`;
       dragHandleRef.current.style.top = `${b.top + DRAG_HANDLE_OFFSET}px`;
     }
 
@@ -695,11 +696,11 @@ export function OverlayManipulator({
             onPointerDown={handleDragPointerDown}
             className="focus-ring absolute z-[34] flex h-8 w-8 items-center justify-center rounded-md border transition-colors"
             style={{
-              left: box.left + DRAG_HANDLE_OFFSET,
+              left: box.left + box.width - DRAG_HANDLE_SIZE - DRAG_HANDLE_OFFSET,
               top: box.top + DRAG_HANDLE_OFFSET,
               cursor: "grab",
               borderColor: isDragging ? "rgba(205,239,255,0.28)" : "rgba(255,255,255,0.06)",
-              background: "var(--editor-panel-elevated)",
+              background: "rgba(10,12,18,0.96)",
               color: isDragging ? "var(--editor-accent)" : "var(--foreground-muted)",
             }}
             title="Drag overlay"

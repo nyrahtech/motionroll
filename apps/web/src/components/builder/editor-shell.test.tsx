@@ -77,6 +77,11 @@ describe("editor shell", () => {
 
     expect(source).toContain("RotateCcw");
     expect(source).toContain("RotateCw");
+    expect(source).toContain("Plus");
+    expect(source).toContain('title={label}');
+    expect(source).toContain('title="Open clip actions"');
+    expect(source).not.toContain("TooltipContent");
+    expect(source).toContain('aria-label={label}');
     expect(source).toContain("justify-self-center");
   });
 

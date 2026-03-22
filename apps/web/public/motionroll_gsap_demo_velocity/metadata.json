@@ -1,7 +1,6 @@
 {
-  "sourceVideoUrl": "/motionroll_gsap_demo_velocity/demo.mp4",
+  "sourceVideoUrl": "/motionroll_gsap_demo_velocity/poster.webp",
   "posterUrl": "/motionroll_gsap_demo_velocity/poster.webp",
-  "fallbackVideoUrl": "/motionroll_gsap_demo_velocity/demo.mp4",
   "frameBaseUrl": "/motionroll_gsap_demo_velocity/frames",
   "framePattern": "frame-{index:04d}.webp",
   "frameCount": 321,
@@ -14,5 +13,5 @@
   "height": 810,
   "sourceWidth": 1920,
   "sourceHeight": 1080,
-  "sourceBytes": 32443108
+  "sourceBytes": 99466
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import React, { type ReactNode } from "react";
 import {
   AlignCenter,
   AlignLeft,
@@ -52,6 +53,29 @@ type Props = {
 };
 
 const fonts = ["Inter", "Manrope", "DM Sans", "Space Grotesk", "Instrument Sans", "Cormorant Garamond"];
+
+type ToolbarIconButtonProps = {
+  label: string;
+  className: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+};
+
+function ToolbarIconButton({ label, className, onClick, disabled, children }: ToolbarIconButtonProps) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className={className}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {children}
+    </button>
+  );
+}
 
 export function InlineTextToolbar({
   position,
@@ -129,77 +153,53 @@ export function InlineTextToolbar({
 
           <div className={dividerClassName} style={{ background: "var(--editor-border)" }} />
 
-          <button
-            type="button"
-            className={cn(
-              btn,
-              fontWeight >= 700 ? activeBtn : dimBtn,
-            )}
+          <ToolbarIconButton
+            label="Bold"
+            className={cn(btn, fontWeight >= 700 ? activeBtn : dimBtn)}
             onClick={() => onChange?.({ fontWeight: fontWeight >= 700 ? 600 : 700 })}
-            title="Bold"
           >
             <Bold className="h-4 w-4" />
-          </button>
+          </ToolbarIconButton>
 
-          <button
-            type="button"
-            className={cn(
-              btn,
-              italic ? activeBtn : dimBtn,
-            )}
+          <ToolbarIconButton
+            label="Italic"
+            className={cn(btn, italic ? activeBtn : dimBtn)}
             onClick={() => onChange?.({ italic: !italic })}
-            title="Italic"
           >
             <Italic className="h-4 w-4" />
-          </button>
+          </ToolbarIconButton>
 
-          <button
-            type="button"
-            className={cn(
-              btn,
-              underline ? activeBtn : dimBtn,
-            )}
+          <ToolbarIconButton
+            label="Underline"
+            className={cn(btn, underline ? activeBtn : dimBtn)}
             onClick={() => onChange?.({ underline: !underline })}
-            title="Underline"
           >
             <Underline className="h-4 w-4" />
-          </button>
+          </ToolbarIconButton>
 
           <div className={dividerClassName} style={{ background: "var(--editor-border)" }} />
 
-          <button
-            type="button"
-            className={cn(
-              btn,
-              textAlign === "start" ? activeBtn : dimBtn,
-            )}
+          <ToolbarIconButton
+            label="Align left"
+            className={cn(btn, textAlign === "start" ? activeBtn : dimBtn)}
             onClick={() => onChange?.({ textAlign: "start" })}
-            title="Align left"
           >
             <AlignLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className={cn(
-              btn,
-              textAlign === "center" ? activeBtn : dimBtn,
-            )}
+          </ToolbarIconButton>
+          <ToolbarIconButton
+            label="Align center"
+            className={cn(btn, textAlign === "center" ? activeBtn : dimBtn)}
             onClick={() => onChange?.({ textAlign: "center" })}
-            title="Align center"
           >
             <AlignCenter className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className={cn(
-              btn,
-              textAlign === "end" ? activeBtn : dimBtn,
-            )}
+          </ToolbarIconButton>
+          <ToolbarIconButton
+            label="Align right"
+            className={cn(btn, textAlign === "end" ? activeBtn : dimBtn)}
             onClick={() => onChange?.({ textAlign: "end" })}
-            title="Align right"
           >
             <AlignRight className="h-4 w-4" />
-          </button>
+          </ToolbarIconButton>
         </>
       ) : null}
 
@@ -208,54 +208,50 @@ export function InlineTextToolbar({
       ) : null}
 
       {onGroup ? (
-        <button
-          type="button"
+        <ToolbarIconButton
+          label="Group selected items"
           className={cn(btn, canGroup ? dimBtn : "cursor-default opacity-45 text-[var(--editor-text-dim)] hover:bg-transparent hover:text-[var(--editor-text-dim)]")}
           onClick={canGroup ? onGroup : undefined}
-          title="Group selected items"
           disabled={!canGroup}
         >
           <Layers3 className="h-4 w-4" />
-        </button>
+        </ToolbarIconButton>
       ) : null}
       {onUngroup ? (
-        <button
-          type="button"
+        <ToolbarIconButton
+          label="Ungroup selected item"
           className={cn(btn, canUngroup ? dimBtn : "cursor-default opacity-45 text-[var(--editor-text-dim)] hover:bg-transparent hover:text-[var(--editor-text-dim)]")}
           onClick={canUngroup ? onUngroup : undefined}
-          title="Ungroup selected item"
           disabled={!canUngroup}
         >
           <Ungroup className="h-4 w-4" />
-        </button>
+        </ToolbarIconButton>
       ) : null}
       {(onGroup || onUngroup) && (onDuplicate || onDelete) ? (
         <div className={dividerClassName} style={{ background: "var(--editor-border)" }} />
       ) : null}
 
       {onDuplicate ? (
-        <button
-          type="button"
+        <ToolbarIconButton
+          label="Duplicate"
           className={cn(btn, dimBtn)}
           onClick={onDuplicate}
-          title="Duplicate"
         >
           <Copy className="h-4 w-4" />
-        </button>
+        </ToolbarIconButton>
       ) : null}
       {onDelete ? (
-        <button
-          type="button"
+        <ToolbarIconButton
+          label="Delete"
           className={cn(
             btn,
             dimBtn,
             "hover:text-red-400",
           )}
           onClick={onDelete}
-          title="Delete"
         >
           <Trash2 className="h-4 w-4" />
-        </button>
+        </ToolbarIconButton>
       ) : null}
     </div>
   );

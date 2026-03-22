@@ -132,6 +132,7 @@ function AlignmentGroup({
           groupButtonClassName,
           value === "start" ? activeGroupButtonClassName : inactiveGroupButtonClassName,
         )}
+        title="Align left"
         aria-label="Align left"
       >
         <AlignLeft className="h-4 w-4" />
@@ -143,6 +144,7 @@ function AlignmentGroup({
           groupButtonClassName,
           value === "center" ? activeGroupButtonClassName : inactiveGroupButtonClassName,
         )}
+        title="Align center"
         aria-label="Align center"
       >
         <AlignCenter className="h-4 w-4" />
@@ -154,6 +156,7 @@ function AlignmentGroup({
           groupButtonClassName,
           value === "end" ? activeGroupButtonClassName : inactiveGroupButtonClassName,
         )}
+        title="Align right"
         aria-label="Align right"
       >
         <AlignRight className="h-4 w-4" />
@@ -186,6 +189,7 @@ function EmphasisGroup({
           groupButtonClassName,
           fontWeight >= 700 ? activeGroupButtonClassName : inactiveGroupButtonClassName,
         )}
+        title="Bold"
         aria-label="Bold"
       >
         <Bold className="h-4 w-4" />
@@ -197,6 +201,7 @@ function EmphasisGroup({
           groupButtonClassName,
           italic ? activeGroupButtonClassName : inactiveGroupButtonClassName,
         )}
+        title="Italic"
         aria-label="Italic"
       >
         <Italic className="h-4 w-4" />
@@ -208,6 +213,7 @@ function EmphasisGroup({
           groupButtonClassName,
           underline ? activeGroupButtonClassName : inactiveGroupButtonClassName,
         )}
+        title="Underline"
         aria-label="Underline"
       >
         <Underline className="h-4 w-4" />

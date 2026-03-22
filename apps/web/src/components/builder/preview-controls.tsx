@@ -42,6 +42,8 @@ export function PreviewControls({
           <button
             type="button"
             onClick={() => onModeChange("desktop")}
+            title="Preview desktop layout"
+            aria-label="Preview desktop layout"
             className={`focus-ring rounded-[6px] p-1 ${mode === "desktop" ? "bg-[rgba(255,255,255,0.05)] text-white" : ""}`}
           >
             <MonitorUp className="h-4 w-4" />
@@ -49,6 +51,8 @@ export function PreviewControls({
           <button
             type="button"
             onClick={() => onModeChange("mobile")}
+            title="Preview mobile layout"
+            aria-label="Preview mobile layout"
             className={`focus-ring rounded-[6px] p-1 ${mode === "mobile" ? "bg-[rgba(255,255,255,0.05)] text-white" : ""}`}
           >
             <MonitorSmartphone className="h-4 w-4" />
@@ -56,6 +60,8 @@ export function PreviewControls({
           <button
             type="button"
             onClick={onFullscreen}
+            title="Open fullscreen preview"
+            aria-label="Open fullscreen preview"
             className="focus-ring rounded-[6px] p-1 hover:bg-[rgba(255,255,255,0.05)] hover:text-white"
           >
             <Maximize2 className="h-4 w-4" />

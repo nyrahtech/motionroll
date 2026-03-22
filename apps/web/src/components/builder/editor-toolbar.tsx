@@ -60,13 +60,13 @@ export function EditorToolbar({
       </div>
 
       <div className="flex items-center gap-1">
-        <Button type="button" variant={browserOpen ? "secondary" : "quiet"} size="icon" onClick={onToggleBrowser}>
+        <Button type="button" variant={browserOpen ? "secondary" : "quiet"} size="icon" onClick={onToggleBrowser} title={browserOpen ? "Hide browser" : "Show browser"} aria-label={browserOpen ? "Hide browser" : "Show browser"}>
           <LayoutPanelLeft className="h-3.5 w-3.5" />
         </Button>
-        <Button type="button" variant={detailsOpen ? "secondary" : "quiet"} size="icon" onClick={onToggleDetails}>
+        <Button type="button" variant={detailsOpen ? "secondary" : "quiet"} size="icon" onClick={onToggleDetails} title={detailsOpen ? "Hide details" : "Show details"} aria-label={detailsOpen ? "Hide details" : "Show details"}>
           <PanelRightOpen className="h-3.5 w-3.5" />
         </Button>
-        <Button type="button" variant="quiet" size="icon" onClick={onFullscreen}>
+        <Button type="button" variant="quiet" size="icon" onClick={onFullscreen} title="Open fullscreen preview" aria-label="Open fullscreen preview">
           <Maximize2 className="h-3.5 w-3.5" />
         </Button>
         <Button type="button" variant="secondary" size="sm" onClick={onPublish}>
