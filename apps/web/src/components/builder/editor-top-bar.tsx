@@ -1,6 +1,7 @@
 "use client";
 
 import { Eye, Monitor, Share2, Smartphone } from "lucide-react";
+import { UserMenu } from "@/components/auth/user-menu";
 import { ProjectSwitcher } from "./project-switcher";
 
 interface TopBarProps {
@@ -60,7 +61,13 @@ function SaveIndicator({
 
   return (
     <span className="flex items-center gap-2 text-xs">
-      <span className="flex items-center gap-2" style={{ color: tone.color }}>
+      <span
+        role="status"
+        aria-live="polite"
+        aria-label={`Save status: ${tone.label}`}
+        className="flex items-center gap-2"
+        style={{ color: tone.color }}
+      >
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: tone.color }} />
         <span className="font-medium">{tone.label}</span>
       </span>
@@ -212,6 +219,7 @@ export function TopBar({
           <Share2 className="h-3.5 w-3.5" />
           Publish
         </button>
+        <UserMenu />
       </div>
     </header>
   );

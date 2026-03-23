@@ -2,19 +2,25 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { presetDefinitions } from "@motionroll/shared";
 import { TemplateCard } from "@/components/template-picker/template-card";
+import { UserMenu } from "@/components/auth/user-menu";
+import { WorkspaceDegradedBanner } from "@/components/app/workspace-degraded-banner";
 import { getDemoProjects } from "@/lib/data/projects";
 import { getPresetPresentation } from "@/lib/preset-presentation";
 import { createProjectAction } from "@/app/actions";
+import { requirePageAuth } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function TemplatesPage() {
-  const demoProjects = await getDemoProjects().catch(() => []);
+  const { userId } = await requirePageAuth();
+  const demoProjectsResult = await getDemoProjects(userId)
+    .then((projects) => ({ projects, degraded: false }))
+    .catch(() => ({ projects: [], degraded: true }));
+  const demoProjects = demoProjectsResult.projects;
   const demoByPreset = new Map(demoProjects.map((project) => [project.selectedPreset, project.id]));
 
   return (
     <div className="min-h-screen" style={{ background: "var(--editor-shell)" }}>
-      {/* Header */}
       <header
         className="flex h-14 items-center justify-between border-b px-6"
         style={{ background: "var(--editor-panel)", borderColor: "var(--editor-border)" }}
@@ -31,15 +37,16 @@ export default async function TemplatesPage() {
           <div className="h-4 w-px" style={{ background: "var(--editor-border)" }} />
           <span className="text-sm font-semibold" style={{ color: "var(--editor-accent)" }}>MotionRoll</span>
         </div>
+        <UserMenu />
       </header>
 
       <div className="mx-auto max-w-7xl p-8">
-        {/* Hero */}
+        {demoProjectsResult.degraded && (
+          <WorkspaceDegradedBanner message="Template demos couldn't load right now. You can still start from any template and edit it normally." />
+        )}
+
         <div className="mb-8">
-          <p
-            className="text-xs font-medium uppercase tracking-widest"
-            style={{ color: "var(--editor-text-dim)" }}
-          >
+          <p className="text-xs font-medium uppercase tracking-widest" style={{ color: "var(--editor-text-dim)" }}>
             Templates
           </p>
           <h1 className="mt-2 text-2xl font-semibold" style={{ color: "var(--editor-text)" }}>
@@ -51,7 +58,6 @@ export default async function TemplatesPage() {
           </p>
         </div>
 
-        {/* Grid */}
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {presetDefinitions.map((preset) => (
             <TemplateCard

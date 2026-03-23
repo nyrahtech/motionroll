@@ -12,7 +12,7 @@ import {
 } from "@motionroll/shared";
 import { db } from "@/db/client";
 import { assetVariants, processingJobs, projectAssets, projects } from "@/db/schema";
-import { LOCAL_OWNER } from "@/lib/data/local-owner";
+
 import { env } from "@/lib/env";
 import {
   deleteStorageObject,
@@ -114,14 +114,16 @@ export async function processSourceAsset(jobId: string, payloadInput: Processing
   const job = await db.query.processingJobs.findFirst({
     where: eq(processingJobs.id, jobId),
   });
+  // Look up project without ownership filter — the job itself is the authorization proof.
+  // The pipeline only runs server-side via Inngest, not via user-facing API.
   const project = await db.query.projects.findFirst({
-    where: and(eq(projects.id, payload.projectId), eq(projects.ownerId, LOCAL_OWNER.id)),
+    where: eq(projects.id, payload.projectId),
   });
   const sourceAsset = await db.query.projectAssets.findFirst({
     where: and(
       eq(projectAssets.id, payload.assetId),
       eq(projectAssets.projectId, payload.projectId),
-      eq(projectAssets.ownerId, LOCAL_OWNER.id),
+      eq(projectAssets.ownerId, project?.ownerId ?? ""),
     ),
   });
 

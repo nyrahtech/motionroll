@@ -8,7 +8,6 @@ import {
   projects,
   publishTargets,
 } from "@/db/schema";
-import { LOCAL_OWNER } from "@/lib/data/local-owner";
 import { env } from "@/lib/env";
 import { getDerivedAssetsSnapshot } from "@/lib/project-assets";
 import {
@@ -19,6 +18,8 @@ import {
 import { buildSectionValuesFromDraft, parseProjectDraftDocument } from "./project-draft";
 
 type BuildProjectManifestOptions = {
+  /** userId to scope the ownership check. If omitted, no ownership filter is applied (publish-read path). */
+  userId?: string;
   publishVersion?: number;
   persistDraftManifest?: boolean;
   persistPublishedTarget?: boolean;
@@ -38,17 +39,17 @@ export async function buildProjectManifest(
   projectId: string,
   options: BuildProjectManifestOptions = {},
 ) {
+  // If userId is provided, scope to that owner (editor/API paths).
+  // If not provided (e.g. public embed read path), look up by projectId alone.
+  const whereClause = options.userId
+    ? and(eq(projects.id, projectId), eq(projects.ownerId, options.userId))
+    : eq(projects.id, projectId);
+
   const project = await db.query.projects.findFirst({
-    where: and(eq(projects.id, projectId), eq(projects.ownerId, LOCAL_OWNER.id)),
+    where: whereClause,
     with: {
-      sections: {
-        orderBy: [asc(projectSections.sortOrder)],
-      },
-      assets: {
-        with: {
-          variants: true,
-        },
-      },
+      sections: { orderBy: [asc(projectSections.sortOrder)] },
+      assets: { with: { variants: true } },
       publishTargets: true,
     },
   });
@@ -57,9 +58,7 @@ export async function buildProjectManifest(
     throw new Error("Project not found");
   }
 
-  const hostedTarget = project.publishTargets.find(
-    (target) => target.targetType === "hosted_embed",
-  );
+  const hostedTarget = project.publishTargets.find((t) => t.targetType === "hosted_embed");
   const publishVersion = options.publishVersion ?? project.publishVersion;
   const draft = project.draftJson ? parseProjectDraftDocument(project.draftJson) : null;
   const baseSection = project.sections[0];
@@ -79,6 +78,7 @@ export async function buildProjectManifest(
         where: eq(projectTransitions.projectSectionId, section.id),
         orderBy: [asc(projectTransitions.sortOrder)],
       });
+
       const resolvedSection = {
         id: section.id,
         presetId: section.presetId ?? project.selectedPreset,
@@ -97,11 +97,9 @@ export async function buildProjectManifest(
             preloadWindow: 6,
           },
         },
-        presetConfig: (section.presetConfig ?? {}) as Record<
-          string,
-          string | number | boolean | string[]
-        >,
+        presetConfig: (section.presetConfig ?? {}) as Record<string, string | number | boolean | string[]>,
       };
+
       const resolvedOverlays =
         draftSection && section.id === draftSection.id
           ? draftSection.overlays.map((overlay) => ({
@@ -154,12 +152,7 @@ export async function buildProjectManifest(
   });
 
   if (options.persistDraftManifest ?? true) {
-    await db
-      .update(projects)
-      .set({
-        lastManifest: manifest,
-      })
-      .where(eq(projects.id, project.id));
+    await db.update(projects).set({ lastManifest: manifest }).where(eq(projects.id, project.id));
   }
 
   if (options.persistPublishedTarget && hostedTarget) {

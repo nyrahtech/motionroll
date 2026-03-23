@@ -8,6 +8,7 @@ import {
   getPresetRuntimeProfile,
   resolveFallbackStrategy,
 } from "@motionroll/shared";
+import motionrollDemoMetadata from "../../public/motionroll_demo_sequence/metadata.json";
 
 type FrameVariantRow = {
   kind: string;
@@ -22,6 +23,17 @@ type AssetRow = {
   metadata: unknown;
   variants: FrameVariantRow[];
 };
+
+const BUNDLED_FRAME_PACKS = [
+  {
+    match: "motionroll_demo_sequence",
+    frameBaseUrl: motionrollDemoMetadata.frameBaseUrl,
+    framePattern: motionrollDemoMetadata.framePattern,
+    frameCount: motionrollDemoMetadata.frameCount,
+    width: motionrollDemoMetadata.width,
+    height: motionrollDemoMetadata.height,
+  },
+] as const;
 
 type OverlayRow = {
   overlayKey: string;
@@ -80,6 +92,38 @@ export function normalizeFrameAssets(assets: AssetRow[]) {
       return true;
     })
     .sort((a, b) => a.index - b.index);
+}
+
+function getBundledFramePack(assets: AssetRow[]) {
+  return BUNDLED_FRAME_PACKS.find((pack) =>
+    assets.some((asset) => asset.storageKey.includes(pack.match) || asset.publicUrl.includes(pack.match)),
+  );
+}
+
+function buildBundledFrameAssets(
+  pack: (typeof BUNDLED_FRAME_PACKS)[number],
+  frameCount: number,
+) {
+  const normalizedCount = Math.max(Math.min(frameCount, pack.frameCount), 0);
+  const extensionMatch = pack.framePattern.match(/\.([a-z0-9]+)$/i);
+  const extension = extensionMatch?.[1] ?? "webp";
+
+  return Array.from({ length: normalizedCount }, (_, index) => {
+    const filename = `frame-${String(index + 1).padStart(4, "0")}.${extension}`;
+    const url = `${pack.frameBaseUrl}/${filename}`;
+    return {
+      index,
+      path: `${pack.match}/frames/${filename}`,
+      variants: [
+        {
+          kind: "desktop" as const,
+          url,
+          width: pack.width,
+          height: pack.height,
+        },
+      ],
+    };
+  });
 }
 
 export function normalizeFrameRange(
@@ -225,12 +269,26 @@ export function buildSectionManifest(input: {
   transitions?: TransitionRow[];
   assets: AssetRow[];
 }): ProjectSectionManifest {
-  const frameAssets = normalizeFrameAssets(input.assets);
+  const bundledFramePack = getBundledFramePack(input.assets);
+  const bundledFramePackLimit = bundledFramePack?.frameCount;
+  const normalizedFrameAssets = normalizeFrameAssets(input.assets).filter((frame) =>
+    typeof bundledFramePackLimit === "number" ? frame.index < bundledFramePackLimit : true,
+  );
   const posterAsset = input.assets.find((asset) => asset.kind === "poster");
   const fallbackVideoAsset = input.assets.find((asset) => asset.kind === "fallback_video");
   const frameSequenceAsset = input.assets.find((asset) => asset.kind === "frame_sequence");
-  const sequenceFrameCount =
+  const rawSequenceFrameCount =
     (frameSequenceAsset?.metadata as { frameCount?: number } | undefined)?.frameCount ?? 0;
+  const sequenceFrameCount =
+    typeof bundledFramePackLimit === "number" && rawSequenceFrameCount > 0
+      ? Math.min(rawSequenceFrameCount, bundledFramePackLimit)
+      : rawSequenceFrameCount;
+  const frameAssets =
+    normalizedFrameAssets.length > 0
+      ? normalizedFrameAssets
+      : bundledFramePack && sequenceFrameCount > 0
+        ? buildBundledFrameAssets(bundledFramePack, sequenceFrameCount)
+        : normalizedFrameAssets;
   const frameCount =
     Math.max(frameAssets.length, sequenceFrameCount) || input.section.commonConfig.frameRange.end + 1;
   const normalizedRange = normalizeFrameRange(input.section.commonConfig.frameRange, frameCount);

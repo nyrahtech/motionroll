@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import type { ProjectManifest } from "@motionroll/shared";
 import { ArrowLeft, Check, Copy, ExternalLink, Monitor, Smartphone } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
+import { UserMenu } from "@/components/auth/user-menu";
 
 export function PublishPanel({
   project,
@@ -25,6 +27,7 @@ export function PublishPanel({
   const [publishState, setPublishState] = useState<"idle" | "publishing" | "published" | "failed">("idle");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
+  const [publishError, setPublishError] = useState<string | null>(null);
 
   const embedCode = useMemo(
     () =>
@@ -33,19 +36,34 @@ export function PublishPanel({
   );
 
   async function copyValue(key: string, value: string) {
-    await navigator.clipboard.writeText(value);
-    setCopiedKey(key);
-    window.setTimeout(() => setCopiedKey(null), 2000);
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey(null), 2000);
+    } catch {
+      toast.error("Copy failed");
+    }
   }
 
   async function finalizePublish() {
     setPublishState("publishing");
+    setPublishError(null);
     const response = await fetch(`/api/projects/${project.id}/publish`, { method: "POST" });
-    if (!response.ok) { setPublishState("failed"); return; }
+    if (!response.ok) {
+      const errorData = (await response.json().catch(() => ({ error: "Publish failed." }))) as {
+        error?: string;
+      };
+      const message = errorData.error ?? "Publish failed.";
+      setPublishState("failed");
+      setPublishError(message);
+      toast.error(message);
+      return;
+    }
     const data = (await response.json()) as { manifest: ProjectManifest; project?: typeof project };
     setManifestState(data.manifest);
     if (data.project) setProjectState(data.project);
     setPublishState("published");
+    toast.success("Publish complete");
   }
 
   const needsRepublish =
@@ -90,6 +108,7 @@ export function PublishPanel({
           <div className="h-4 w-px" style={{ background: "var(--editor-border)" }} />
           <span className="text-sm font-semibold" style={{ color: "var(--editor-accent)" }}>MotionRoll</span>
         </div>
+        <UserMenu />
 
         {/* Device switcher */}
         <div className="flex items-center gap-1 rounded p-1" style={{ background: "var(--editor-panel-elevated)" }}>
@@ -130,13 +149,25 @@ export function PublishPanel({
             className="interactive-soft flex h-8 items-center gap-1.5 rounded px-4 text-sm font-medium disabled:opacity-40"
             style={{ background: "var(--editor-accent)", color: "#0a0a0b" }}
           >
-            {publishState === "publishing" ? "Publishing…" : publishState === "published" ? "Published!" : "Publish"}
+            {publishState === "publishing" ? "Publishing..." : publishState === "published" ? "Published!" : "Publish"}
           </button>
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-6">
         <div className="flex w-full flex-col gap-6">
+        {publishError ? (
+          <div
+            className="mx-auto w-full max-w-[1200px] rounded-lg border px-4 py-3 text-sm"
+            style={{
+              background: "rgba(248,113,113,0.08)",
+              borderColor: "rgba(248,113,113,0.24)",
+              color: "#fca5a5",
+            }}
+          >
+            {publishError}
+          </div>
+        ) : null}
         {/* Preview pane */}
         <div className={`flex flex-col gap-4 ${isDesktopPreview ? "w-full" : "items-center"}`}>
           <div className="text-center">
@@ -195,7 +226,7 @@ export function PublishPanel({
                       color: check.status === "ready" ? "var(--editor-accent)" : check.status === "warning" ? "#facc15" : "#f87171",
                     }}
                   >
-                    {check.status === "ready" ? "✓" : "!"}
+                    {check.status === "ready" ? "OK" : "!"}
                   </div>
                   <div className="min-w-0">
                     <p className="text-xs font-medium" style={{ color: "var(--editor-text)" }}>{check.label}</p>

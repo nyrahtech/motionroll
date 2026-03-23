@@ -3,6 +3,13 @@
 import type { UseFormReturn } from "react-hook-form";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { EditorFormValues, InspectorTab } from "./editor-types";
 import {
@@ -13,8 +20,6 @@ import {
 } from "./editor-shell";
 
 const inspectorTabs = ["content", "playback", "preset"] as const satisfies readonly InspectorTab[];
-const selectClassName =
-  "focus-ring flex h-11 w-full rounded-[14px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-4 py-2 text-sm text-[var(--foreground)]";
 
 export function InspectorPane({
   tab,
@@ -44,6 +49,8 @@ export function InspectorPane({
   onToggleAdvanced: () => void;
   presetOptions: Array<{ id: string; label: string }>;
 }) {
+  const selectedPresetId = form.watch("presetId");
+
   return (
     <EditorInspector
       title={tab === "content" ? "Content" : tab === "playback" ? "Playback" : "Preset"}
@@ -210,13 +217,25 @@ export function InspectorPane({
             >
               <label className="space-y-2">
                 <span className="field-label">Preset</span>
-                <select className={selectClassName} {...form.register("presetId")}>
+                <Select
+                  value={selectedPresetId}
+                  onValueChange={(value) => {
+                    form.setValue("presetId", value as EditorFormValues["presetId"], {
+                      shouldDirty: true,
+                    });
+                  }}
+                >
+                  <SelectTrigger className="h-11 rounded-[14px] border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-4 text-sm text-[var(--foreground)]">
+                    <SelectValue placeholder="Choose preset" />
+                  </SelectTrigger>
+                  <SelectContent>
                   {presetOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
+                    <SelectItem key={option.id} value={option.id}>
                       {option.label}
-                    </option>
+                    </SelectItem>
                   ))}
-                </select>
+                  </SelectContent>
+                </Select>
               </label>
             </InspectorGroup>
           </>

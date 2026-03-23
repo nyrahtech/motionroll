@@ -1,14 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const componentDir = fileURLToPath(new URL(".", import.meta.url));
+const componentDir = path.resolve(process.cwd(), "src", "components", "builder");
 
-describe("editor sidebar", () => {
-  it("backs native titles onto icon-only formatting controls", () => {
+describe("editor inspector primitives", () => {
+  it("has accessible title attributes on icon-only formatting controls", () => {
+    // These controls are now in editor-inspector-primitives.tsx after the sidebar split.
     const source = fs.readFileSync(
-      path.resolve(componentDir, "editor-sidebar.tsx"),
+      path.resolve(componentDir, "editor-inspector-primitives.tsx"),
       "utf8",
     );
 

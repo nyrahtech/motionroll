@@ -7,9 +7,11 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { projectAssets, projects } from "@/db/schema";
 import { env } from "@/lib/env";
-import { LOCAL_OWNER } from "@/lib/data/local-owner";
+import { requireAuth } from "@/lib/auth";
+import { parseBody } from "@/lib/api-utils";
 import { createSignedUploadUrl, getStoragePublicUrl } from "@/lib/storage/s3-adapter";
 import { validateVideoUpload } from "@/lib/uploads/validation";
+import { uploadRateLimiter, getClientIdentifier } from "@/lib/rate-limiter";
 
 export const dynamic = "force-dynamic";
 
@@ -24,13 +26,33 @@ const registerUploadSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const body = registerUploadSchema.parse(await request.json());
+  const { userId } = await requireAuth();
+
+  // Rate limit: 10 upload registrations per minute per user
+  const { ok, resetAt } = uploadRateLimiter.check(userId);
+  if (!ok) {
+    return NextResponse.json(
+      { error: "Too many requests. Please wait before uploading again." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(Math.ceil((resetAt - Date.now()) / 1000)),
+          "X-RateLimit-Remaining": "0",
+        },
+      },
+    );
+  }
+
+  const bodyResult = await parseBody(request, registerUploadSchema);
+  if (bodyResult.error) return bodyResult.error;
+  const body = bodyResult.data;
+
   const project = await db.query.projects.findFirst({
-    where: and(eq(projects.id, body.projectId), eq(projects.ownerId, LOCAL_OWNER.id)),
+    where: and(eq(projects.id, body.projectId), eq(projects.ownerId, userId)),
   });
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found for local owner." }, { status: 404 });
+    return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
 
   let validatedUpload: ReturnType<typeof validateVideoUpload>;
@@ -42,9 +64,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid video upload request.",
-      },
+      { error: error instanceof Error ? error.message : "Invalid video upload request." },
       { status: 400 },
     );
   }
@@ -57,14 +77,11 @@ export async function POST(request: Request) {
   await db.transaction(async (tx) => {
     await tx
       .update(projectAssets)
-      .set({
-        isPrimary: false,
-        updatedAt: new Date(),
-      })
+      .set({ isPrimary: false, updatedAt: new Date() })
       .where(
         and(
           eq(projectAssets.projectId, body.projectId),
-          eq(projectAssets.ownerId, LOCAL_OWNER.id),
+          eq(projectAssets.ownerId, userId),
           eq(projectAssets.kind, "source_video"),
         ),
       );
@@ -72,7 +89,7 @@ export async function POST(request: Request) {
     await tx.insert(projectAssets).values({
       id: assetId,
       projectId: body.projectId,
-      ownerId: LOCAL_OWNER.id,
+      ownerId: userId,
       kind: "source_video",
       sourceType: "video",
       sourceOrigin: "upload",

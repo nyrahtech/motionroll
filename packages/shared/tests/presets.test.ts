@@ -35,7 +35,7 @@ describe("project manifest", () => {
         id: "c4cc93ae-c988-48d7-9a76-9b85990fd2ca",
         slug: "demo",
         title: "Demo",
-        ownerId: "local-owner",
+        ownerId: "user_test_123",
         publishVersion: 1,
         previewUrl: "http://localhost:3000/embed/demo",
       },

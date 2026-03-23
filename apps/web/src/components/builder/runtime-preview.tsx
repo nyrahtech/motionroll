@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { clampProgress } from "@motionroll/shared";
 import type { ProjectManifest } from "@motionroll/shared";
-import { createScrollSection, type ScrollSectionController } from "@motionroll/runtime";
+import { withOpacity, type ScrollSectionController } from "@motionroll/runtime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { OverlayManipulator } from "./overlay-manipulator";
+import { useRuntimeController } from "./hooks/useRuntimeController";
 
 const DESIGN_STAGE_WIDTH = 1440;
 const DESIGN_STAGE_HEIGHT = 810;
@@ -77,6 +78,160 @@ type RuntimePreviewProps = {
   onDeleteSelection?: () => void;
 };
 
+/**
+ * Applies manifest overlay styles to live DOM nodes inside the preview container.
+ * Must be called from within a requestAnimationFrame callback.
+ */
+function applyManifestOverlayStyles(
+  manifest: ProjectManifest,
+  container: HTMLElement,
+  controller: ScrollSectionController,
+  onWireInteractivity: () => void,
+): void {
+  const sec = manifest.sections[0];
+  if (!sec) return;
+
+  const cW = Math.max(container.clientWidth, 1);
+  const cH = Math.max(container.clientHeight, 1);
+  const scale = Math.max(0.35, Math.min(cW / DESIGN_STAGE_WIDTH, cH / DESIGN_STAGE_HEIGHT));
+  const overlayRoot = container.querySelector(".motionroll-overlay-root");
+
+  if (overlayRoot instanceof HTMLElement) {
+    const orderedOverlays = [...sec.overlays]
+      .filter((overlay) => !overlay.content.parentGroupId)
+      .sort(
+      (left, right) => (left.content.layer ?? 0) - (right.content.layer ?? 0),
+    );
+
+    for (const overlay of orderedOverlays) {
+      const card = overlayRoot.querySelector<HTMLElement>(`[data-overlay-id="${overlay.id}"]`);
+      if (!card) continue;
+      card.style.zIndex = String(100 + (overlay.content.layer ?? 0));
+      overlayRoot.appendChild(card);
+    }
+  }
+
+  // Per-sync placement cache — avoids recomputing parent placements
+  const placementCache = new Map<string, ReturnType<typeof getOverlayPixelPlacement>>();
+  const getPlacement = (ov: (typeof sec.overlays)[number]) => {
+    if (!placementCache.has(ov.id)) {
+      placementCache.set(ov.id, getOverlayPixelPlacement(ov, container, scale));
+    }
+    return placementCache.get(ov.id)!;
+  };
+
+  for (const overlay of sec.overlays) {
+    const card = container.querySelector<HTMLElement>(`[data-overlay-id="${overlay.id}"]`);
+    if (!card) continue;
+
+    const layout = overlay.content.layout;
+    const style  = overlay.content.style;
+    const bg     = overlay.content.background;
+    const placement = getPlacement(overlay);
+    const parentOverlay = overlay.content.parentGroupId
+      ? sec.overlays.find((item) => item.id === overlay.content.parentGroupId)
+      : undefined;
+    const parentPlacement = parentOverlay
+      ? getPlacement(parentOverlay)
+      : undefined;
+
+    // Geometry
+    card.style.position  = "absolute";
+    card.style.left      = overlay.content.align === "center"
+      ? `${Math.round((parentPlacement ? placement.anchorLeft - parentPlacement.left : placement.anchorLeft))}px`
+      : `${Math.round((parentPlacement ? placement.left - parentPlacement.left : placement.left))}px`;
+    card.style.top       = overlay.content.align === "center"
+      ? `${Math.round((parentPlacement ? placement.anchorTop - parentPlacement.top : placement.anchorTop))}px`
+      : `${Math.round((parentPlacement ? placement.top - parentPlacement.top : placement.top))}px`;
+    card.style.right     = "auto";
+    card.style.bottom    = "auto";
+    card.style.width     = `${placement.width}px`;
+    card.style.minHeight = placement.height ? `${placement.height}px` : "";
+    card.style.height    = placement.height ? `${placement.height}px` : "";
+    card.style.maxWidth  = overlay.content.type === "group"
+      ? `${placement.width}px`
+      : `${Math.round((style?.maxWidth ?? layout?.width ?? 420) * scale)}px`;
+    card.style.zIndex    = String(100 + (overlay.content.layer ?? 0));
+    card.style.transform = overlay.content.align === "center"
+      ? "translate3d(-50%,-50%,0)"
+      : "translate3d(0,0,0)";
+    card.style.overflow = overlay.content.type === "group" ? "visible" : "";
+
+    if (!layout) {
+      card.style.left   = overlay.content.align === "center" ? "50%" : `${Math.round(32 * scale)}px`;
+      card.style.top    = overlay.content.align === "end" ? "auto" : `${Math.round(32 * scale)}px`;
+      card.style.bottom = overlay.content.align === "end" ? `${Math.round(32 * scale)}px` : "auto";
+    }
+
+    // Card visuals
+    card.style.opacity        = String(style?.opacity ?? 1);
+    card.style.padding        = overlay.content.type === "group"
+      ? "0px"
+      : `${Math.round((bg?.paddingY ?? 14) * scale)}px ${Math.round((bg?.paddingX ?? 18) * scale)}px`;
+    card.style.borderRadius   = `${bg?.radius ?? 14}px`;
+    card.style.borderWidth    = bg?.enabled ? "1px" : "0";
+    card.style.borderStyle    = overlay.content.type === "group" ? "dashed" : "solid";
+    card.style.borderColor    = withOpacity(
+      bg?.borderColor ?? "#d6f6ff",
+      bg?.borderOpacity ?? (overlay.content.type === "group" ? 0.18 : 0),
+    );
+    card.style.background     = bg?.enabled
+      ? withOpacity(bg.color ?? "#0d1016", bg.opacity ?? 0.82)
+      : overlay.content.type === "group"
+        ? "rgba(205,239,255,0.035)"
+      : "transparent";
+    card.style.borderWidth    = bg?.enabled || overlay.content.type === "group" ? "1px" : "0";
+    card.style.backdropFilter = bg?.enabled ? "blur(18px)" : "none";
+
+    if (overlay.content.type === "group") {
+      continue;
+    }
+
+    // Text styles
+    const textAlign = style?.textAlign === "start" ? "left"
+      : style?.textAlign === "end" ? "right"
+      : "center";
+    const sharedText: Partial<CSSStyleDeclaration> = {
+      fontFamily:     style?.fontFamily ?? "Inter",
+      fontWeight:     String(style?.fontWeight ?? 600),
+      fontStyle:      style?.italic ? "italic" : "normal",
+      textDecoration: style?.underline ? "underline" : "none",
+      color:          style?.color ?? "#f6f7fb",
+      textAlign,
+      letterSpacing:  `${style?.letterSpacing ?? 0}em`,
+      textTransform:  (style?.textTransform ?? "none") as string,
+    };
+
+    const textBlock = card.querySelector<HTMLElement>('[data-text-field="text"]');
+    if (textBlock) {
+      Object.assign(textBlock.style, {
+        ...sharedText,
+        fontSize: `${Math.round((style?.fontSize ?? 34) * scale)}px`,
+        lineHeight: String(style?.lineHeight ?? 1.08),
+        whiteSpace: "pre-wrap",
+      });
+    }
+
+    // Media / action link
+    const media = card.querySelector<HTMLElement>("[data-media-field='media']");
+    if (media) {
+      media.style.maxWidth = `${Math.round((layout?.width ?? 420) * scale)}px`;
+      if (overlay.content.type === "icon") media.style.height = `${Math.round(64 * scale)}px`;
+      else if (overlay.content.type === "logo") media.style.height = `${Math.round(80 * scale)}px`;
+    }
+
+    const actionLink = card.querySelector<HTMLElement>("a");
+    if (actionLink) {
+      actionLink.style.marginTop = `${Math.round(16 * scale)}px`;
+      actionLink.style.fontSize  = `${Math.round(14 * scale)}px`;
+      if (style?.buttonLike) actionLink.style.padding = `${Math.round(9 * scale)}px ${Math.round(14 * scale)}px`;
+    }
+  }
+
+  controller.setProgress(controller.getProgress());
+  onWireInteractivity();
+}
+
 export function RuntimePreview({
   manifest,
   mode: controlledMode,
@@ -108,12 +263,9 @@ export function RuntimePreview({
   // ── Refs ───────────────────────────────────────────────────────────────
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mountNodeRef = useRef<HTMLDivElement | null>(null);
-  const controllerRef = useRef<ScrollSectionController | null>(null);
-  const onPlayheadChangeRef = useRef<typeof onPlayheadChange>(onPlayheadChange);
-  const lastInternalProgressRef = useRef<number | null>(null);
+
   const isInteractingRef = useRef(false);
   const pendingManifestRef = useRef<ProjectManifest | null>(null);
-  const pendingManifestSignatureRef = useRef<string | null>(null);
   const wireRafRef = useRef<number | null>(null);
   const syncRafRef = useRef<number | null>(null);
   // Latest manifest captured for the pending RAF sync — always up to date.
@@ -122,8 +274,6 @@ export function RuntimePreview({
   // ── State ──────────────────────────────────────────────────────────────
   const [internalMode, setInternalMode] = useState<"desktop" | "mobile">("desktop");
   const [renderManifest, setRenderManifest] = useState(manifest);
-  const renderManifestSignatureRef = useRef(JSON.stringify(manifest));
-  const manifestSignature = useMemo(() => JSON.stringify(manifest), [manifest]);
 
   // ── Derived ────────────────────────────────────────────────────────────
   const mode = controlledMode ?? internalMode;
@@ -195,33 +345,23 @@ export function RuntimePreview({
     isInteractingRef.current = active;
     if (!active && pendingManifestRef.current) {
       const next = pendingManifestRef.current;
-      const nextSignature = pendingManifestSignatureRef.current ?? JSON.stringify(next);
       pendingManifestRef.current = null;
-      pendingManifestSignatureRef.current = null;
-      if (renderManifestSignatureRef.current !== nextSignature) {
-        renderManifestSignatureRef.current = nextSignature;
+      if (renderManifest !== next) {
         setRenderManifest(next);
       }
     }
   }
 
-  // ── Ref sync ───────────────────────────────────────────────────────────
-  useEffect(() => {
-    onPlayheadChangeRef.current = onPlayheadChange;
-  }, [onPlayheadChange]);
-
   // ── Manifest guard ─────────────────────────────────────────────────────
   useEffect(() => {
     if (isInteractingRef.current) {
       pendingManifestRef.current = manifest;
-      pendingManifestSignatureRef.current = manifestSignature;
       return;
     }
-    if (renderManifestSignatureRef.current !== manifestSignature) {
-      renderManifestSignatureRef.current = manifestSignature;
+    if (renderManifest !== manifest) {
       setRenderManifest(manifest);
     }
-  }, [manifest, manifestSignature]);
+  }, [manifest, renderManifest]);
 
   // ── Overlay interactivity wiring ───────────────────────────────────────
   function wireOverlayInteractivity() {
@@ -275,47 +415,22 @@ export function RuntimePreview({
     scheduleWireInteractivity();
   }, [selectedOverlayId, renderManifest, isControlledRuntime]);
 
-  // ── Heavy effect: full runtime restart (structural changes only) ────────
-  //
-  // Depends on `restartKey`, NOT `renderManifest`. Overlay-only manifest
-  // changes (layout, style, text) do not change the restart key and will
-  // never trigger this effect. Only frame assets, fallback URLs, mode,
-  // playback mode and similar structural fields cause a restart.
-  useEffect(() => {
-    if (!isControlledRuntime || !hasRenderableMedia) return;
-    const node = mountNodeRef.current;
-    if (!node) return;
-
-    const existing = controllerRef.current;
-    if (existing) {
-      existing.destroy();
-      node.replaceChildren();
-    }
-    controllerRef.current = createScrollSection(node, renderManifest, {
-      initialProgress: playheadProgress ?? 0,
-      mode,
-      interactionMode: "controlled",
-      allowWheelScrub: false,
-      enableOverlayTransitions: isPlaying,
-      onProgressChange: (progress) => {
-        lastInternalProgressRef.current = progress;
-        onPlayheadChangeRef.current?.(progress);
-      },
-    });
-    if (typeof playheadProgress === "number") {
-      controllerRef.current.setProgress(playheadProgress);
-    }
-    scheduleWireInteractivity();
-
-    return () => {
-      if (wireRafRef.current !== null) {
-        cancelAnimationFrame(wireRafRef.current);
-        wireRafRef.current = null;
-      }
-      controllerRef.current?.destroy();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [restartKey]);
+  // ── Controller lifecycle (restart, scroll-mode, playhead, auto-deselect) ─
+  const { controllerRef, lastInternalProgressRef } = useRuntimeController({
+    manifest,
+    renderManifest,
+    restartKey,
+    mode,
+    isPlaying,
+    isControlledRuntime,
+    hasRenderableMedia,
+    playheadProgress,
+    selectedOverlayId,
+    mountNodeRef,
+    onPlayheadChange,
+    onSelectOverlay,
+    scheduleWireInteractivity,
+  });
 
   // ── Light effect: full overlay DOM sync (no runtime restart) ─────────
   //
@@ -340,149 +455,12 @@ export function RuntimePreview({
       if (!manifest || !controllerRef.current) return;
       const container = containerRef.current;
       if (!container) return;
-      const sec = manifest.sections[0];
-      if (!sec) return;
-
-      const cW = Math.max(container.clientWidth, 1);
-      const cH = Math.max(container.clientHeight, 1);
-      const scale = Math.max(0.35, Math.min(cW / DESIGN_STAGE_WIDTH, cH / DESIGN_STAGE_HEIGHT));
-      const overlayRoot = container.querySelector(".motionroll-overlay-root");
-
-      function withOpacity(hex: string, opacity: number) {
-        const v = hex.replace("#", "").trim();
-        const norm = v.length === 3 ? v.split("").map((c) => c + c).join("") : v;
-        if (!/^[0-9a-fA-F]{6}$/.test(norm)) return hex;
-        const r = parseInt(norm.slice(0, 2), 16);
-        const g = parseInt(norm.slice(2, 4), 16);
-        const b = parseInt(norm.slice(4, 6), 16);
-        return `rgba(${r},${g},${b},${opacity})`;
-      }
-
-      if (overlayRoot instanceof HTMLElement) {
-        const orderedOverlays = [...sec.overlays]
-          .filter((overlay) => !overlay.content.parentGroupId)
-          .sort(
-          (left, right) => (left.content.layer ?? 0) - (right.content.layer ?? 0),
-        );
-
-        for (const overlay of orderedOverlays) {
-          const card = overlayRoot.querySelector<HTMLElement>(`[data-overlay-id="${overlay.id}"]`);
-          if (!card) continue;
-          card.style.zIndex = String(100 + (overlay.content.layer ?? 0));
-          overlayRoot.appendChild(card);
-        }
-      }
-
-      for (const overlay of sec.overlays) {
-        const card = container.querySelector<HTMLElement>(`[data-overlay-id="${overlay.id}"]`);
-        if (!card) continue;
-
-        const layout = overlay.content.layout;
-        const style  = overlay.content.style;
-        const bg     = overlay.content.background;
-        const placement = getOverlayPixelPlacement(overlay, container, scale);
-        const parentOverlay = overlay.content.parentGroupId
-          ? sec.overlays.find((item) => item.id === overlay.content.parentGroupId)
-          : undefined;
-        const parentPlacement = parentOverlay
-          ? getOverlayPixelPlacement(parentOverlay, container, scale)
-          : undefined;
-
-        // Geometry
-        card.style.position  = "absolute";
-        card.style.left      = overlay.content.align === "center"
-          ? `${Math.round((parentPlacement ? placement.anchorLeft - parentPlacement.left : placement.anchorLeft))}px`
-          : `${Math.round((parentPlacement ? placement.left - parentPlacement.left : placement.left))}px`;
-        card.style.top       = overlay.content.align === "center"
-          ? `${Math.round((parentPlacement ? placement.anchorTop - parentPlacement.top : placement.anchorTop))}px`
-          : `${Math.round((parentPlacement ? placement.top - parentPlacement.top : placement.top))}px`;
-        card.style.right     = "auto";
-        card.style.bottom    = "auto";
-        card.style.width     = `${placement.width}px`;
-        card.style.minHeight = placement.height ? `${placement.height}px` : "";
-        card.style.height    = placement.height ? `${placement.height}px` : "";
-        card.style.maxWidth  = overlay.content.type === "group"
-          ? `${placement.width}px`
-          : `${Math.round((style?.maxWidth ?? layout?.width ?? 420) * scale)}px`;
-        card.style.zIndex    = String(100 + (overlay.content.layer ?? 0));
-        card.style.transform = overlay.content.align === "center"
-          ? "translate3d(-50%,-50%,0)"
-          : "translate3d(0,0,0)";
-        card.style.overflow = overlay.content.type === "group" ? "visible" : "";
-
-        if (!layout) {
-          card.style.left   = overlay.content.align === "center" ? "50%" : `${Math.round(32 * scale)}px`;
-          card.style.top    = overlay.content.align === "end" ? "auto" : `${Math.round(32 * scale)}px`;
-          card.style.bottom = overlay.content.align === "end" ? `${Math.round(32 * scale)}px` : "auto";
-        }
-
-        // Card visuals
-        card.style.opacity        = String(style?.opacity ?? 1);
-        card.style.padding        = overlay.content.type === "group"
-          ? "0px"
-          : `${Math.round((bg?.paddingY ?? 14) * scale)}px ${Math.round((bg?.paddingX ?? 18) * scale)}px`;
-        card.style.borderRadius   = `${bg?.radius ?? 14}px`;
-        card.style.borderWidth    = bg?.enabled ? "1px" : "0";
-        card.style.borderStyle    = overlay.content.type === "group" ? "dashed" : "solid";
-        card.style.borderColor    = withOpacity(
-          bg?.borderColor ?? "#d6f6ff",
-          bg?.borderOpacity ?? (overlay.content.type === "group" ? 0.18 : 0),
-        );
-        card.style.background     = bg?.enabled
-          ? withOpacity(bg.color ?? "#0d1016", bg.opacity ?? 0.82)
-          : overlay.content.type === "group"
-            ? "rgba(205,239,255,0.035)"
-          : "transparent";
-        card.style.borderWidth    = bg?.enabled || overlay.content.type === "group" ? "1px" : "0";
-        card.style.backdropFilter = bg?.enabled ? "blur(18px)" : "none";
-
-        if (overlay.content.type === "group") {
-          continue;
-        }
-
-        // Text styles
-        const textAlign = style?.textAlign === "start" ? "left"
-          : style?.textAlign === "end" ? "right"
-          : "center";
-        const sharedText: Partial<CSSStyleDeclaration> = {
-          fontFamily:     style?.fontFamily ?? "Inter",
-          fontWeight:     String(style?.fontWeight ?? 600),
-          fontStyle:      style?.italic ? "italic" : "normal",
-          textDecoration: style?.underline ? "underline" : "none",
-          color:          style?.color ?? "#f6f7fb",
-          textAlign,
-          letterSpacing:  `${style?.letterSpacing ?? 0}em`,
-          textTransform:  (style?.textTransform ?? "none") as string,
-        };
-
-        const textBlock = card.querySelector<HTMLElement>('[data-text-field="text"]');
-        if (textBlock) {
-          Object.assign(textBlock.style, {
-            ...sharedText,
-            fontSize: `${Math.round((style?.fontSize ?? 34) * scale)}px`,
-            lineHeight: String(style?.lineHeight ?? 1.08),
-            whiteSpace: "pre-wrap",
-          });
-        }
-
-        // Media / action link
-        const media = card.querySelector<HTMLElement>("[data-media-field='media']");
-        if (media) {
-          media.style.maxWidth = `${Math.round((layout?.width ?? 420) * scale)}px`;
-          if (overlay.content.type === "icon") media.style.height = `${Math.round(64 * scale)}px`;
-          else if (overlay.content.type === "logo") media.style.height = `${Math.round(80 * scale)}px`;
-        }
-
-        const actionLink = card.querySelector<HTMLElement>("a");
-        if (actionLink) {
-          actionLink.style.marginTop = `${Math.round(16 * scale)}px`;
-          actionLink.style.fontSize  = `${Math.round(14 * scale)}px`;
-          if (style?.buttonLike) actionLink.style.padding = `${Math.round(9 * scale)}px ${Math.round(14 * scale)}px`;
-        }
-      }
-
-      controllerRef.current.setProgress(controllerRef.current.getProgress());
-      scheduleWireInteractivity();
+      applyManifestOverlayStyles(
+        manifest,
+        container,
+        controllerRef.current,
+        scheduleWireInteractivity,
+      );
     }); // end requestAnimationFrame
 
     return () => {
@@ -492,51 +470,6 @@ export function RuntimePreview({
       }
     };
   }, [renderManifest, isControlledRuntime]);
-
-  // ── Runtime: scroll mode ───────────────────────────────────────────────
-  useEffect(() => {
-    if (isControlledRuntime || !hasRenderableMedia) return;
-    const node = mountNodeRef.current;
-    if (!node) return;
-
-    const existing = controllerRef.current;
-    if (existing) {
-      existing.destroy();
-      node.replaceChildren();
-    }
-    controllerRef.current = createScrollSection(node, renderManifest, {
-      mode,
-      interactionMode: "scroll",
-      allowWheelScrub: false,
-    });
-
-    return () => controllerRef.current?.destroy();
-  }, [hasRenderableMedia, isControlledRuntime, mode, renderManifest]);
-
-  // ── Auto-deselect when playhead leaves the overlay's timing window ────
-  useEffect(() => {
-    if (!isControlledRuntime || typeof playheadProgress !== "number") return;
-    if (!selectedOverlay || isInteractingRef.current) return;
-    const { start, end } = selectedOverlay.timing;
-    const active = playheadProgress >= start && playheadProgress < end + 0.0001;
-    if (!active) onSelectOverlay?.("");
-  }, [playheadProgress, selectedOverlay, isControlledRuntime]);
-
-  // ── Playhead sync ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!isControlledRuntime || typeof playheadProgress !== "number") return;
-    if (isInteractingRef.current) return;
-
-    if (
-      lastInternalProgressRef.current !== null &&
-      Math.abs(lastInternalProgressRef.current - playheadProgress) <= 0.001
-    ) {
-      lastInternalProgressRef.current = null;
-      return;
-    }
-
-    controllerRef.current?.setProgress(playheadProgress);
-  }, [playheadProgress, isControlledRuntime]);
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (

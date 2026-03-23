@@ -3,6 +3,13 @@
 import { LayoutPanelLeft, Maximize2, PanelRightOpen, Save, Sparkles, Upload } from "lucide-react";
 import type { PresetId } from "@motionroll/shared";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const presetOptions: Array<{ id: PresetId; label: string }> = [
   { id: "scroll-sequence", label: "Scroll Sequence" },
@@ -45,17 +52,22 @@ export function EditorToolbar({
         <div className="hidden h-4 w-px bg-[rgba(255,255,255,0.08)] sm:block" />
         <label className="hidden items-center gap-2 rounded-[7px] bg-[rgba(255,255,255,0.04)] px-2 py-1 text-xs text-[var(--foreground-soft)] sm:flex">
           <Sparkles className="h-3.5 w-3.5 text-[var(--foreground-faint)]" />
-          <select
-            value={presetId}
-            onChange={(event) => onPresetChange(event.target.value as PresetId)}
-            className="bg-transparent text-[var(--foreground-soft)] outline-none"
-          >
-            {presetOptions.map((option) => (
-              <option key={option.id} value={option.id} className="bg-[#0d1117] text-white">
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <Select value={presetId} onValueChange={(value) => onPresetChange(value as PresetId)}>
+            <SelectTrigger
+              size="sm"
+              className="h-7 min-w-[180px] border-0 bg-transparent px-1.5 text-xs text-[var(--foreground-soft)] shadow-none focus:ring-0"
+              aria-label="Choose preset"
+            >
+              <SelectValue placeholder="Choose preset" />
+            </SelectTrigger>
+            <SelectContent>
+              {presetOptions.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
       </div>
 

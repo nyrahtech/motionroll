@@ -1,26 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
-import { useForm } from "react-hook-form";
-import { MediaFrame } from "@/components/motionroll/media-frame";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { MediaFrame } from "../motionroll/media-frame";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "../ui/select";
 import { EditorPanel } from "./editor-shell";
 
 type ProviderName = "runway" | "luma" | "sora" | "other";
 type ProviderAsset = {
   externalId: string;
+  generationId?: string;
   title: string;
-  previewUrl: string;
+  previewUrl: string | null;
+  status?: "queued" | "running" | "completed" | "failed" | "unsupported";
+  createdAt?: string;
+  canImport?: boolean;
 };
 
 const placeholderAssets = Array.from({ length: 2 }, (_, index) => ({
@@ -38,28 +41,41 @@ export function ProviderPanel({
   projectId: string;
   embedded?: boolean;
 }) {
-  const form = useForm({
-    defaultValues: {
-      provider: "runway" as ProviderName,
-      accountLabel: "Primary local connection",
-      apiKey: "",
-    },
-  });
+  const [provider, setProvider] = useState<ProviderName>("runway");
+  const [accountLabel, setAccountLabel] = useState("Primary local connection");
+  const [apiKey, setApiKey] = useState("");
   const [message, setMessage] = useState("");
   const [assets, setAssets] = useState<ProviderAsset[]>([]);
-  const provider = form.watch("provider");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
+
+  // Poll for asset updates every 5 seconds when there are running generations
+  useEffect(() => {
+    if (!isPolling) {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      return;
+    }
+    async function poll() {
+      const response = await fetch(`/api/providers/${provider}/assets`);
+      if (!response.ok) return;
+      const data = await response.json() as { assets?: ProviderAsset[] };
+      if (data.assets) setAssets(data.assets);
+    }
+    void poll();
+    pollRef.current = setInterval(() => void poll(), 5000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [isPolling, provider]);
 
   async function connect() {
-    const values = form.getValues();
-    const response = await fetch(`/api/providers/${values.provider}/connect`, {
+    const response = await fetch(`/api/providers/${provider}/connect`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        accountLabel: values.accountLabel,
+        accountLabel,
         credentials: {
-          apiKey: values.apiKey,
+          apiKey,
         },
       }),
     });
@@ -68,16 +84,14 @@ export function ProviderPanel({
   }
 
   async function loadAssets() {
-    const values = form.getValues();
-    const response = await fetch(`/api/providers/${values.provider}/assets`);
+    const response = await fetch(`/api/providers/${provider}/assets`);
     const data = await response.json();
     setAssets(data.assets ?? []);
     setMessage(data.message ?? "");
   }
 
   async function importAsset(assetExternalId: string) {
-    const values = form.getValues();
-    const response = await fetch(`/api/providers/${values.provider}/import`, {
+    const response = await fetch(`/api/providers/${provider}/import`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -98,9 +112,7 @@ export function ProviderPanel({
           <span className={fieldLabelClassName}>Provider</span>
           <Select
             value={provider}
-            onValueChange={(value) =>
-              form.setValue("provider", value as ProviderName, { shouldDirty: true })
-            }
+            onValueChange={(value) => setProvider(value as ProviderName)}
           >
             <SelectTrigger className="rounded-[12px]" size="default">
               <SelectValue placeholder="Provider" />
@@ -115,7 +127,7 @@ export function ProviderPanel({
         </label>
         <label className="space-y-2">
           <span className={fieldLabelClassName}>Account label</span>
-          <Input className="h-9 rounded-[12px]" {...form.register("accountLabel")} />
+          <Input className="h-9 rounded-[12px]" value={accountLabel} onChange={(e) => setAccountLabel(e.target.value)} />
         </label>
       </div>
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
@@ -124,7 +136,7 @@ export function ProviderPanel({
           <Input
             className="h-9 rounded-[12px]"
             placeholder="Paste API key or token"
-            {...form.register("apiKey")}
+            value={apiKey} onChange={(e) => setApiKey(e.target.value)}
           />
         </label>
         <Button type="button" variant="secondary" className="h-9 px-4" onClick={connect}>
@@ -143,40 +155,50 @@ export function ProviderPanel({
       ) : null}
       {assets.length > 0 ? (
         <div className="space-y-3">
-          {assets.map((asset) => (
-            <div
-              key={asset.externalId}
-              className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--panel-bg)] p-3"
-            >
-              <div className="grid gap-3 sm:grid-cols-[132px,minmax(0,1fr)]">
-                <MediaFrame
-                  src={asset.previewUrl}
-                  alt={asset.title}
-                  aspectClassName="aspect-[5/4]"
-                  overlay={
-                    <div className="absolute inset-x-3 top-3 flex justify-between gap-2">
-                      <Badge variant="quiet">Preview</Badge>
-                    </div>
-                  }
-                />
-                <div className="flex min-w-0 flex-col justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
+          {assets.map((asset) => {
+            const isRunning = asset.status === "running" || asset.status === "queued";
+            const isFailed = asset.status === "failed";
+            return (
+              <div
+                key={asset.externalId}
+                className="rounded-[var(--radius-md)] border bg-[var(--panel-bg)] p-3"
+                style={{ borderColor: isFailed ? "rgba(248,113,113,0.3)" : "var(--border-subtle)" }}
+              >
+                <div className="grid gap-3 sm:grid-cols-[132px,minmax(0,1fr)]">
+                  <MediaFrame
+                    src={asset.previewUrl ?? ""}
+                    alt={asset.title}
+                    aspectClassName="aspect-[5/4]"
+                    overlay={
+                      <div className="absolute inset-x-3 top-3 flex justify-between gap-2">
+                        <Badge variant={isRunning ? "accent" : "quiet"}>
+                          {isFailed ? "Failed" : isRunning ? "Processing..." : "Ready"}
+                        </Badge>
+                      </div>
+                    }
+                  />
+                  <div className="flex min-w-0 flex-col justify-between gap-3">
+                    <div>
                       <p className="text-sm font-medium text-white">{asset.title}</p>
-                      <Badge variant="quiet">Stub asset</Badge>
+                      {asset.createdAt ? (
+                        <p className="mt-0.5 text-xs text-[var(--foreground-muted)]">
+                          {new Date(asset.createdAt).toLocaleDateString()}
+                        </p>
+                      ) : null}
                     </div>
-                    <p className="mt-1 text-sm leading-6 text-[var(--foreground-muted)]">
-                      {asset.externalId}
-                    </p>
+                    {asset.canImport ? (
+                      <Button type="button" size="sm" onClick={() => importAsset(asset.externalId)}>
+                        <Sparkles className="h-4 w-4" />
+                        Import to project
+                      </Button>
+                    ) : isRunning ? (
+                      <p className="text-xs text-[var(--foreground-muted)]">Generating - auto-refreshing...</p>
+                    ) : null}
                   </div>
-                  <Button type="button" size="sm" onClick={() => importAsset(asset.externalId)}>
-                    <Sparkles className="h-4 w-4" />
-                    Import
-                  </Button>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="space-y-3">
@@ -210,7 +232,7 @@ export function ProviderPanel({
   }
 
   return (
-    <EditorPanel title="Import AI scene" badge={<Badge variant="accent">Runway · Luma · Sora</Badge>}>
+    <EditorPanel title="Import AI scene" badge={<Badge variant="accent">Runway / Luma / Sora</Badge>}>
       {content}
     </EditorPanel>
   );

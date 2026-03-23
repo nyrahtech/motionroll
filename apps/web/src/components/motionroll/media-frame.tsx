@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "../../lib/utils";
 
 function getMediaKind(src: string) {
   const normalized = src.split("?")[0]?.toLowerCase() ?? "";

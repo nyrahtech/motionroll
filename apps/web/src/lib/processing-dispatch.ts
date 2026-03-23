@@ -1,6 +1,6 @@
 import type { ProcessingJobPayload } from "@motionroll/shared";
 import { env } from "@/lib/env";
-import { inngest } from "@/lib/inngest";
+import { inngest } from "@/lib/inngest-client";
 import { processSourceAsset } from "@/lib/processing/pipeline";
 
 const DEFAULT_LOCAL_INNGEST_EVENT_KEY = "local-dev-key";

@@ -24,11 +24,11 @@ That focus is what makes the app easier to understand on a first run.
 - self-hosted editor fonts via Fontsource
 - upload restrictions and in-editor upload UX via Uppy
 - Docker-assisted local Postgres and MinIO setup
-- single-user local persistence model
+- Clerk-authenticated per-user workspace model
 - project-switching editor with one persistent sidebar
 - media processing pipeline with FFmpeg and Sharp helpers
 - hosted publish flow with immutable publish-version snapshots
-- seeded demo projects for product walkthroughs and screenshots
+- first-sign-in demo workspace seeding for product walkthroughs and screenshots
 
 ## What is intentionally stubbed
 
@@ -129,7 +129,7 @@ npm run db:seed
 - `npm run db:migrate`
   Apply migrations to local Postgres.
 - `npm run db:seed`
-  Seed the local owner, templates, and demo projects.
+  Seed global templates. Starter demo workspaces are created on first sign-in.
 - `npm run storage:init`
   Ensure the configured object-storage bucket exists.
 
@@ -137,12 +137,12 @@ npm run db:seed
 
 The intended first-run experience is:
 
-1. Open the home page.
-2. Land directly in the Editor on `MotionRoll Demo`.
-3. Scrub the preview, adjust timing in the timeline, and edit content directly in the canvas.
-4. Review the Template Picker only if you want a different preset direction.
-5. Import media or study a seeded demo.
-6. Open Publish and inspect readiness, preview URL, and embed options.
+1. Sign in to MotionRoll.
+2. Open the home page.
+3. Land directly in the Editor on your first-run `MotionRoll Demo` workspace.
+4. Scrub the preview, adjust timing in the timeline, and edit content directly in the canvas.
+5. Review the Template Picker only if you want a different preset direction.
+6. Import media or study a seeded demo, then open Publish and inspect readiness, preview URL, and embed options.
 
 ## Recommended demo flow
 
@@ -252,8 +252,8 @@ What does not claim to work yet:
 
 ## Current limitations
 
-- single-user local model only
-- not internet-ready multi-user software; local-owner assumptions are explicit throughout the app
+- requires Clerk configuration for authenticated app access
+- starter demo workspaces are created per user on first sign-in
 - hosted publish is primary; export packaging is still a scaffold
 - AI provider integrations are honest stubs
 - one primary cinematic section is the supported editing path in v1

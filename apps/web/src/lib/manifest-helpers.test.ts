@@ -191,4 +191,105 @@ describe("buildSectionManifest", () => {
     expect(manifest.overlays.map((overlay) => overlay.id)).toEqual(["bottom", "top"]);
     expect(manifest.overlays.map((overlay) => overlay.content.layer)).toEqual([0, 3]);
   });
+
+  it("caps stale bundled MotionRoll demo frame packs to shipped frame availability", () => {
+    const manifest = buildSectionManifest({
+      section: {
+        id: "3517be83-7f3c-4600-af7e-6385d4469115",
+        presetId: "scroll-sequence",
+        title: "Bundled demo section",
+        commonConfig: {
+          sectionHeightVh: 420,
+          scrubStrength: 0.85,
+          frameRange: { start: 0, end: 320 },
+          fallbackBehavior: {
+            mobile: "sequence",
+            reducedMotion: "sequence",
+          },
+          motion: {
+            easing: "linear",
+            pin: true,
+            preloadWindow: 6,
+          },
+        },
+        presetConfig: {},
+      },
+      overlays: [],
+      assets: [
+        {
+          kind: "frame_sequence",
+          storageKey: "motionroll_demo_sequence/sequence.json",
+          publicUrl: "/motionroll_demo_sequence/poster.webp",
+          metadata: { frameCount: 321 },
+          variants: [],
+        },
+        ...Array.from({ length: 321 }, (_, index) => ({
+          kind: "frame",
+          storageKey: `motionroll_demo_sequence/frames/frame-${String(index + 1).padStart(4, "0")}.webp`,
+          publicUrl: `/motionroll_demo_sequence/frames/frame-${String(index + 1).padStart(4, "0")}.webp`,
+          metadata: { frameIndex: index },
+          variants: [
+            {
+              kind: "desktop",
+              publicUrl: `/motionroll_demo_sequence/frames/frame-${String(index + 1).padStart(4, "0")}.webp`,
+              metadata: {},
+            },
+          ],
+        })),
+      ],
+    });
+
+    expect(manifest.frameCount).toBe(47);
+    expect(manifest.frameAssets).toHaveLength(47);
+    expect(manifest.progressMapping.frameRange.end).toBe(46);
+  });
+
+  it("synthesizes bundled MotionRoll demo frames when the seed omits per-frame asset rows", () => {
+    const manifest = buildSectionManifest({
+      section: {
+        id: "3517be83-7f3c-4600-af7e-6385d4469116",
+        presetId: "scroll-sequence",
+        title: "Minimal bundled demo section",
+        commonConfig: {
+          sectionHeightVh: 420,
+          scrubStrength: 0.85,
+          frameRange: { start: 0, end: 320 },
+          fallbackBehavior: {
+            mobile: "sequence",
+            reducedMotion: "sequence",
+          },
+          motion: {
+            easing: "linear",
+            pin: true,
+            preloadWindow: 6,
+          },
+        },
+        presetConfig: {},
+      },
+      overlays: [],
+      assets: [
+        {
+          kind: "frame_sequence",
+          storageKey: "demo/demo-motionroll-editor-user/sequence.json",
+          publicUrl: "/motionroll_demo_sequence/poster.webp",
+          metadata: { frameCount: 47 },
+          variants: [],
+        },
+        {
+          kind: "poster",
+          storageKey: "motionroll_demo_sequence/poster.webp",
+          publicUrl: "/motionroll_demo_sequence/poster.webp",
+          metadata: {},
+          variants: [],
+        },
+      ],
+    });
+
+    expect(manifest.frameCount).toBe(47);
+    expect(manifest.frameAssets).toHaveLength(47);
+    expect(manifest.frameAssets[0]?.variants[0]?.url).toBe(
+      "/motionroll_demo_sequence/frames/frame-0001.webp",
+    );
+    expect(manifest.progressMapping.frameRange.end).toBe(46);
+  });
 });

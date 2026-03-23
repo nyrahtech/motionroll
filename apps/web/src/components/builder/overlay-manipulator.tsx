@@ -1,201 +1,56 @@
 "use client";
 
-/**
- * OverlayManipulator
- *
- * All moving parts — card, outline, 4 corner handles, drag handle,
- * toolbar wrapper — are moved via direct DOM style writes on every pointermove.
- * React state (box) only sets the initial position and the final committed
- * position after pointerup. Nothing goes through React's scheduler during
- * an active gesture, so movement is always synchronous with the pointer.
- */
-
 import { useEffect, useRef, useState } from "react";
 import type { RefObject, PointerEvent as ReactPointerEvent } from "react";
 import { clampProgress } from "@motionroll/shared";
 import type { OverlayDefinition } from "@motionroll/shared";
 import { Move } from "lucide-react";
 import { InlineTextToolbar } from "./inline-text-toolbar";
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const DESIGN_WIDTH = 1440;
-const DESIGN_HEIGHT = 810;
-const MIN_DIM = 80;
-const HANDLE_HALF = 6; // half of 12px handle size
-const DRAG_HANDLE_OFFSET = 8;
-const DRAG_HANDLE_SIZE = 32;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type Box = { left: number; top: number; width: number; height: number };
-type Corner = "nw" | "ne" | "sw" | "se";
-type LiveResizeTargets = {
-  text: HTMLElement | null;
-  media: HTMLElement | null;
-  actionLink: HTMLElement | null;
-  isButtonLike: boolean;
-};
+import {
+  CORNER_HANDLE_HALF,
+  DRAG_HANDLE_OFFSET,
+  DRAG_HANDLE_SIZE,
+  MIN_BOX_DIMENSION,
+  getStageScale,
+  overlayToBox,
+  unionBoxes,
+  boxToLayout,
+  toolbarPos,
+  clampScale,
+  getResizeStyleChanges,
+  getLiveResizeTargets,
+  type Box,
+  type Corner,
+  type LiveResizeTargets,
+} from "./overlay-manipulator-utils";
+import type { LayoutChangeOptions } from "./editor-overlay-utils";
 
 export type OverlayManipulatorProps = {
   overlay: OverlayDefinition;
-  selectedOverlayId: string;
+  selectedOverlayId?: string;
   selectedOverlayIds?: string[];
   selectionOverlays?: OverlayDefinition[];
   containerRef: RefObject<HTMLElement | null>;
   selectedStyle?: OverlayDefinition["content"]["style"];
-  isTextStyle: boolean;
+  isTextStyle?: boolean;
   allowLayoutEditing?: boolean;
-  onLayoutChange: (
+  onLayoutChange?: (
     layout: Partial<{ x: number; y: number; width: number; height: number }>,
-    options?: {
-      intent?: "move" | "resize";
-      scaleX?: number;
-      scaleY?: number;
-      styleChanges?: Partial<NonNullable<OverlayDefinition["content"]["style"]>>;
-      backgroundChanges?: Partial<NonNullable<OverlayDefinition["content"]["background"]>>;
-    },
+    options?: LayoutChangeOptions,
   ) => void;
-  onStyleChange: (changes: Record<string, unknown>) => void;
-  onEdit: () => void;
+  onStyleChange?: (changes: Record<string, unknown>) => void;
+  onEdit?: () => void;
   canGroupSelection?: boolean;
   canUngroupSelection?: boolean;
   onGroupSelection?: () => void;
   onUngroupSelection?: () => void;
-  onDuplicate: () => void;
-  onDelete: () => void;
+  onDuplicate?: () => void;
+  onDelete?: () => void;
   onMoveSelection?: (delta: { x: number; y: number }) => void;
   onDuplicateSelection?: () => void;
   onDeleteSelection?: () => void;
-  onInteractingChange: (active: boolean) => void;
+  onInteractingChange?: (active: boolean) => void;
 };
-
-// ─── Coordinate helpers ────────────────────────────────────────────────────────
-
-function getStageScale(container: HTMLElement): number {
-  return Math.max(
-    0.35,
-    Math.min(
-      container.clientWidth / DESIGN_WIDTH,
-      container.clientHeight / DESIGN_HEIGHT,
-    ),
-  );
-}
-
-function overlayToBox(overlay: OverlayDefinition, container: HTMLElement, renderedHeight: number): Box {
-  const layout = overlay.content.layout;
-  const cW = container.clientWidth;
-  const cH = container.clientHeight;
-  const scale = getStageScale(container);
-  const w = Math.round((layout?.width ?? 420) * scale);
-  const h = renderedHeight;
-
-  if (overlay.content.align === "center") {
-    return {
-      left: (layout?.x ?? 0.5) * cW - w / 2,
-      top:  (layout?.y ?? 0.5) * cH - h / 2,
-      width: w,
-      height: h,
-    };
-  }
-  return {
-    left: (layout?.x ?? 0.08) * cW,
-    top:  (layout?.y ?? 0.12) * cH,
-    width: w,
-    height: h,
-  };
-}
-
-function unionBoxes(boxes: Box[]): Box | null {
-  if (boxes.length === 0) {
-    return null;
-  }
-  const left = Math.min(...boxes.map((box) => box.left));
-  const top = Math.min(...boxes.map((box) => box.top));
-  const right = Math.max(...boxes.map((box) => box.left + box.width));
-  const bottom = Math.max(...boxes.map((box) => box.top + box.height));
-  return {
-    left,
-    top,
-    width: Math.max(MIN_DIM, right - left),
-    height: Math.max(MIN_DIM, bottom - top),
-  };
-}
-
-function boxToLayout(box: Box, overlay: OverlayDefinition, container: HTMLElement) {
-  const cW = Math.max(container.clientWidth, 1);
-  const cH = Math.max(container.clientHeight, 1);
-  const scale = getStageScale(container);
-  const center = overlay.content.align === "center";
-  return {
-    x: clampProgress(center ? (box.left + box.width / 2) / cW : box.left / cW),
-    y: clampProgress(center ? (box.top + box.height / 2) / cH : box.top / cH),
-    width: Math.round(box.width / scale),
-    height: Math.round(box.height / scale),
-  };
-}
-
-function toolbarPos(box: Box, cW: number, cH: number) {
-  const tbW = 320;
-  const tbH = 44;
-  const left = Math.max(8, Math.min(box.left, cW - tbW - 8));
-  const aboveTop = box.top - tbH - 8;
-  const belowTop = box.top + box.height + 8;
-  const top = aboveTop >= 8 ? aboveTop : Math.min(belowTop, cH - tbH - 8);
-  return { top, left };
-}
-
-function clampScale(value: number, min = 0.5, max = 3) {
-  return Math.max(min, Math.min(value, max));
-}
-
-function getResizeStyleChanges(
-  overlay: OverlayDefinition,
-  initialBox: Box,
-  nextBox: Box,
-) {
-  const baseStyle = overlay.content.style;
-  const baseBackground = overlay.content.background;
-  const baseLayout = overlay.content.layout;
-  const scaleX = initialBox.width > 0 ? nextBox.width / initialBox.width : 1;
-  const scaleY = initialBox.height > 0 ? nextBox.height / initialBox.height : 1;
-  const areaScale = Math.sqrt(scaleX * scaleY);
-  const contentScale = clampScale(1 + (areaScale - 1) * 0.82);
-  const paddingScaleX = clampScale(1 + (scaleX - 1) * 0.72);
-  const paddingScaleY = clampScale(1 + (scaleY - 1) * 0.72);
-
-  return {
-    scaleX,
-    scaleY,
-    styleChanges: {
-      fontSize: Math.max(10, Math.round((baseStyle?.fontSize ?? 34) * contentScale)),
-      maxWidth: Math.max(80, Math.round((baseStyle?.maxWidth ?? baseLayout?.width ?? 420) * scaleX)),
-    },
-    backgroundChanges: {
-      radius: Math.max(0, Math.round((baseBackground?.radius ?? 14) * contentScale)),
-      paddingX: Math.max(0, Math.round((baseBackground?.paddingX ?? 18) * paddingScaleX)),
-      paddingY: Math.max(0, Math.round((baseBackground?.paddingY ?? 14) * paddingScaleY)),
-    },
-    mediaMaxWidth: Math.max(80, Math.round((baseLayout?.width ?? 420) * scaleX)),
-    iconHeight: Math.max(20, Math.round(64 * contentScale)),
-    logoHeight: Math.max(24, Math.round(80 * contentScale)),
-    actionFontSize: Math.max(10, Math.round(14 * contentScale)),
-    actionMarginTop: Math.max(8, Math.round(16 * contentScale)),
-    actionPaddingY: Math.max(6, Math.round(9 * paddingScaleY)),
-    actionPaddingX: Math.max(8, Math.round(14 * paddingScaleX)),
-  };
-}
-
-function getLiveResizeTargets(card: HTMLElement, overlay: OverlayDefinition): LiveResizeTargets {
-  return {
-    text: card.querySelector<HTMLElement>('[data-text-field="text"]'),
-    media: card.querySelector<HTMLElement>("[data-media-field='media']"),
-    actionLink: card.querySelector<HTMLElement>("a"),
-    isButtonLike: Boolean(overlay.content.style?.buttonLike),
-  };
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
 
 export function OverlayManipulator({
   overlay,
@@ -228,10 +83,10 @@ export function OverlayManipulator({
 
   // ── DOM refs for all chrome elements ──────────────────────────────────
   const outlineRef   = useRef<HTMLDivElement | null>(null);
-  const handleNwRef  = useRef<HTMLDivElement | null>(null);
-  const handleNeRef  = useRef<HTMLDivElement | null>(null);
-  const handleSwRef  = useRef<HTMLDivElement | null>(null);
-  const handleSeRef  = useRef<HTMLDivElement | null>(null);
+  const handleNwRef  = useRef<HTMLButtonElement | null>(null);
+  const handleNeRef  = useRef<HTMLButtonElement | null>(null);
+  const handleSwRef  = useRef<HTMLButtonElement | null>(null);
+  const handleSeRef  = useRef<HTMLButtonElement | null>(null);
   const dragHandleRef = useRef<HTMLButtonElement | null>(null);
   const toolbarWrapRef = useRef<HTMLDivElement | null>(null);
   const selectionIds = (selectedOverlayIds?.length ? selectedOverlayIds : [selectedOverlayId]).filter(Boolean);
@@ -257,20 +112,20 @@ export function OverlayManipulator({
 
     // Handles
     if (handleNwRef.current) {
-      handleNwRef.current.style.left = `${b.left - HANDLE_HALF}px`;
-      handleNwRef.current.style.top  = `${b.top  - HANDLE_HALF}px`;
+      handleNwRef.current.style.left = `${b.left - CORNER_HANDLE_HALF}px`;
+      handleNwRef.current.style.top  = `${b.top  - CORNER_HANDLE_HALF}px`;
     }
     if (handleNeRef.current) {
-      handleNeRef.current.style.left = `${b.left + b.width - HANDLE_HALF}px`;
-      handleNeRef.current.style.top  = `${b.top  - HANDLE_HALF}px`;
+      handleNeRef.current.style.left = `${b.left + b.width - CORNER_HANDLE_HALF}px`;
+      handleNeRef.current.style.top  = `${b.top  - CORNER_HANDLE_HALF}px`;
     }
     if (handleSwRef.current) {
-      handleSwRef.current.style.left = `${b.left - HANDLE_HALF}px`;
-      handleSwRef.current.style.top  = `${b.top  + b.height - HANDLE_HALF}px`;
+      handleSwRef.current.style.left = `${b.left - CORNER_HANDLE_HALF}px`;
+      handleSwRef.current.style.top  = `${b.top  + b.height - CORNER_HANDLE_HALF}px`;
     }
     if (handleSeRef.current) {
-      handleSeRef.current.style.left = `${b.left + b.width - HANDLE_HALF}px`;
-      handleSeRef.current.style.top  = `${b.top  + b.height - HANDLE_HALF}px`;
+      handleSeRef.current.style.left = `${b.left + b.width - CORNER_HANDLE_HALF}px`;
+      handleSeRef.current.style.top  = `${b.top  + b.height - CORNER_HANDLE_HALF}px`;
     }
 
     if (dragHandleRef.current) {
@@ -310,8 +165,8 @@ export function OverlayManipulator({
       return {
         left: rect.left - cRect.left,
         top: rect.top - cRect.top,
-        width: Math.max(rect.width, MIN_DIM),
-        height: Math.max(rect.height, MIN_DIM),
+        width: Math.max(rect.width, MIN_BOX_DIMENSION),
+        height: Math.max(rect.height, MIN_BOX_DIMENSION),
       };
     });
     if (cardBoxes.length > 0) {
@@ -447,7 +302,7 @@ export function OverlayManipulator({
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(true);
-    onInteractingChange(true);
+    onInteractingChange?.(true);
 
     const initialBox: Box = startBox;
     const card = getCard();
@@ -460,8 +315,8 @@ export function OverlayManipulator({
         box: {
           left: rect.left - containerRect.left,
           top: rect.top - containerRect.top,
-          width: Math.max(rect.width, MIN_DIM),
-          height: Math.max(rect.height, MIN_DIM),
+          width: Math.max(rect.width, MIN_BOX_DIMENSION),
+          height: Math.max(rect.height, MIN_BOX_DIMENSION),
         },
       };
     });
@@ -496,7 +351,7 @@ export function OverlayManipulator({
       const nextBox = boxRef.current;
       if (!nextBox) {
         setIsDragging(false);
-        onInteractingChange(false);
+        onInteractingChange?.(false);
         return;
       }
       if (isMultiSelection) {
@@ -505,13 +360,13 @@ export function OverlayManipulator({
           y: (nextBox.top - initialBox.top) / Math.max(cRect.height, 1),
         });
       } else {
-        onLayoutChange(boxToLayout(nextBox, overlay, container), { intent: "move", scaleX: 1, scaleY: 1 });
+        onLayoutChange?.(boxToLayout(nextBox, overlay, container), { intent: "move", scaleX: 1, scaleY: 1 });
       }
       // Keep card at final pixel position — the manifest-driven overlay-sync
       // effect in runtime-preview will restore fractional styles once committed.
       setBox(nextBox);
       setIsDragging(false);
-      onInteractingChange(false);
+      onInteractingChange?.(false);
     }
 
     function cleanup() {
@@ -538,7 +393,7 @@ export function OverlayManipulator({
 
     e.preventDefault();
     e.stopPropagation();
-    onInteractingChange(true);
+    onInteractingChange?.(true);
 
     const initialBox: Box = startBox;
     const card = getCard();
@@ -558,22 +413,22 @@ export function OverlayManipulator({
       let { left, top, width, height } = initialBox;
 
       if (corner === "nw") {
-        const nl = Math.max(0, Math.min(left + dx, left + width - MIN_DIM));
-        const nt = Math.max(0, Math.min(top  + dy, top  + height - MIN_DIM));
+        const nl = Math.max(0, Math.min(left + dx, left + width - MIN_BOX_DIMENSION));
+        const nt = Math.max(0, Math.min(top  + dy, top  + height - MIN_BOX_DIMENSION));
         width  += left - nl;
         height += top  - nt;
         left = nl; top = nt;
       } else if (corner === "ne") {
-        const nt = Math.max(0, Math.min(top + dy, top + height - MIN_DIM));
+        const nt = Math.max(0, Math.min(top + dy, top + height - MIN_BOX_DIMENSION));
         height += top - nt; top = nt;
-        width = Math.max(MIN_DIM, Math.min(width + dx, cRect.width - left));
+        width = Math.max(MIN_BOX_DIMENSION, Math.min(width + dx, cRect.width - left));
       } else if (corner === "sw") {
-        const nl = Math.max(0, Math.min(left + dx, left + width - MIN_DIM));
+        const nl = Math.max(0, Math.min(left + dx, left + width - MIN_BOX_DIMENSION));
         width += left - nl; left = nl;
-        height = Math.max(MIN_DIM, Math.min(height + dy, cRect.height - top));
+        height = Math.max(MIN_BOX_DIMENSION, Math.min(height + dy, cRect.height - top));
       } else {
-        width  = Math.max(MIN_DIM, Math.min(width  + dx, cRect.width  - left));
-        height = Math.max(MIN_DIM, Math.min(height + dy, cRect.height - top));
+        width  = Math.max(MIN_BOX_DIMENSION, Math.min(width  + dx, cRect.width  - left));
+        height = Math.max(MIN_BOX_DIMENSION, Math.min(height + dy, cRect.height - top));
       }
 
       const nextBox = { left, top, width, height };
@@ -603,11 +458,11 @@ export function OverlayManipulator({
       cleanup();
       const nextBox = boxRef.current;
       if (!nextBox) {
-        onInteractingChange(false);
+        onInteractingChange?.(false);
         return;
       }
       const resize = getResizeStyleChanges(overlay, initialBox, nextBox);
-      onLayoutChange(boxToLayout(nextBox, overlay, container), {
+      onLayoutChange?.(boxToLayout(nextBox, overlay, container), {
         intent: "resize",
         scaleX: resize.scaleX,
         scaleY: resize.scaleY,
@@ -615,7 +470,7 @@ export function OverlayManipulator({
         backgroundChanges: resize.backgroundChanges,
       });
       setBox(nextBox);
-      onInteractingChange(false);
+      onInteractingChange?.(false);
     }
 
     function cleanup() {
@@ -643,7 +498,7 @@ export function OverlayManipulator({
   const cH = containerRef.current?.clientHeight ?? 0;
   const tb = toolbarPos(box, cW, cH);
 
-  const handles: { id: Corner; ref: RefObject<HTMLDivElement | null>; cursor: string }[] = [
+  const handles: { id: Corner; ref: RefObject<HTMLButtonElement | null>; cursor: string }[] = [
     { id: "nw", ref: handleNwRef, cursor: "nwse-resize" },
     { id: "ne", ref: handleNeRef, cursor: "nesw-resize" },
     { id: "sw", ref: handleSwRef, cursor: "nesw-resize" },
@@ -671,16 +526,27 @@ export function OverlayManipulator({
               {handles.map(({ id, ref, cursor }) => {
                 const isNorth = id[0] === "n";
                 const isWest  = id[1] === "w";
+                const label =
+                  id === "nw"
+                    ? "Resize overlay north west"
+                    : id === "ne"
+                      ? "Resize overlay north east"
+                      : id === "sw"
+                        ? "Resize overlay south west"
+                        : "Resize overlay south east";
                 return (
-              <div
+              <button
                 key={id}
                 ref={ref}
+                type="button"
                 data-overlay-selection-chrome
-                onPointerDown={(e: ReactPointerEvent<HTMLDivElement>) => handleResizePointerDown(e, id)}
+                onPointerDown={(e: ReactPointerEvent<HTMLButtonElement>) => handleResizePointerDown(e, id)}
                 className="absolute z-[34] h-3 w-3 rounded-sm border-2 border-[rgba(103,232,249,0.9)] bg-[#0a1520]"
+                aria-label={label}
+                title={label}
                     style={{
-                      left: isWest  ? box.left - HANDLE_HALF : box.left + box.width  - HANDLE_HALF,
-                      top:  isNorth ? box.top  - HANDLE_HALF : box.top  + box.height - HANDLE_HALF,
+                      left: isWest  ? box.left - CORNER_HANDLE_HALF : box.left + box.width  - CORNER_HANDLE_HALF,
+                      top:  isNorth ? box.top  - CORNER_HANDLE_HALF : box.top  + box.height - CORNER_HANDLE_HALF,
                       cursor,
                     }}
                   />

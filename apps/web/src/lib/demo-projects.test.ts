@@ -30,7 +30,7 @@ describe("demo project seeds", () => {
     };
 
     expect(progressToFrameIndex(0, frameRange)).toBe(0);
-    expect(progressToFrameIndex(0.5, frameRange)).toBe(160);
-    expect(progressToFrameIndex(1, frameRange)).toBe(320);
+    expect(progressToFrameIndex(0.5, frameRange)).toBe(23);
+    expect(progressToFrameIndex(1, frameRange)).toBe(46);
   });
 });

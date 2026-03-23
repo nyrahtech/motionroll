@@ -6,9 +6,9 @@ import { ChevronDown, SlidersHorizontal, X } from "lucide-react";
 import type { EditorFormValues } from "./editor-types";
 import type { TimelineClipModel, TimelineSelection } from "./timeline-model";
 import { EditorInspector, InspectorGroup } from "./editor-shell";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "../ui/badge";
+import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
 
 export function SelectionDetailsPanel({
   selection,

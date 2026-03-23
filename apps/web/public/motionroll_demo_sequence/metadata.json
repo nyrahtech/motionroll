@@ -4,7 +4,7 @@
   "fallbackVideoUrl": "/motionroll_demo_sequence/demo.mp4",
   "frameBaseUrl": "/motionroll_demo_sequence/frames",
   "framePattern": "frame-{index:04d}.webp",
-  "frameCount": 321,
+  "frameCount": 47,
   "sourceFrameCount": 1698,
   "sourceFps": 60,
   "frameRate": 12,

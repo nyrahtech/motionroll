@@ -1,5 +1,5 @@
 import path from "node:path";
-import { env } from "@/lib/env";
+import { env } from "../env";
 
 const acceptedVideoMimeTypes = new Set([
   "video/mp4",

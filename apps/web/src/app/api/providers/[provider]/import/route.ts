@@ -4,7 +4,8 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { aiGenerations, projects } from "@/db/schema";
 import { getAiProviderAdapter } from "@/lib/ai/providers";
-import { LOCAL_OWNER } from "@/lib/data/local-owner";
+import { requireAuth } from "@/lib/auth";
+import { parseBody } from "@/lib/api-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -18,15 +19,23 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ provider: string }> },
 ) {
+  const { userId } = await requireAuth();
   const { provider: rawProvider } = await params;
-  const provider = providerSchema.parse(rawProvider);
-  const body = importSchema.parse(await request.json());
+  const providerResult = providerSchema.safeParse(rawProvider);
+  if (!providerResult.success) {
+    return NextResponse.json({ error: `Unknown provider: ${rawProvider}` }, { status: 400 });
+  }
+  const provider = providerResult.data;
+  const bodyResult = await parseBody(request, importSchema);
+  if (bodyResult.error) return bodyResult.error;
+  const body = bodyResult.data;
+
   const project = await db.query.projects.findFirst({
-    where: and(eq(projects.id, body.projectId), eq(projects.ownerId, LOCAL_OWNER.id)),
+    where: and(eq(projects.id, body.projectId), eq(projects.ownerId, userId)),
   });
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found for local owner." }, { status: 404 });
+    return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
 
   const adapter = getAiProviderAdapter(provider);
@@ -38,7 +47,7 @@ export async function POST(
   const [generation] = await db
     .insert(aiGenerations)
     .values({
-      userId: LOCAL_OWNER.id,
+      userId,
       projectId: body.projectId,
       provider,
       status: "unsupported",
@@ -49,22 +58,15 @@ export async function POST(
             externalId: body.assetExternalId,
             title: `${provider} import scaffold`,
             previewUrl: imported.sourceUrl,
-            metadata: {
-              mimeType: "video/mp4",
-              bytes: 0,
-              sourceUrl: imported.sourceUrl,
-            },
+            metadata: { mimeType: "video/mp4", bytes: 0, sourceUrl: imported.sourceUrl },
           }
         : null,
     })
     .returning();
+
   if (!generation) {
     return NextResponse.json({ error: "Import record persistence failed" }, { status: 500 });
   }
 
-  return NextResponse.json({
-    importRecorded: true,
-    generationId: generation.id,
-    ...imported,
-  });
+  return NextResponse.json({ importRecorded: true, generationId: generation.id, ...imported });
 }

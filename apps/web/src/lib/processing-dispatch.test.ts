@@ -9,7 +9,7 @@ vi.mock("@/lib/env", () => ({
   },
 }));
 
-vi.mock("@/lib/inngest", () => ({
+vi.mock("@/lib/inngest-client", () => ({
   inngest: {
     send: sendMock,
   },
@@ -53,7 +53,7 @@ describe("processing dispatch", () => {
     const retryingSendMock = vi.fn().mockRejectedValue(new Error("Inngest API Error: 401 Event key not found"));
     const retryingProcessMock = vi.fn();
 
-    vi.doMock("@/lib/inngest", () => ({
+    vi.doMock("@/lib/inngest-client", () => ({
       inngest: {
         send: retryingSendMock,
       },

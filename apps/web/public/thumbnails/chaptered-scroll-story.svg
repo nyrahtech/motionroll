@@ -1,16 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900">
-  <defs>
-    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0%" stop-color="#281c12"/>
-      <stop offset="100%" stop-color="#0a0b0a"/>
-    </linearGradient>
-  </defs>
-  <rect width="1200" height="900" fill="url(#g)"/>
-  <path d="M220 160 h760 a32 32 0 0 1 32 32 v510 a32 32 0 0 1 -32 32 h-760 a32 32 0 0 1 -32 -32 v-510 a32 32 0 0 1 32 -32 z" fill="none" stroke="#ffe1a6" stroke-opacity=".32"/>
-  <text x="210" y="280" fill="#ffecc3" font-size="46" font-family="Arial, sans-serif">Chapter 01</text>
-  <text x="210" y="390" fill="#ffecc3" font-size="46" font-family="Arial, sans-serif">Chapter 02</text>
-  <text x="210" y="500" fill="#ffecc3" font-size="46" font-family="Arial, sans-serif">Chapter 03</text>
-  <text x="210" y="610" fill="#ffecc3" font-size="46" font-family="Arial, sans-serif">Chapter 04</text>
-  <rect x="720" y="240" width="190" height="380" rx="30" fill="#fff5d8" fill-opacity=".08" stroke="#fff5d8" stroke-opacity=".3"/>
-  <text x="110" y="800" fill="#fff6e6" font-size="72" font-family="Arial, sans-serif" font-weight="700">Chaptered Scroll Story</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">
+  <rect width="800" height="450" fill="#0b0e14"/>
+  <rect x="60" y="60" width="680" height="330" rx="8" fill="#131720"/>
+  <text x="400" y="225" text-anchor="middle" dominant-baseline="middle" 
+        font-family="Inter, sans-serif" font-size="18" fill="#4a5568">
+    chaptered-scroll-story
+  </text>
 </svg>

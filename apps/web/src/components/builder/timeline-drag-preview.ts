@@ -4,6 +4,7 @@ export type LayerRowGeometry = {
   trackIndex: number;
   top: number;
   bottom: number;
+  height: number;
 };
 
 type DragContainerRect = {

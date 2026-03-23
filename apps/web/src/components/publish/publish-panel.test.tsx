@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const componentDir = fileURLToPath(new URL(".", import.meta.url));
-const appDir = path.resolve(componentDir, "../../app");
+const rootDir = process.cwd();
+const componentDir = path.resolve(rootDir, "src/components/publish");
+const appDir = path.resolve(rootDir, "src/app");
 
 describe("publish panel runtime preview", () => {
   it("uses an iframe instead of the editor preview runtime", () => {
@@ -20,6 +20,7 @@ describe("publish panel runtime preview", () => {
     expect(source).toContain("forceSequence=1");
     expect(source).toContain('device === "desktop" ? "desktop" : "mobile"');
     expect(source).toContain('width: isDesktopPreview ? "100%"');
+    expect(source).not.toContain(">Download<");
   });
 
   it("allows runtime mode overrides on preview and embed pages", () => {

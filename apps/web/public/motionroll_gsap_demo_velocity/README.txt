@@ -2,7 +2,7 @@ MotionRoll GSAP Velocity Demo
 
 Files:
 - index.html
-- poster.webp
+- demo.mp4
 - frames/*.webp
 
 Run from a local server, for example:
@@ -12,7 +12,7 @@ Then open:
   http://localhost:8080
 
 Notes:
-- Uses high-quality WebP frames plus poster.webp for the asset preview
+- Uses high-quality WebP frames extracted from demo.mp4
 - Uses GSAP + ScrollTrigger for pinning and scroll progress
 - Uses velocity-aware smoothing so fast wheel input catches up faster
 - Includes Manual scrub mode with a slider

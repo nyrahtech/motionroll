@@ -2,7 +2,6 @@ import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { projects, publishTargets, publishVersions } from "@/db/schema";
-import { LOCAL_OWNER } from "@/lib/data/local-owner";
 import { buildProjectManifest } from "@/lib/manifest";
 import { getDerivedAssetsSnapshot } from "@/lib/project-assets";
 import { copyStorageObject, getStoragePublicUrl } from "@/lib/storage/s3-adapter";
@@ -22,6 +21,10 @@ type AssetRow = {
   metadata: unknown;
   variants: VariantRow[];
 };
+
+function usesStaticPublicAsset(asset: { publicUrl: string }) {
+  return asset.publicUrl.startsWith("/");
+}
 
 function resolveExtension(input: { key: string; metadata: unknown; fallback: string }) {
   const keyExtension = path.extname(input.key);
@@ -55,6 +58,10 @@ async function cloneDerivedAssetsForPublish(
 
   const publishedAssets = await Promise.all(
     draftAssets.map(async (asset) => {
+      if (usesStaticPublicAsset(asset)) {
+        return asset;
+      }
+
       if (asset.kind === "frame_sequence") {
         return {
           ...asset,
@@ -69,6 +76,10 @@ async function cloneDerivedAssetsForPublish(
         const frameBasePath = `${publishBasePath}/frames/frame-${String(frameIndex).padStart(5, "0")}`;
         const variants = await Promise.all(
           asset.variants.map(async (variant) => {
+            if (usesStaticPublicAsset(variant)) {
+              return variant;
+            }
+
             const destinationKey = `${frameBasePath}/${variant.kind}${resolveExtension({
               key: variant.storageKey,
               metadata: variant.metadata,
@@ -112,9 +123,9 @@ async function cloneDerivedAssetsForPublish(
   };
 }
 
-export async function createPublishedSnapshot(projectId: string) {
+export async function createPublishedSnapshot(projectId: string, userId: string) {
   const project = await db.query.projects.findFirst({
-    where: and(eq(projects.id, projectId), eq(projects.ownerId, LOCAL_OWNER.id)),
+    where: and(eq(projects.id, projectId), eq(projects.ownerId, userId)),
     with: {
       assets: {
         with: {
@@ -137,6 +148,7 @@ export async function createPublishedSnapshot(projectId: string) {
     project.assets as AssetRow[],
   );
   const manifest = await buildProjectManifest(projectId, {
+    userId,
     publishVersion: nextVersion,
     persistDraftManifest: true,
     publishedAt,

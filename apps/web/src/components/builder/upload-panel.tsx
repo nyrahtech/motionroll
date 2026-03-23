@@ -4,8 +4,8 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { Film } from "lucide-react";
 import Uppy from "@uppy/core";
 import DashboardView from "@uppy/react/dashboard";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { EditorPanel } from "./editor-shell";
 
 const defaultStatus =
@@ -171,7 +171,7 @@ export function UploadPanel({
         <div>
           <p className="text-sm font-medium text-white">Video format supported</p>
           <p className="mt-0.5 text-xs" style={{ color: "var(--foreground-muted)" }}>
-            MP4, MOV, WEBM, M4V · 500 MB max
+            MP4, MOV, WEBM, M4V - 500 MB max
           </p>
         </div>
       </div>
@@ -195,7 +195,7 @@ export function UploadPanel({
           <div>
             <p className="text-sm font-medium text-white">Video format supported</p>
             <p className="mt-0.5 text-xs" style={{ color: "var(--foreground-muted)" }}>
-              MP4, MOV, WEBM, M4V · 500 MB max
+              MP4, MOV, WEBM, M4V - 500 MB max
             </p>
           </div>
         </div>
@@ -219,7 +219,7 @@ export function UploadPanel({
   return (
     <EditorPanel
       title="Video format supported"
-      badge={<Badge variant="accent">MP4 · MOV · WEBM · Max 500 MB</Badge>}
+      badge={<Badge variant="accent">MP4 / MOV / WEBM / Max 500 MB</Badge>}
     >
       {panelContent}
     </EditorPanel>

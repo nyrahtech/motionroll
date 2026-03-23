@@ -1,10 +1,22 @@
 import { createEnv } from "@t3-oss/env-nextjs";
 import { z } from "zod";
 
+const testAuthBypassSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim() : value),
+  z.enum(["true", "false"]).optional(),
+);
+
+function normalizeOptionalString(value: string | undefined) {
+  if (typeof value !== "string") {
+    return value;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 const defaults = {
   DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/motionroll",
   DIRECT_URL: "postgres://postgres:postgres@127.0.0.1:5432/motionroll",
-  LOCAL_OWNER_EMAIL: "owner@motionroll.local",
   STORAGE_BUCKET: "motionroll-assets",
   STORAGE_REGION: "auto",
   STORAGE_ENDPOINT: "http://127.0.0.1:9000",
@@ -22,14 +34,12 @@ const defaults = {
   INNGEST_SIGNING_KEY: "local-signing-key",
   PUBLISH_EMBED_BASE_URL: "http://localhost:3000/embed",
   NEXT_PUBLIC_APP_URL: "http://localhost:3000",
-  NEXT_PUBLIC_LOCAL_OWNER_ID: "local-owner",
 };
 
 export const env = createEnv({
   server: {
     DATABASE_URL: z.string().url(),
     DIRECT_URL: z.string().url(),
-    LOCAL_OWNER_EMAIL: z.string().email(),
     STORAGE_BUCKET: z.string().min(1),
     STORAGE_REGION: z.string().min(1),
     STORAGE_ENDPOINT: z.string().url(),
@@ -45,16 +55,17 @@ export const env = createEnv({
     CREDENTIAL_ENCRYPTION_KEY: z.string().min(16),
     INNGEST_EVENT_KEY: z.string().min(1),
     INNGEST_SIGNING_KEY: z.string().min(1),
+    CLERK_SECRET_KEY: z.string().startsWith("sk_").optional(),
     PUBLISH_EMBED_BASE_URL: z.string().url(),
+    MOTIONROLL_TEST_AUTH_BYPASS: testAuthBypassSchema,
   },
   client: {
     NEXT_PUBLIC_APP_URL: z.string().url(),
-    NEXT_PUBLIC_LOCAL_OWNER_ID: z.string().min(1),
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().startsWith("pk_").optional(),
   },
   runtimeEnv: {
     DATABASE_URL: process.env.DATABASE_URL ?? defaults.DATABASE_URL,
     DIRECT_URL: process.env.DIRECT_URL ?? defaults.DIRECT_URL,
-    LOCAL_OWNER_EMAIL: process.env.LOCAL_OWNER_EMAIL ?? defaults.LOCAL_OWNER_EMAIL,
     STORAGE_BUCKET: process.env.STORAGE_BUCKET ?? defaults.STORAGE_BUCKET,
     STORAGE_REGION: process.env.STORAGE_REGION ?? defaults.STORAGE_REGION,
     STORAGE_ENDPOINT: process.env.STORAGE_ENDPOINT ?? defaults.STORAGE_ENDPOINT,
@@ -66,7 +77,8 @@ export const env = createEnv({
       process.env.STORAGE_SECRET_ACCESS_KEY ?? defaults.STORAGE_SECRET_ACCESS_KEY,
     STORAGE_FORCE_PATH_STYLE:
       process.env.STORAGE_FORCE_PATH_STYLE ?? defaults.STORAGE_FORCE_PATH_STYLE,
-    PROCESSING_TEMP_DIR: process.env.PROCESSING_TEMP_DIR ?? defaults.PROCESSING_TEMP_DIR,
+    PROCESSING_TEMP_DIR:
+      process.env.PROCESSING_TEMP_DIR ?? defaults.PROCESSING_TEMP_DIR,
     UPLOAD_MAX_VIDEO_BYTES:
       process.env.UPLOAD_MAX_VIDEO_BYTES ?? defaults.UPLOAD_MAX_VIDEO_BYTES,
     PROCESSING_MAX_FRAMES:
@@ -76,13 +88,17 @@ export const env = createEnv({
     FFMPEG_BINARY: process.env.FFMPEG_BINARY ?? defaults.FFMPEG_BINARY,
     CREDENTIAL_ENCRYPTION_KEY:
       process.env.CREDENTIAL_ENCRYPTION_KEY ?? defaults.CREDENTIAL_ENCRYPTION_KEY,
-    INNGEST_EVENT_KEY: process.env.INNGEST_EVENT_KEY ?? defaults.INNGEST_EVENT_KEY,
+    INNGEST_EVENT_KEY:
+      process.env.INNGEST_EVENT_KEY ?? defaults.INNGEST_EVENT_KEY,
     INNGEST_SIGNING_KEY:
       process.env.INNGEST_SIGNING_KEY ?? defaults.INNGEST_SIGNING_KEY,
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+    CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
     PUBLISH_EMBED_BASE_URL:
       process.env.PUBLISH_EMBED_BASE_URL ?? defaults.PUBLISH_EMBED_BASE_URL,
-    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL ?? defaults.NEXT_PUBLIC_APP_URL,
-    NEXT_PUBLIC_LOCAL_OWNER_ID:
-      process.env.NEXT_PUBLIC_LOCAL_OWNER_ID ?? defaults.NEXT_PUBLIC_LOCAL_OWNER_ID,
+    NEXT_PUBLIC_APP_URL:
+      process.env.NEXT_PUBLIC_APP_URL ?? defaults.NEXT_PUBLIC_APP_URL,
+    MOTIONROLL_TEST_AUTH_BYPASS: normalizeOptionalString(process.env.MOTIONROLL_TEST_AUTH_BYPASS),
   },
 });

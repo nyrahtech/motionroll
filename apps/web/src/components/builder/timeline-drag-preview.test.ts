@@ -4,23 +4,23 @@ import { getClipInsertionIndex, getLayerDragGhostPosition, resolveLayerTrackInde
 describe("timeline drag preview helpers", () => {
   it("prefers the row directly under the pointer", () => {
     expect(resolveLayerTrackIndexFromPointer(122, [
-      { trackIndex: 0, top: 40, bottom: 100 },
-      { trackIndex: 1, top: 101, bottom: 161 },
-      { trackIndex: 2, top: 162, bottom: 222 },
+      { trackIndex: 0, top: 40, bottom: 100, height: 60 },
+      { trackIndex: 1, top: 101, bottom: 161, height: 60 },
+      { trackIndex: 2, top: 162, bottom: 222, height: 60 },
     ])).toBe(1);
   });
 
   it("falls back to the nearest visible layer row near boundaries", () => {
     expect(resolveLayerTrackIndexFromPointer(158, [
-      { trackIndex: 0, top: 40, bottom: 100 },
-      { trackIndex: 1, top: 101, bottom: 141 },
-      { trackIndex: 2, top: 181, bottom: 221 },
+      { trackIndex: 0, top: 40, bottom: 100, height: 60 },
+      { trackIndex: 1, top: 101, bottom: 141, height: 40 },
+      { trackIndex: 2, top: 181, bottom: 221, height: 40 },
     ])).toBe(1);
 
     expect(resolveLayerTrackIndexFromPointer(176, [
-      { trackIndex: 0, top: 40, bottom: 100 },
-      { trackIndex: 1, top: 101, bottom: 141 },
-      { trackIndex: 2, top: 181, bottom: 221 },
+      { trackIndex: 0, top: 40, bottom: 100, height: 60 },
+      { trackIndex: 1, top: 101, bottom: 141, height: 40 },
+      { trackIndex: 2, top: 181, bottom: 221, height: 40 },
     ])).toBe(2);
   });
 

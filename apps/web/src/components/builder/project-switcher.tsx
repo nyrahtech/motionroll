@@ -130,6 +130,7 @@ export function ProjectSwitcher({
   const trigger = (
     <button
       type="button"
+      aria-label="Open project switcher"
       className="focus-ring inline-flex max-w-[320px] cursor-pointer items-center gap-2 rounded-[10px] border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-2.5 py-1.5 text-sm text-white transition hover:border-[rgba(205,239,255,0.18)] hover:bg-[rgba(205,239,255,0.06)]"
     >
       <span className="truncate">{currentProjectTitle}</span>
@@ -203,6 +204,7 @@ export function ProjectSwitcher({
               </p>
               <div className="flex gap-2">
                 <Input
+                  aria-label="Project title"
                   value={renameValue}
                   onChange={(event) => {
                     setRenameValue(event.target.value);
@@ -223,15 +225,21 @@ export function ProjectSwitcher({
                   <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
                     Project details
                   </p>
-                  <Input value={sectionTitle} onChange={(event) => onSectionTitleChange(event.target.value)} />
+                  <Input
+                    aria-label="Section title"
+                    value={sectionTitle}
+                    onChange={(event) => onSectionTitleChange(event.target.value)}
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Input
+                    aria-label="Frame range start"
                     type="number"
                     value={frameRangeStart}
                     onChange={(event) => onFrameRangeChange("start", Number(event.target.value))}
                   />
                   <Input
+                    aria-label="Frame range end"
                     type="number"
                     value={frameRangeEnd}
                     onChange={(event) => onFrameRangeChange("end", Number(event.target.value))}

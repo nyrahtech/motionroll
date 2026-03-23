@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
+import { requirePageAuth } from "@/lib/auth";
 import { StandaloneRuntime } from "@/components/runtime/standalone-runtime";
+import { getProjectById } from "@/lib/data/projects";
 import { buildProjectManifest } from "@/lib/manifest";
 
 export const dynamic = "force-dynamic";
@@ -19,10 +21,15 @@ export default async function ProjectPreviewPage({
   params: Promise<{ projectId: string }>;
   searchParams?: Promise<{ mode?: string; forceSequence?: string }>;
 }) {
+  const { userId } = await requirePageAuth();
   const { projectId } = await params;
   const resolvedSearchParams = searchParams ? await searchParams : {};
-  const requestedMode = resolvedSearchParams.mode;
-  const manifest = await buildProjectManifest(projectId).catch(() => null);
+  const project = await getProjectById(projectId, userId).catch(() => null);
+  if (!project) {
+    notFound();
+  }
+
+  const manifest = await buildProjectManifest(projectId, { userId }).catch(() => null);
   if (!manifest) {
     notFound();
   }
@@ -31,11 +38,10 @@ export default async function ProjectPreviewPage({
     <main className="bg-black">
       <StandaloneRuntime
         manifest={manifest}
-        mode={resolveRuntimeMode(requestedMode)}
+        mode={resolveRuntimeMode(resolvedSearchParams.mode)}
         reducedMotion={false}
         forceSequence={resolveForceSequence(resolvedSearchParams.forceSequence)}
       />
-      {/* Exit preview bar — fixed at bottom, only visible at rest */}
       <div
         className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center pb-6"
         style={{ background: "linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)", paddingTop: 48 }}
@@ -46,7 +52,7 @@ export default async function ProjectPreviewPage({
           style={{ background: "rgba(10,12,18,0.88)", borderColor: "rgba(255,255,255,0.16)" }}
           onClick={() => window.close()}
         >
-          ← Exit preview
+          &lt;- Exit preview
         </button>
       </div>
     </main>

@@ -1,13 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { SidebarPanel } from "./editor-sidebar";
 
-const componentDir = fileURLToPath(new URL(".", import.meta.url));
+const componentDir = path.resolve(process.cwd(), "src", "components", "builder");
 
 describe("editor shell", () => {
   it("renders the simplified sidebar content choices", () => {
@@ -32,27 +31,31 @@ describe("editor shell", () => {
   });
 
   it("keeps sidebar actions persistent and wording compact", () => {
-    const source = fs.readFileSync(
+    const sidebarSource = fs.readFileSync(
       path.resolve(componentDir, "editor-sidebar.tsx"),
       "utf8",
     );
+    const inspectorSource = fs.readFileSync(
+      path.resolve(componentDir, "editor-inspector.tsx"),
+      "utf8",
+    );
 
-    expect(source).toContain('activeContext === "upload"');
-    expect(source).toContain('activeContext === "ai"');
-    expect(source).toContain('label="Add Text"');
-    expect(source).toContain('label="Add Image"');
-    expect(source).toContain('label="Import Video"');
-    expect(source).toContain('label="AI Import"');
-    expect(source).not.toContain("Build the scene one clear layer at a time");
-    expect(source).not.toContain("Keep the inspector focused on the selected block and its motion.");
-    expect(source).not.toContain('title="Inspector"');
-    expect(source).not.toContain('title={usesMedia ? "Media" : "Text"}');
-    expect(source).not.toContain("SelectionHeader");
-    expect(source).toContain("SelectTrigger");
-    expect(source).toContain('label="Background"');
-    expect(source).toContain("ColorPicker");
-    expect(source).toContain('opacity={backgroundOpacity}');
-    expect(source).not.toContain("backgroundEnabled");
+    expect(sidebarSource).toContain('activeContext === "upload"');
+    expect(sidebarSource).toContain('activeContext === "ai"');
+    expect(sidebarSource).toContain('label="Add Text"');
+    expect(sidebarSource).toContain('label="Add Image"');
+    expect(sidebarSource).toContain('label="Import Video"');
+    expect(sidebarSource).toContain('label="AI Import"');
+    expect(sidebarSource).not.toContain("Build the scene one clear layer at a time");
+    expect(sidebarSource).not.toContain("Keep the inspector focused on the selected block and its motion.");
+    expect(sidebarSource).not.toContain('title="Inspector"');
+    expect(sidebarSource).not.toContain('title={usesMedia ? "Media" : "Text"}');
+    expect(sidebarSource).not.toContain("SelectionHeader");
+    expect(inspectorSource).toContain("SelectTrigger");
+    expect(inspectorSource).toContain('label="Background"');
+    expect(inspectorSource).toContain("ColorPicker");
+    expect(inspectorSource).toContain('opacity={backgroundOpacity}');
+    expect(inspectorSource).not.toContain("backgroundEnabled");
   });
 
   it("keeps viewport controls in the top bar source", () => {
@@ -70,19 +73,23 @@ describe("editor shell", () => {
   });
 
   it("keeps undo and redo in the editor transport source", () => {
-    const source = fs.readFileSync(
+    const panelSource = fs.readFileSync(
       path.resolve(componentDir, "timeline-panel.tsx"),
       "utf8",
     );
+    const rowSource = fs.readFileSync(
+      path.resolve(componentDir, "timeline", "TimelineTrackRow.tsx"),
+      "utf8",
+    );
 
-    expect(source).toContain("RotateCcw");
-    expect(source).toContain("RotateCw");
-    expect(source).toContain("Plus");
-    expect(source).toContain('title={label}');
-    expect(source).toContain('title="Open clip actions"');
-    expect(source).not.toContain("TooltipContent");
-    expect(source).toContain('aria-label={label}');
-    expect(source).toContain("justify-self-center");
+    expect(panelSource).toContain("RotateCcw");
+    expect(panelSource).toContain("RotateCw");
+    expect(panelSource).toContain("Plus");
+    expect(panelSource).toContain('title={label}');
+    expect(panelSource).not.toContain("TooltipContent");
+    expect(panelSource).toContain('aria-label={label}');
+    expect(panelSource).toContain("justify-self-center");
+    expect(rowSource).toContain('title="Open clip actions"');
   });
 
   it("disables preview-stage sub-controls at the source level", () => {
@@ -97,7 +104,7 @@ describe("editor shell", () => {
 
   it("keeps a background sync path in the editor source", () => {
     const source = fs.readFileSync(
-      path.resolve(componentDir, "project-builder.tsx"),
+      path.resolve(componentDir, "hooks", "useEditorPersistence.ts"),
       "utf8",
     );
 

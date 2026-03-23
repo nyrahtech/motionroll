@@ -13,16 +13,16 @@ import {
   Ungroup,
   Underline,
 } from "lucide-react";
-import { ColorPicker } from "@/components/ui/color-picker";
-import { Input } from "@/components/ui/input";
+import { ColorPicker } from "../ui/color-picker";
+import { Input } from "../ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+} from "../ui/select";
+import { cn } from "../../lib/utils";
 
 type Props = {
   position: { top: number; left: number };

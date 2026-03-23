@@ -1,12 +1,8 @@
-import { Inngest } from "inngest";
-import { env } from "@/lib/env";
+import { inngest } from "@/lib/inngest-client";
 import { processSourceAsset } from "@/lib/processing/pipeline";
+import { providerGenerationPoll } from "@/lib/provider-generation-poll";
 
-export const inngest = new Inngest({
-  id: "motionroll",
-  name: "MotionRoll",
-  eventKey: env.INNGEST_EVENT_KEY,
-});
+export { inngest };
 
 export const processAssetRequested = inngest.createFunction(
   { id: "process-asset-requested" },
@@ -16,4 +12,4 @@ export const processAssetRequested = inngest.createFunction(
   },
 );
 
-export const inngestFunctions = [processAssetRequested];
+export const inngestFunctions = [processAssetRequested, providerGenerationPoll];

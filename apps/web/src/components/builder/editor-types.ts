@@ -6,26 +6,25 @@ import type {
   ProjectManifest,
 } from "@motionroll/shared";
 import type {
-  TimelineClipModel,
-  TimelineDraftState,
-  TimelineSelection,
   TimelineTrackModel,
 } from "./timeline-model";
 
+export type EditorPaneTab = "assets" | "overlays" | "imports";
+export type InspectorTab = "content" | "playback" | "preset";
+
 export type EditorFormValues = {
   title: string;
-  presetId: PresetId;
   sectionTitle: string;
+  text: string;
+  ctaLabel: string;
+  ctaHref: string;
+  overlayStart: number;
+  overlayEnd: number;
   sectionHeightVh: number;
   scrubStrength: number;
   frameRangeStart: number;
   frameRangeEnd: number;
-  selectedOverlayId?: string;
-  overlayStart?: number;
-  overlayEnd?: number;
-  text: string;
-  ctaLabel: string;
-  ctaHref: string;
+  presetId: PresetId;
 };
 
 export type EditorProject = {
@@ -94,16 +93,6 @@ export type EditorProject = {
     version: number;
     publishedAt: Date | null;
   }>;
-};
-
-export type EditorPaneTab = "assets" | "overlays" | "imports";
-export type InspectorTab = "content" | "playback" | "preset";
-
-export type EditorTimelineState = {
-  tracks: TimelineTrackModel[];
-  selection: TimelineSelection;
-  draft: TimelineDraftState;
-  activeClip?: TimelineClipModel;
 };
 
 export type EditorContainerProps = {
