@@ -13,6 +13,7 @@ function makeDraft(title = "Draft"): EditorDraft {
     title,
     presetId: "product-reveal" as const,
     sectionTitle: "Scene 01",
+    sceneTransitionPreset: "none",
     sectionHeightVh: 240,
     scrubStrength: 1,
     frameRangeStart: 0,

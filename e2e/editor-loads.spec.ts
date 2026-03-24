@@ -14,7 +14,7 @@ test.describe("Editor loads", () => {
   });
 
   test("library page shows New Project button", async ({ page }) => {
-    await expect(page.getByRole("button", { name: /new project/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^new project$/i }).first()).toBeVisible();
   });
 
   test("library page shows Projects heading", async ({ page }) => {
@@ -26,7 +26,7 @@ test.describe("Editor loads", () => {
   });
 
   test("sort dropdown is present", async ({ page }) => {
-    await expect(page.getByRole("combobox", { name: /last opened/i })).toBeVisible();
+    await expect(page.getByText(/^last opened$/i).first()).toBeVisible();
   });
 });
 

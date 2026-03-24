@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import React, { useEffect } from "react";
 import type { ProjectManifest } from "@motionroll/shared";
 import { RuntimePreview } from "./runtime-preview";
+import type { EditorPlaybackController } from "./hooks/useEditorPlayback";
 
 export function PreviewStage({
-  manifest, mode, playheadProgress,
+  manifest, mode, playback,
   isPlaying, selectedOverlayId, selectedOverlayIds, canGroupSelection, canUngroupSelection, onModeChange,
   onPlayheadChange, onPlayToggle, onSelectOverlay,
   onOverlayLayoutChange, onInlineTextChange, onOverlayStyleChange, onDuplicateOverlay, onDeleteOverlay,
@@ -13,7 +14,7 @@ export function PreviewStage({
 }: {
   manifest: ProjectManifest;
   mode: "desktop" | "mobile";
-  playheadProgress: number;
+  playback: EditorPlaybackController;
   isPlaying: boolean;
   selectedOverlayId?: string;
   selectedOverlayIds?: string[];
@@ -92,7 +93,7 @@ export function PreviewStage({
             manifest={manifest}
             mode={mode}
             isPlaying={isPlaying}
-            playheadProgress={playheadProgress}
+            playback={playback}
             onPlayheadChange={onPlayheadChange}
             onModeChange={onModeChange}
             onPlayToggle={onPlayToggle}

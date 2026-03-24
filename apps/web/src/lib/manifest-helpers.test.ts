@@ -27,6 +27,29 @@ describe("normalizeFrameAssets", () => {
 
     expect(frames.map((frame) => frame.index)).toEqual([1, 2]);
   });
+
+  it("rewrites storage-backed frame variants through the app storage route", () => {
+    const frames = normalizeFrameAssets([
+      {
+        kind: "frame",
+        storageKey: "derived/frame-01",
+        publicUrl: "http://127.0.0.1:9000/motionroll-assets/derived/frame-01",
+        metadata: { frameIndex: 1 },
+        variants: [
+          {
+            kind: "desktop",
+            storageKey: "project/derived/frames/00001/desktop.jpg",
+            publicUrl: "http://127.0.0.1:9000/motionroll-assets/project/derived/frames/00001/desktop.jpg",
+            metadata: {},
+          },
+        ],
+      },
+    ]);
+
+    expect(frames[0]?.variants[0]?.url).toBe(
+      "http://localhost:3000/api/storage/project/derived/frames/00001/desktop.jpg",
+    );
+  });
 });
 
 describe("normalizeFrameRange", () => {
@@ -104,6 +127,8 @@ describe("buildSectionManifest", () => {
             align: "start",
             theme: "accent",
             treatment: "default",
+            enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
+            exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
           },
         },
       ],
@@ -171,6 +196,8 @@ describe("buildSectionManifest", () => {
             theme: "light",
             treatment: "default",
             layer: 3,
+            enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
+            exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
           },
         },
         {
@@ -182,6 +209,8 @@ describe("buildSectionManifest", () => {
             theme: "dark",
             treatment: "default",
             layer: 0,
+            enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
+            exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
           },
         },
       ],

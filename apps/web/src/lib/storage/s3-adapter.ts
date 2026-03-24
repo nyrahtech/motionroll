@@ -7,10 +7,13 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { Readable } from "node:stream";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage";
 import { writeFile } from "node:fs/promises";
-import { env } from "@/lib/env";
+import { env } from "../env";
+import { getStoragePublicUrl } from "./public-urls";
+export { getStoragePublicUrl } from "./public-urls";
 
 const client = new S3Client({
   region: env.STORAGE_REGION,
@@ -21,10 +24,6 @@ const client = new S3Client({
     secretAccessKey: env.STORAGE_SECRET_ACCESS_KEY,
   },
 });
-
-export function getStoragePublicUrl(key: string) {
-  return `${env.STORAGE_PUBLIC_BASE_URL.replace(/\/$/, "")}/${key}`;
-}
 
 export async function ensureStorageBucket() {
   try {
@@ -110,12 +109,7 @@ export async function copyStorageObject(sourceKey: string, destinationKey: strin
 }
 
 export async function downloadStorageObject(key: string, outputPath: string) {
-  const response = await client.send(
-    new GetObjectCommand({
-      Bucket: env.STORAGE_BUCKET,
-      Key: key,
-    }),
-  );
+  const response = await getStorageObject(key);
 
   const bytes = await response.Body?.transformToByteArray();
   if (!bytes) {
@@ -124,4 +118,26 @@ export async function downloadStorageObject(key: string, outputPath: string) {
 
   await writeFile(outputPath, Buffer.from(bytes));
   return outputPath;
+}
+
+export async function getStorageObject(key: string) {
+  return client.send(
+    new GetObjectCommand({
+      Bucket: env.STORAGE_BUCKET,
+      Key: key,
+    }),
+  );
+}
+
+export function toWebReadableStream(body: Readable | { transformToWebStream?: () => ReadableStream }) {
+  if (typeof body === "object" && body !== null && "transformToWebStream" in body && typeof body.transformToWebStream === "function") {
+    return body.transformToWebStream();
+  }
+
+  const readable = body as Readable;
+  if (typeof Readable.toWeb === "function") {
+    return Readable.toWeb(readable) as ReadableStream;
+  }
+
+  throw new Error("Unable to convert storage object body into a web stream.");
 }

@@ -1,8 +1,9 @@
 import {
   clampProgress,
+  frameIndexToSequenceProgress,
   normalizeTimingRange,
   type OverlayDefinition,
-  type OverlayTransition,
+  type OverlayTiming,
 } from "@motionroll/shared";
 import type { HydratedOverlayDefinition } from "./editor-draft-types";
 
@@ -92,6 +93,7 @@ function normalizeTextHtml(input: unknown): string | undefined {
 export function hydrateOverlay(overlay: OverlayDefinition): HydratedOverlayDefinition {
   return {
     ...overlay,
+    timingSource: overlay.timingSource ?? "manual",
     content: {
       type: overlay.content.type ?? "text",
       text: overlay.content.text,
@@ -135,39 +137,138 @@ export function hydrateOverlay(overlay: OverlayDefinition): HydratedOverlayDefin
         borderColor: overlay.content.background?.borderColor ?? "#d6f6ff",
         borderOpacity: overlay.content.background?.borderOpacity ?? 0,
       },
-      animation: {
-        preset: overlay.content.animation?.preset ?? "fade",
-        easing: overlay.content.animation?.easing ?? "ease-out",
-        duration: overlay.content.animation?.duration ?? 0.45,
-        delay: overlay.content.animation?.delay ?? 0,
+      enterAnimation: {
+        type: overlay.content.enterAnimation?.type ?? "fade",
+        easing: overlay.content.enterAnimation?.easing ?? "ease-out",
+        duration: overlay.content.enterAnimation?.duration ?? 0.45,
+        delay: overlay.content.enterAnimation?.delay ?? 0,
       },
-      transition: {
-        preset: overlay.content.transition?.preset ?? "crossfade",
-        easing: overlay.content.transition?.easing ?? "ease-in-out",
-        duration: overlay.content.transition?.duration ?? 0.4,
+      exitAnimation: {
+        type: overlay.content.exitAnimation?.type ?? "none",
+        easing: overlay.content.exitAnimation?.easing ?? "ease-in-out",
+        duration: overlay.content.exitAnimation?.duration ?? 0.35,
       },
       parentGroupId: overlay.content.parentGroupId,
     },
   };
 }
 
+export function getSceneRangeTiming(
+  frameRangeStart: number,
+  frameRangeEnd: number,
+  frameCount: number,
+): OverlayTiming {
+  const safeFrameCount = Math.max(frameCount, frameRangeEnd + 1, 1);
+  return normalizeTimingRange(
+    {
+      start: frameIndexToSequenceProgress(frameRangeStart, safeFrameCount),
+      end: frameIndexToSequenceProgress(frameRangeEnd, safeFrameCount),
+    },
+    0.04,
+  );
+}
+
+function clampTimingToBounds(
+  timing: OverlayTiming,
+  bounds: OverlayTiming,
+  minimumWidth = 0.04,
+) {
+  const boundedStart = Math.min(Math.max(timing.start, bounds.start), bounds.end);
+  const boundedEnd = Math.min(Math.max(timing.end, bounds.start), bounds.end);
+  const boundedWidth = Math.max(bounds.end - bounds.start, 0);
+  const requiredWidth = Math.min(minimumWidth, boundedWidth);
+  if (boundedWidth <= Number.EPSILON) {
+    return { start: bounds.start, end: bounds.end };
+  }
+  if (boundedEnd - boundedStart >= requiredWidth) {
+    return {
+      start: boundedStart,
+      end: boundedEnd,
+    };
+  }
+  const nextEnd = Math.min(bounds.end, boundedStart + requiredWidth);
+  const nextStart = Math.max(bounds.start, nextEnd - requiredWidth);
+  return {
+    start: nextStart,
+    end: nextEnd,
+  };
+}
+
+export function getSceneBoundOverlayTiming(
+  playhead: number,
+  sceneTiming: OverlayTiming,
+) {
+  const sceneWidth = Math.max(sceneTiming.end - sceneTiming.start, 0.04);
+  const span = Math.min(sceneWidth, Math.max(sceneWidth * 0.24, 0.14));
+  const center = Math.min(Math.max(playhead, sceneTiming.start), sceneTiming.end);
+  return clampTimingToBounds(
+    {
+      start: center - span * 0.35,
+      end: center + span * 0.65,
+    },
+    sceneTiming,
+    Math.min(0.08, sceneWidth),
+  );
+}
+
+export function scaleSceneRangeOverlays<T extends OverlayDefinition>(
+  overlays: T[],
+  previousFrameRangeStart: number,
+  previousFrameRangeEnd: number,
+  nextFrameRangeStart: number,
+  nextFrameRangeEnd: number,
+  frameCount: number,
+) {
+  const previousSceneTiming = getSceneRangeTiming(
+    previousFrameRangeStart,
+    previousFrameRangeEnd,
+    frameCount,
+  );
+  const nextSceneTiming = getSceneRangeTiming(
+    nextFrameRangeStart,
+    nextFrameRangeEnd,
+    frameCount,
+  );
+  const previousSceneWidth = Math.max(
+    previousSceneTiming.end - previousSceneTiming.start,
+    0.0001,
+  );
+  const nextSceneWidth = Math.max(nextSceneTiming.end - nextSceneTiming.start, 0);
+  return overlays.map((overlay) => ({
+    ...overlay,
+    timingSource: "manual" as const,
+    timing: clampTimingToBounds(
+      normalizeTimingRange(
+        {
+          start:
+            nextSceneTiming.start +
+            ((overlay.timing.start - previousSceneTiming.start) / previousSceneWidth) *
+              nextSceneWidth,
+          end:
+            nextSceneTiming.start +
+            ((overlay.timing.end - previousSceneTiming.start) / previousSceneWidth) *
+              nextSceneWidth,
+        },
+        Math.min(0.04, nextSceneWidth),
+      ),
+      nextSceneTiming,
+      Math.min(0.04, nextSceneWidth),
+    ),
+  }));
+}
+
 export function createDefaultOverlay(
   id: string,
   type: "text" | "image" | "logo" | "icon" | "moment" | "group",
-  playhead: number,
-  mediaUrl?: string,
+  options: {
+    timing: OverlayTiming;
+    mediaUrl?: string;
+  },
 ): HydratedOverlayDefinition {
-  const timing = normalizeTimingRange(
-    {
-      start: clampProgress(playhead - 0.06),
-      end: clampProgress(playhead + 0.12),
-    },
-    0.08,
-  );
-
   return {
     id,
-    timing,
+    timing: normalizeTimingRange(options.timing, 0.04),
+    timingSource: "manual",
     content: {
       type: type === "moment" ? "text" : type,
       text:
@@ -178,7 +279,7 @@ export function createDefaultOverlay(
           : type === "moment"
           ? "Moment highlight"
           : "New text block",
-      mediaUrl,
+      mediaUrl: options.mediaUrl,
       align: "start",
       theme: "dark",
       treatment: "default",
@@ -225,16 +326,16 @@ export function createDefaultOverlay(
         borderColor: "#d6f6ff",
         borderOpacity: 0,
       },
-      animation: {
-        preset: "fade",
+      enterAnimation: {
+        type: "fade",
         easing: "ease-out",
         duration: 0.45,
         delay: 0,
       },
-      transition: {
-        preset: "crossfade",
+      exitAnimation: {
+        type: "none",
         easing: "ease-in-out",
-        duration: 0.4,
+        duration: 0.35,
       },
       parentGroupId: undefined,
     },
@@ -445,6 +546,7 @@ export function sanitizeOverlayForSave(overlay: HydratedOverlayDefinition): Over
   const mediaUrl = overlay.content.mediaUrl?.trim();
   return {
     ...overlay,
+    timingSource: "manual",
     content: {
       ...overlay.content,
       mediaUrl: mediaUrl ? mediaUrl : undefined,

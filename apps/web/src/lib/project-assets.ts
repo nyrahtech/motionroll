@@ -1,6 +1,9 @@
+import { resolveStorageReadUrl } from "./storage/public-urls";
+
 type VariantLike = {
   kind: string;
   publicUrl: string;
+  storageKey?: string;
   metadata?: unknown;
 };
 
@@ -14,15 +17,28 @@ type AssetLike = {
   storageKey?: string;
   publicUrl: string;
   metadata?: unknown;
-  createdAt?: Date;
-  updatedAt?: Date;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
   variants?: VariantLike[];
 };
 
 const derivedAssetKinds = new Set(["frame_sequence", "frame", "poster", "fallback_video", "thumbnail"]);
 
+function toTimeValue(value?: Date | string) {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
+}
+
 function assetTimeValue(asset: AssetLike) {
-  return asset.updatedAt?.getTime() ?? asset.createdAt?.getTime() ?? 0;
+  return toTimeValue(asset.updatedAt) || toTimeValue(asset.createdAt) || 0;
 }
 
 export function sortProjectAssets<T extends AssetLike>(assets: T[]) {
@@ -68,21 +84,21 @@ export function getRenderableAssetPreview(
   assets: AssetLike[],
 ) {
   if (asset.publicUrl && ["poster", "frame", "thumbnail"].includes(asset.kind)) {
-    return asset.publicUrl;
+    return resolveStorageReadUrl(asset.publicUrl, asset.storageKey);
   }
 
   const poster = assets.find((candidate) => candidate.kind === "poster");
   if (poster?.publicUrl) {
-    return poster.publicUrl;
+    return resolveStorageReadUrl(poster.publicUrl, poster.storageKey);
   }
 
   const firstFrame = sortProjectAssets(assets).find((candidate) => candidate.kind === "frame");
   if (firstFrame?.publicUrl) {
-    return firstFrame.publicUrl;
+    return resolveStorageReadUrl(firstFrame.publicUrl, firstFrame.storageKey);
   }
 
   if (asset.kind === "fallback_video" && asset.publicUrl) {
-    return asset.publicUrl;
+    return resolveStorageReadUrl(asset.publicUrl, asset.storageKey);
   }
 
   return "";

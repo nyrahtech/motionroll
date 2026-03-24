@@ -14,6 +14,8 @@ export type ClipDragState =
       startScrollLeft: number;
       initialStart: number;
       initialEnd: number;
+      pointerOffsetX: number;
+      pointerOffsetY: number;
       layerTrackIndex?: number;
     }
   | null;
@@ -46,7 +48,6 @@ export type ClipGhostState =
       left: number;
       width: number;
       contentType?: string;
-      transitionLabel?: string | null;
     }
   | null;
 

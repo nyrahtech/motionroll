@@ -6,15 +6,21 @@
  * tiny leaf avoids diff cost on larger ancestors.
  */
 import React from "react";
+import type { EditorPlaybackController } from "../hooks/useEditorPlayback";
+import { usePlaybackProgress } from "../hooks/useEditorPlayback";
+import { TIMELINE_START_OFFSET } from "../timeline-layout";
 
 type TimelinePlayheadProps = {
-  playheadX: number;
+  playback: EditorPlaybackController;
+  totalW: number;
 };
 
-export function TimelinePlayhead({ playheadX }: TimelinePlayheadProps) {
+export function TimelinePlayhead({ playback, totalW }: TimelinePlayheadProps) {
+  const playheadX = TIMELINE_START_OFFSET + usePlaybackProgress(playback) * totalW;
+
   return (
     <div
-      className="pointer-events-none absolute top-0 bottom-0 z-[12] w-5 -translate-x-1/2"
+      className="pointer-events-none absolute top-0 bottom-0 z-[48] w-5 -translate-x-1/2"
       style={{ left: playheadX }}
     >
       {/* Vertical line */}
@@ -31,7 +37,8 @@ export function TimelinePlayhead({ playheadX }: TimelinePlayheadProps) {
         style={{
           borderLeft: "6px solid transparent",
           borderRight: "6px solid transparent",
-          borderTop: "8px solid var(--editor-playhead)",
+          borderTop: "10px solid var(--editor-playhead)",
+          filter: "drop-shadow(0 0 8px rgba(103,232,249,0.45))",
         }}
       />
     </div>

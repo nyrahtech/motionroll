@@ -11,6 +11,7 @@
 
 import { useCallback } from "react";
 import { clampProgress } from "@motionroll/shared";
+import { TIMELINE_START_OFFSET } from "../timeline-layout";
 import {
   getClipInsertionIndex,
   getLayerDragGhostPosition,
@@ -81,6 +82,14 @@ export function useTimelineDrag({
   layerTracks, totalW, durationSeconds, snapPoints,
   onSelectionChange, onReorderTracks, onClipTimingChange, onCommitClipMove, onPlayheadChange,
 }: UseTimelineDragProps) {
+
+  function disableDocumentSelection() {
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+    return () => {
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }
 
   function suppressPostDragClick() {
     suppressClickUntilRef.current = performance.now() + 220;
@@ -182,18 +191,23 @@ export function useTimelineDrag({
     if (!trackArea) return;
     const rect = trackArea.getBoundingClientRect();
     const scrollLeft = scrollRef.current?.scrollLeft ?? 0;
-    const rawProgress = (clientX - rect.left + scrollLeft) / Math.max(totalW, 1);
+    const rawProgress =
+      (clientX - rect.left + scrollLeft - TIMELINE_START_OFFSET) / Math.max(totalW, 1);
     onPlayheadChange(clampProgress(rawProgress));
   }
 
   function handlePlayheadPointerDown(e: React.PointerEvent) {
+    e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     updatePlayheadFromPointer(e.clientX);
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
 
     function onMove(ev: PointerEvent) {
       updatePlayheadFromPointer(ev.clientX);
     }
     function onUp() {
+      document.body.style.userSelect = previousUserSelect;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     }
@@ -238,6 +252,9 @@ export function useTimelineDrag({
 
       const geometry = getLayerRowGeometry();
       const targetTrack = typeof targetLayerIndex === "number" ? layerTracks[targetLayerIndex] : undefined;
+      const sourceTrack = typeof state.layerTrackIndex === "number"
+        ? layerTracks[state.layerTrackIndex]
+        : undefined;
       const existingClips = targetTrack?.clips.filter((c) => c.id !== state.clipId) ?? [];
       const targetIndex = getClipInsertionIndex(start, existingClips, state.clipId);
       const isCrossLayer = targetLayerIndex !== state.layerTrackIndex;
@@ -245,9 +262,9 @@ export function useTimelineDrag({
       syncClipMovePreview({
         draggedClipId: state.clipId,
         sourceTrackIndex: state.layerTrackIndex ?? 0,
-        sourceLayerId: state.layerTrackIndex ?? null,
+        sourceLayerId: sourceTrack?.metadata?.layerIndex ?? null,
         targetTrackIndex: targetLayerIndex ?? state.layerTrackIndex ?? 0,
-        targetLayerId: targetLayerIndex ?? null,
+        targetLayerId: targetTrack?.metadata?.layerIndex ?? null,
         targetStart: start,
         targetEnd: end,
         targetIndex,
@@ -255,24 +272,24 @@ export function useTimelineDrag({
         isSnapped: snapped,
       });
 
-      const trackAreaRect = trackAreaRef.current?.getBoundingClientRect();
+      const scrollRect = scroll?.getBoundingClientRect();
       const ghostPos =
-        trackAreaRect && scroll
+        scroll && scrollRect
           ? getLayerDragGhostPosition({
               clientX,
               clientY,
               containerRect: {
-                left: trackAreaRect.left,
-                top: trackAreaRect.top,
-                width: trackAreaRect.width,
-                height: trackAreaRect.height,
+                left: scrollRect.left,
+                top: scrollRect.top,
+                width: scrollRect.width,
+                height: scrollRect.height,
               },
               scrollLeft: scroll.scrollLeft,
               scrollTop: scroll.scrollTop,
-              pointerOffsetX: 0,
-              pointerOffsetY: geometry[0]?.height ? geometry[0].height / 2 : 20,
+              pointerOffsetX: state.pointerOffsetX,
+              pointerOffsetY: state.pointerOffsetY,
               ghostWidth: Math.max(18, duration * totalW),
-              ghostHeight: geometry[0]?.height ?? 56,
+              ghostHeight: 40,
             })
           : null;
       if (ghostPos) {
@@ -283,7 +300,6 @@ export function useTimelineDrag({
           left: ghostPos.left,
           width: Math.max(18, duration * totalW),
           contentType: clip?.metadata?.contentType,
-          transitionLabel: clip?.metadata?.transitionPreset?.replace(/-/g, " ") ?? null,
         });
       }
       syncDropTrackIndex(targetLayerIndex ?? null);
@@ -312,12 +328,28 @@ export function useTimelineDrag({
     const scrollRect = scroll.getBoundingClientRect();
     const geometry = getLayerRowGeometry();
     const rowHeight = geometry[0]?.height ?? 56;
+    const ghostPos = getLayerDragGhostPosition({
+      clientX,
+      clientY,
+      containerRect: {
+        left: scrollRect.left,
+        top: scrollRect.top,
+        width: scrollRect.width,
+        height: scrollRect.height,
+      },
+      scrollLeft: scroll.scrollLeft,
+      scrollTop: scroll.scrollTop,
+      pointerOffsetX: state.pointerOffsetX,
+      pointerOffsetY: state.pointerOffsetY,
+      ghostWidth: scroll.clientWidth,
+      ghostHeight: rowHeight,
+    });
     setDragGhost({
       kind: "layer",
       label: layerTracks[state.fromIndex]?.label ?? `Layer ${state.fromIndex + 1}`,
-      top: clientY - scrollRect.top - state.pointerOffsetY,
-      left: scrollRect.left,
-      width: scrollRect.width,
+      top: ghostPos.top,
+      left: ghostPos.left,
+      width: scroll.clientWidth,
       height: rowHeight,
     });
   }
@@ -338,12 +370,13 @@ export function useTimelineDrag({
   function activateClipMoveDrag(clipId: string, trackType: TimelineTrackType, layerTrackIndex?: number) {
     const clip = layerTracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
     if (!clip) return;
+    const sourceTrack = typeof layerTrackIndex === "number" ? layerTracks[layerTrackIndex] : undefined;
     syncClipMovePreview({
       draggedClipId: clipId,
       sourceTrackIndex: layerTrackIndex ?? 0,
-      sourceLayerId: layerTrackIndex ?? null,
+      sourceLayerId: sourceTrack?.metadata?.layerIndex ?? null,
       targetTrackIndex: layerTrackIndex ?? 0,
-      targetLayerId: layerTrackIndex ?? null,
+      targetLayerId: sourceTrack?.metadata?.layerIndex ?? null,
       targetStart: clip.start,
       targetEnd: clip.end,
       targetIndex: getClipInsertionIndex(clip.start, layerTracks[layerTrackIndex ?? 0]?.clips ?? [], clipId),
@@ -374,6 +407,8 @@ export function useTimelineDrag({
       startScrollLeft: scrollRef.current?.scrollLeft ?? 0,
       initialStart: clip.start,
       initialEnd: clip.end,
+      pointerOffsetX: e.clientX - e.currentTarget.getBoundingClientRect().left,
+      pointerOffsetY: e.clientY - e.currentTarget.getBoundingClientRect().top,
       layerTrackIndex,
     };
     moveDragActivatedRef.current = false;
@@ -381,6 +416,7 @@ export function useTimelineDrag({
       setDraggingClipId(null);
       setDraggingClipMode(null);
     }
+    const restoreSelection = disableDocumentSelection();
 
     function handleMove(ev: MouseEvent) {
       pointerClientRef.current = { x: ev.clientX, y: ev.clientY };
@@ -416,6 +452,7 @@ export function useTimelineDrag({
       clipDragStateRef.current = null;
       moveDragActivatedRef.current = false;
       resetDragVisualState();
+      restoreSelection();
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     }
@@ -426,16 +463,20 @@ export function useTimelineDrag({
 
   const beginTrackReorder = useCallback((e: React.MouseEvent, fromIndex: number) => {
     e.preventDefault();
+    e.stopPropagation();
+    const scroll = scrollRef.current;
     const geometry = getLayerRowGeometry();
     const rowGeom = geometry[fromIndex];
+    const scrollRect = scroll?.getBoundingClientRect();
     const pointerOffsetY = rowGeom ? e.clientY - rowGeom.top : 0;
     trackReorderStateRef.current = {
       fromIndex,
-      pointerOffsetX: 0,
+      pointerOffsetX: scrollRect ? e.clientX - scrollRect.left : 0,
       pointerOffsetY,
       startX: e.clientX,
       startY: e.clientY,
     };
+    const restoreSelection = disableDocumentSelection();
 
     function handleMove(ev: MouseEvent) {
       pointerClientRef.current = { x: ev.clientX, y: ev.clientY };
@@ -460,6 +501,7 @@ export function useTimelineDrag({
       if (didDrag) suppressPostDragClick();
       trackReorderStateRef.current = null;
       resetDragVisualState();
+      restoreSelection();
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     }

@@ -98,12 +98,30 @@ describe("timeline-model", () => {
               {
                 id: "top",
                 timing: { start: 0.2, end: 0.5 },
-                content: { text: "Top\n\nLayer", align: "start", theme: "dark", treatment: "default", layer: 1 },
+                timingSource: "sceneRange",
+                content: {
+                  text: "Top\n\nLayer",
+                  align: "start",
+                  theme: "dark",
+                  treatment: "default",
+                  layer: 1,
+                  enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
+                  exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
+                },
               },
               {
                 id: "bottom",
                 timing: { start: 0.1, end: 0.4 },
-                content: { text: "Bottom\n\nLayer", align: "start", theme: "light", treatment: "default", layer: 0 },
+                timingSource: "sceneRange",
+                content: {
+                  text: "Bottom\n\nLayer",
+                  align: "start",
+                  theme: "light",
+                  treatment: "default",
+                  layer: 0,
+                  enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
+                  exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
+                },
               },
             ],
             moments: [],
@@ -227,6 +245,7 @@ describe("timeline-model", () => {
     expect(frameStrip[0]).toBe("/frames/10.jpg");
     expect(frameStrip[Math.floor(frameStrip.length / 2)]).toBe("/frames/15.jpg");
     expect(frameStrip.at(-1)).toBe("/frames/19.jpg");
+    expect(tracks[0]?.clips[0]?.metadata?.frameStripSource?.fallbackUrl).toBe("/poster.png");
   });
 
   it("can resample scene thumbnails from a live resized range", () => {

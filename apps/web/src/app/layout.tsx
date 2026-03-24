@@ -23,18 +23,27 @@ import "@uppy/core/css/style.min.css";
 import "@uppy/drag-drop/css/style.min.css";
 import "@uppy/dashboard/css/style.min.css";
 import "./globals.css";
-import { isClerkAuthConfigured } from "@/lib/auth";
-import { clerkDarkAppearance } from "@/components/auth/clerk-appearance";
+import { isClerkAuthConfigured, isTestAuthBypassEnabled } from "@/lib/auth";
+import { clerkBaseAppearance } from "@/components/auth/clerk-appearance";
+import { AuthRuntimeProvider } from "@/components/auth/auth-runtime-provider";
+import { assertClerkConfigurationIsValid } from "@/lib/clerk-config";
 
 export const metadata: Metadata = {
   title: "MotionRoll",
   description: "Editor-first scroll storytelling tool",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const authConfigured = isClerkAuthConfigured();
+  const testAuthBypassEnabled = isTestAuthBypassEnabled();
+  const shouldMountClerk = authConfigured && !testAuthBypassEnabled;
+
+  if (shouldMountClerk) {
+    await assertClerkConfigurationIsValid();
+  }
+
   const content = (
     <html lang="en">
       <body
@@ -48,7 +57,9 @@ export default function RootLayout({
           minHeight: "100vh",
         }}
       >
-        {children}
+        <AuthRuntimeProvider clerkMounted={shouldMountClerk}>
+          {children}
+        </AuthRuntimeProvider>
         <Toaster
           theme="dark"
           toastOptions={{
@@ -65,13 +76,13 @@ export default function RootLayout({
     </html>
   );
 
-  if (authConfigured) {
+  if (shouldMountClerk) {
     return (
       <ClerkProvider
         signInUrl="/sign-in"
         signUpUrl="/sign-up"
         afterSignOutUrl="/sign-in"
-        appearance={clerkDarkAppearance}
+        appearance={clerkBaseAppearance}
       >
         {content}
       </ClerkProvider>

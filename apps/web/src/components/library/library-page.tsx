@@ -67,7 +67,17 @@ async function readJsonError(response: Response, fallback: string) {
   return data.error ?? fallback;
 }
 
-function ProjectCard({ project, href, archived = false }: { project: ProjectListItem; href: Route; archived?: boolean }) {
+function ProjectCard({
+  project,
+  href,
+  archived = false,
+  prioritizeImage = false,
+}: {
+  project: ProjectListItem;
+  href: Route;
+  archived?: boolean;
+  prioritizeImage?: boolean;
+}) {
   const router = useRouter();
   const status = getProjectStatus(project);
   const cover = getProjectCover(project);
@@ -135,7 +145,17 @@ function ProjectCard({ project, href, archived = false }: { project: ProjectList
         className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--editor-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--editor-panel)]"
       >
         <div className="relative aspect-video overflow-hidden" style={{ background: "var(--editor-shell)", position: "relative" }}>
-          {cover ? <Image src={cover} alt={optimisticTitle} fill className="object-cover" unoptimized /> : <div className="flex h-[96px] items-center justify-center"><span className="text-xs" style={{ color: "var(--editor-text-dim)" }}>No preview</span></div>}
+          {cover ? (
+            <Image
+              src={cover}
+              alt={optimisticTitle}
+              fill
+              className="object-cover"
+              unoptimized
+              priority={prioritizeImage}
+              loading={prioritizeImage ? "eager" : "lazy"}
+            />
+          ) : <div className="flex h-[96px] items-center justify-center"><span className="text-xs" style={{ color: "var(--editor-text-dim)" }}>No preview</span></div>}
           <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
             <span className="rounded px-4 py-1.5 text-sm font-medium" style={{ background: "var(--editor-accent)", color: "#0a0a0b" }}>{archived ? "View" : "Open"}</span>
           </div>
@@ -448,7 +468,14 @@ export function LibraryPage({
             <>
               <p className="mb-4 text-sm" style={{ color: "var(--editor-text-dim)" }}>{filteredAll.length} result{filteredAll.length !== 1 ? "s" : ""}{debouncedSearch ? ` for "${debouncedSearch}"` : ""}</p>
               <div ref={gridRef} className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {filteredAll.slice(0, visibleCount).map((p) => <ProjectCard key={p.id} project={p} href={`/projects/${p.id}` as Route} />)}
+                {filteredAll.slice(0, visibleCount).map((p, index) => (
+                  <ProjectCard
+                    key={p.id}
+                    project={p}
+                    href={`/projects/${p.id}` as Route}
+                    prioritizeImage={index < 2}
+                  />
+                ))}
               </div>
               {filteredAll.length > visibleCount && (
                 <div className="mt-6 text-center">
@@ -464,7 +491,16 @@ export function LibraryPage({
             <>
               {demoProjects.length > 0 && (
                 <CollapsibleSection title="Demo Projects" subtitle="Open something visual immediately" defaultOpen={true} action={<Link href="/templates" className="text-sm hover:underline" style={{ color: "var(--editor-accent)" }}>Browse templates -&gt;</Link>}>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">{sortedDemo.map((p) => <ProjectCard key={p.id} project={p} href={`/projects/${p.id}` as Route} />)}</div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {sortedDemo.map((p, index) => (
+                      <ProjectCard
+                        key={p.id}
+                        project={p}
+                        href={`/projects/${p.id}` as Route}
+                        prioritizeImage={index < 2}
+                      />
+                    ))}
+                  </div>
                 </CollapsibleSection>
               )}
               <CollapsibleSection title="Recent Projects" subtitle="Continue editing" defaultOpen={true}>
@@ -473,7 +509,14 @@ export function LibraryPage({
                 ) : (
                   <>
                     <div ref={gridRef} className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {sortedRecent.slice(0, visibleCount).map((p) => <ProjectCard key={p.id} project={p} href={`/projects/${p.id}` as Route} />)}
+                      {sortedRecent.slice(0, visibleCount).map((p, index) => (
+                        <ProjectCard
+                          key={p.id}
+                          project={p}
+                          href={`/projects/${p.id}` as Route}
+                          prioritizeImage={index === 0 && sortedDemo.length === 0}
+                        />
+                      ))}
                       <NewProjectCard onCreate={() => void handleCreateProject()} isCreating={isCreatingProject} />
                     </div>
                     {sortedRecent.length > visibleCount && (
@@ -486,7 +529,9 @@ export function LibraryPage({
               </CollapsibleSection>
               {archivedProjects.length > 0 && (
                 <CollapsibleSection title="Archived" subtitle="Restore work you set aside" defaultOpen={false}>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{archivedProjects.map((p) => <ProjectCard key={p.id} project={p} href={`/projects/${p.id}` as Route} archived />)}</div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {archivedProjects.map((p) => <ProjectCard key={p.id} project={p} href={`/projects/${p.id}` as Route} archived />)}
+                  </div>
                 </CollapsibleSection>
               )}
             </>

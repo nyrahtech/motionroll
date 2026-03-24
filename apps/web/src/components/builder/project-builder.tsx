@@ -14,7 +14,7 @@ import { PreviewStage } from "./preview-stage";
 import { TimelinePanel } from "./timeline-panel";
 import { deriveTimelineTracks } from "./timeline-model";
 import type { EditorContainerProps } from "./editor-types";
-import { buildProjectDraftDocument } from "@/lib/project-draft";
+import { buildProjectDraftDocument, parseProjectDraftDocument } from "@/lib/project-draft";
 import { getPrimarySourceAsset } from "@/lib/project-assets";
 import {
   EditorErrorBoundary,
@@ -35,6 +35,7 @@ import {
   getGroupSelectionEligibility,
   getRootOverlayId,
   getDirectGroupChildren,
+  scaleSceneRangeOverlays,
   shiftOverlayAbsoluteLayout,
 } from "./editor-overlay-utils";
 
@@ -46,6 +47,21 @@ function buildDraftManifest(
 ): EditorContainerProps["manifest"] {
   const section = manifest.sections[0];
   if (!section) return manifest;
+  const existingSequenceTransition = section.transitions.find((transition) => transition.scope === "sequence");
+  const nextTransitions =
+    draft.sceneTransitionPreset === "none"
+      ? []
+      : [
+          {
+            id: existingSequenceTransition?.id ?? "scene-transition",
+            scope: "sequence" as const,
+            fromId: existingSequenceTransition?.fromId ?? section.id,
+            toId: existingSequenceTransition?.toId ?? section.id,
+            preset: draft.sceneTransitionPreset,
+            easing: existingSequenceTransition?.easing ?? "ease-in-out",
+            duration: existingSequenceTransition?.duration ?? 0.4,
+          },
+        ];
   return {
     ...manifest,
     project: { ...manifest.project, title: draft.title },
@@ -55,6 +71,7 @@ function buildDraftManifest(
         ...section,
         title: draft.sectionTitle,
         overlays: draft.overlays,
+        transitions: nextTransitions,
         progressMapping: {
           ...section.progressMapping,
           frameRange: { start: draft.frameRangeStart, end: draft.frameRangeEnd },
@@ -90,11 +107,15 @@ function clampPlayheadToSceneRange(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function ProjectEditor({ project, projects, manifest }: EditorContainerProps) {
-  const initialRemoteDraft = buildProjectDraftDocument(project, manifest);
+  const initialRemoteDraft = project.draftJson
+    ? parseProjectDraftDocument(project.draftJson)
+    : buildProjectDraftDocument(project, manifest);
 
   const [projectState, setProjectState] = useState(project);
   const [manifestState, setManifestState] = useState(manifest);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
+  const [isProjectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
+  const processingRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Stable callback refs allow hooks to call each other without circular deps ──
   // useEditorDraft is initialized first (needs no deps), then useEditorPersistence
@@ -128,12 +149,6 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       },
       [replaceDraftState],
     ),
-    setProjectStateFromResponse: useCallback((p: unknown) => {
-      if (p) setProjectState(p as typeof project);
-    }, []),
-    setManifestStateFromResponse: useCallback((m: unknown) => {
-      if (m) setManifestState(m as typeof manifest);
-    }, []),
   });
 
   const {
@@ -171,7 +186,7 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
   );
 
   // ── Playback hook ─────────────────────────────────────────────────────────
-  const { isPlaying, playhead, playheadRef, seekPlayhead, togglePlay, stopPlay } =
+  const { isPlaying, playback, playheadRef, seekPlayhead, togglePlay, stopPlay } =
     useEditorPlayback(durationSeconds);
 
   // ── Selection hook ────────────────────────────────────────────────────────
@@ -200,8 +215,8 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     onOverlayFieldChange,
     onOverlayStyleChange,
     onOverlayStyleLiveChange,
-    onOverlayAnimationChange,
-    onOverlayTransitionChange,
+    onOverlayEnterAnimationChange,
+    onOverlayExitAnimationChange,
     onOverlayLayoutChange,
     onInlineTextChange,
   } = useOverlayCallbacks({
@@ -243,6 +258,53 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     hasUnsyncedChanges,
     hasUnpublishedChanges,
   } as const;
+
+  const refreshProjectRuntimeState = useCallback(async () => {
+    const [projectResponse, manifestResponse] = await Promise.all([
+      fetch(`/api/projects/${project.id}`, { method: "GET", cache: "no-store" }),
+      fetch(`/api/projects/${project.id}/manifest`, { method: "GET", cache: "no-store" }),
+    ]);
+
+    if (!projectResponse.ok || !manifestResponse.ok) {
+      throw new Error("Could not refresh project processing state.");
+    }
+
+    const [nextProject, nextManifest] = await Promise.all([
+      projectResponse.json() as Promise<EditorContainerProps["project"]>,
+      manifestResponse.json() as Promise<EditorContainerProps["manifest"]>,
+    ]);
+
+    setProjectState(nextProject);
+    setManifestState(nextManifest);
+
+    return nextProject;
+  }, [project.id]);
+
+  const stopProcessingRefresh = useCallback(() => {
+    if (processingRefreshTimeoutRef.current) {
+      clearTimeout(processingRefreshTimeoutRef.current);
+      processingRefreshTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleProcessingRefresh = useCallback((delayMs = 2200) => {
+    stopProcessingRefresh();
+    processingRefreshTimeoutRef.current = setTimeout(() => {
+      void (async () => {
+        try {
+          const nextProject = await refreshProjectRuntimeState();
+          const hasActiveProcessingJob = nextProject.jobs?.some(
+            (job) => job.status === "queued" || job.status === "processing",
+          );
+          if (hasActiveProcessingJob) {
+            scheduleProcessingRefresh();
+          }
+        } catch {
+          scheduleProcessingRefresh(3500);
+        }
+      })();
+    }, delayMs);
+  }, [refreshProjectRuntimeState, stopProcessingRefresh]);
 
   const handlePreviewStyleChange = useCallback(
     (overlayId: string, changes: Record<string, unknown>) => {
@@ -302,6 +364,8 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     if (failedJob) toast.error(`Processing failed: ${failedJob.failureReason ?? "unknown error"}`);
   }, [projectState.jobs]);
 
+  useEffect(() => stopProcessingRefresh, [stopProcessingRefresh]);
+
   // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -324,18 +388,30 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
+  function openDetachedWindow(url?: string) {
+    const popup = window.open(url ?? "", "_blank");
+    if (popup) {
+      try {
+        popup.opener = null;
+      } catch {
+        // Some browsers restrict opener writes; best effort is enough here.
+      }
+    }
+    return popup;
+  }
+
   async function handlePreview() {
     const previewUrl = `/projects/${projectState.id}/preview`;
-    if (!hasUnsyncedChangesRef.current) { window.open(previewUrl, "_blank", "noopener,noreferrer"); return; }
-    const pw = window.open("", "_blank", "noopener,noreferrer");
+    if (!hasUnsyncedChangesRef.current) { openDetachedWindow(previewUrl); return; }
+    const pw = openDetachedWindow();
     const didFlush = await flushRemoteSync();
     if (!didFlush) {
       pw?.close();
       toast.error("MotionRoll couldn't sync the latest draft for preview yet.");
       return;
     }
-    if (pw) { pw.location.href = previewUrl; return; }
-    window.open(previewUrl, "_blank", "noopener,noreferrer");
+    if (pw && !pw.closed) { pw.location.replace(previewUrl); return; }
+    openDetachedWindow(previewUrl);
   }
 
   async function handlePublish() {
@@ -349,12 +425,43 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
 
   function addOverlay(type: string) {
     if (type === "video") { clearSelection(); setActiveSidebarContext("upload"); return; }
-    const overlayId = editorDraft.addOverlay(type, playheadRef.current);
+    const overlayId = editorDraft.addOverlay(type, playheadRef.current, frameCount);
     if (overlayId) selectOverlay(overlayId, draftRef.current.overlays);
   }
 
+  const handleOpenSceneAnimation = useCallback(() => {
+    setProjectSwitcherOpen(true);
+  }, []);
+
+  const handleSetSceneTransitionPreset = useCallback(
+    (
+      preset: EditorDraft["sceneTransitionPreset"],
+    ) => {
+      updateDraft((current) => ({
+        ...current,
+        sceneTransitionPreset: preset,
+      }));
+    },
+    [updateDraft],
+  );
+
+  const handleUploadQueued = useCallback(() => {
+    void refreshProjectRuntimeState()
+      .then((nextProject) => {
+        const hasActiveProcessingJob = nextProject.jobs?.some(
+          (job) => job.status === "queued" || job.status === "processing",
+        );
+        if (hasActiveProcessingJob) {
+          scheduleProcessingRefresh();
+        }
+      })
+      .catch(() => {
+        scheduleProcessingRefresh(1500);
+      });
+  }, [refreshProjectRuntimeState, scheduleProcessingRefresh]);
+
   function handleGroupSelectionWrapper() {
-    editorDraft.handleGroupSelection(multiSelectedOverlayIds, playheadRef.current);
+    editorDraft.handleGroupSelection(multiSelectedOverlayIds, playheadRef.current, frameCount);
   }
 
   function handleUngroupSelectionWrapper() {
@@ -389,7 +496,20 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
           updateDraft((cur) => {
             const nextStart = field === "start" ? Math.max(0, value) : cur.frameRangeStart;
             const reqEnd = field === "end" ? Math.max(value, nextStart + 1) : cur.frameRangeEnd;
-            return { ...cur, frameRangeStart: nextStart, frameRangeEnd: Math.max(reqEnd, nextStart + 1) };
+            const nextEnd = Math.max(reqEnd, nextStart + 1);
+            return {
+              ...cur,
+              frameRangeStart: nextStart,
+              frameRangeEnd: nextEnd,
+              overlays: scaleSceneRangeOverlays(
+                cur.overlays,
+                cur.frameRangeStart,
+                cur.frameRangeEnd,
+                nextStart,
+                nextEnd,
+                frameCount,
+              ),
+            };
           })
         }
         onSectionFieldChange={(field, value) =>
@@ -401,6 +521,8 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
         previewMode={previewMode}
         isPlaying={isPlaying}
         onPreviewModeChange={setPreviewMode}
+        projectSwitcherOpen={isProjectSwitcherOpen}
+        onProjectSwitcherOpenChange={setProjectSwitcherOpen}
         onRetrySync={async () => { await flushRemoteSync(); }}
         onPreview={handlePreview}
         onPublish={handlePublish}
@@ -424,9 +546,11 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
           onOverlayFieldChange={onOverlayFieldChange}
           onOverlayStyleChange={onOverlayStyleChange}
           onOverlayStyleLiveChange={onOverlayStyleLiveChange}
-          onOverlayAnimationChange={onOverlayAnimationChange}
-          onOverlayTransitionChange={onOverlayTransitionChange}
+          onOverlayEnterAnimationChange={onOverlayEnterAnimationChange}
+          onOverlayExitAnimationChange={onOverlayExitAnimationChange}
           onAddContent={addOverlay}
+          onUploadQueued={handleUploadQueued}
+          processingJobs={projectState.jobs}
         />
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -436,7 +560,7 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                 <PreviewStage
                   manifest={editorManifest}
                   mode={previewMode}
-                  playheadProgress={playhead}
+                  playback={playback}
                   isPlaying={isPlaying}
                   selectedOverlayId={selectedOverlayId}
                   selectedOverlayIds={multiSelectedOverlayIds}
@@ -489,7 +613,7 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                 tracks={timelineTracks}
                 selection={selection}
                 selectedClipIds={selectedTimelineClipIds}
-                playhead={playhead}
+                playback={playback}
                 durationSeconds={durationSeconds}
                 isPlaying={isPlaying}
                 canUndo={canUndo}
@@ -524,10 +648,15 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                 onMoveClipToNewLayer={(clipId) =>
                   editorDraft.handleMoveClipToNewLayer(clipId, timelineTracks)
                 }
-                onReorderTracks={editorDraft.handleReorderOverlays}
-                onSetClipTransitionPreset={(clipId, preset) =>
-                  editorDraft.handleSetClipTransitionPreset(clipId, preset, timelineTracks)
+                onSetClipEnterAnimationType={(clipId, type) =>
+                  editorDraft.handleSetClipEnterAnimationType(clipId, type, timelineTracks)
                 }
+                onSetClipExitAnimationType={(clipId, type) =>
+                  editorDraft.handleSetClipExitAnimationType(clipId, type, timelineTracks)
+                }
+                onOpenSceneAnimation={handleOpenSceneAnimation}
+                onSetSceneTransitionPreset={handleSetSceneTransitionPreset}
+                onReorderTracks={editorDraft.handleReorderOverlays}
               />
             </TimelineErrorBoundary>
           </div>

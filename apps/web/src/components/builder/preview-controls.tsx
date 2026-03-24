@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { Maximize2, MonitorSmartphone, MonitorUp, Pause, Play } from "lucide-react";
 import { getTimelineTimeLabel } from "./timeline-model";
 

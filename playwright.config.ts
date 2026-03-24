@@ -44,6 +44,7 @@ export default defineConfig({
         env: {
           ...process.env,
           MOTIONROLL_TEST_AUTH_BYPASS: "true",
+          NEXT_PUBLIC_MOTIONROLL_TEST_AUTH_BYPASS: "true",
         },
       },
 });

@@ -19,11 +19,14 @@ import {
  * Converts a ProjectDraftDocument (wire/DB format) into an EditorDraft
  * (in-memory editor format). Hydrates overlays with defaults.
  */
-export function documentToEditorDraft(document: ProjectDraftDocument): EditorDraft {
+export function documentToEditorDraft(
+  document: ProjectDraftDocument,
+): EditorDraft {
   return {
     title: document.title,
     presetId: document.presetId,
     sectionTitle: document.sectionTitle,
+    sceneTransitionPreset: document.sceneTransitionPreset,
     sectionHeightVh: document.sectionHeightVh,
     scrubStrength: document.scrubStrength,
     frameRangeStart: document.frameRangeStart,
@@ -52,6 +55,7 @@ export function editorDraftToDocument(draft: EditorDraft): ProjectDraftDocument 
     title: draft.title,
     presetId: draft.presetId,
     sectionTitle: draft.sectionTitle,
+    sceneTransitionPreset: draft.sceneTransitionPreset,
     sectionHeightVh: draft.sectionHeightVh,
     scrubStrength: draft.scrubStrength,
     frameRangeStart: draft.frameRangeStart,

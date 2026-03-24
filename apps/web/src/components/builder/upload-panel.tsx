@@ -14,11 +14,20 @@ const defaultStatus =
 export function UploadPanel({
   projectId,
   embedded = false,
+  onUploadQueued,
+  processingJobs,
 }: {
   projectId: string;
   embedded?: boolean;
+  onUploadQueued?: () => void | Promise<void>;
+  processingJobs?: Array<{
+    id: string;
+    status: string;
+    failureReason: string | null;
+  }>;
 }) {
   const [status, setStatus] = useState(defaultStatus);
+  const [trackedJobId, setTrackedJobId] = useState<string | null>(null);
   const inputId = useId();
   const panelInputId = `${inputId}-panel`;
 
@@ -50,7 +59,38 @@ export function UploadPanel({
     };
   }, [uppy]);
 
+  useEffect(() => {
+    if (!trackedJobId) {
+      return;
+    }
+
+    const matchingJob = processingJobs?.find((job) => job.id === trackedJobId);
+    if (!matchingJob) {
+      return;
+    }
+
+    if (matchingJob.status === "queued") {
+      setStatus("Processing queued...");
+      return;
+    }
+
+    if (matchingJob.status === "running") {
+      setStatus("Processing video into frames...");
+      return;
+    }
+
+    if (matchingJob.status === "completed") {
+      setStatus("Processing complete. Preview updated.");
+      return;
+    }
+
+    if (matchingJob.status === "failed") {
+      setStatus(matchingJob.failureReason ?? "Processing failed.");
+    }
+  }, [processingJobs, trackedJobId]);
+
   async function handleUpload(file: File) {
+    setTrackedJobId(null);
     setStatus("Validating video...");
     const registrationResponse = await fetch("/api/uploads/register", {
       method: "POST",
@@ -106,7 +146,12 @@ export function UploadPanel({
       return;
     }
 
-    setStatus("Video upload complete. Processing job queued.");
+    const enqueueResult = await enqueueResponse.json();
+    if (typeof enqueueResult.jobId === "string") {
+      setTrackedJobId(enqueueResult.jobId);
+    }
+    void onUploadQueued?.();
+    setStatus("Processing queued...");
   }
 
   function handleFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
@@ -148,9 +193,6 @@ export function UploadPanel({
   function renderDropzone() {
     return (
       <div className="motionroll-uppy relative">
-        <div className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center px-4 text-center text-sm font-medium text-[var(--foreground-soft)]">
-          Drag and drop videos here
-        </div>
         <DashboardView
           uppy={uppy}
           proudlyDisplayPoweredByUppy={false}

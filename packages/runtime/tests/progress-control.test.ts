@@ -13,6 +13,9 @@ class FakeElement {
   rel = "";
   alt = "";
   src = "";
+  poster = "";
+  preload = "";
+  currentTime = 0;
   autoplay = false;
   loop = false;
   muted = false;
@@ -23,9 +26,24 @@ class FakeElement {
   rectTop = 0;
   rectHeight = 540;
   parent: FakeElement | null = null;
+  listeners: Record<string, Array<() => void>> = {};
 
   constructor(tagName: string) {
     this.tagName = tagName;
+  }
+
+  play = vi.fn(async () => undefined);
+  pause = vi.fn(() => undefined);
+
+  addEventListener(eventName: string, listener: () => void) {
+    this.listeners[eventName] ??= [];
+    this.listeners[eventName].push(listener);
+  }
+
+  removeEventListener(eventName: string, listener: () => void) {
+    this.listeners[eventName] = (this.listeners[eventName] ?? []).filter(
+      (registeredListener) => registeredListener !== listener,
+    );
   }
 
   appendChild(child: FakeElement) {
@@ -136,7 +154,7 @@ class FakeImage {
   }
 }
 
-function createManifest(): ProjectManifest {
+function createManifest(frameBasePath = "/frames"): ProjectManifest {
   return {
     version: "1.0.0",
     generatedAt: new Date(0).toISOString(),
@@ -162,9 +180,9 @@ function createManifest(): ProjectManifest {
         presetId: "product-reveal" as const,
         title: "Section",
         frameAssets: [
-          { index: 0, path: "frame-0", variants: [{ kind: "mobile" as const, url: "/frames/0-mobile.jpg" }] },
-          { index: 1, path: "frame-1", variants: [{ kind: "mobile" as const, url: "/frames/1-mobile.jpg" }] },
-          { index: 2, path: "frame-2", variants: [{ kind: "mobile" as const, url: "/frames/2-mobile.jpg" }] },
+          { index: 0, path: "frame-0", variants: [{ kind: "mobile" as const, url: `${frameBasePath}/0-mobile.jpg` }] },
+          { index: 1, path: "frame-1", variants: [{ kind: "mobile" as const, url: `${frameBasePath}/1-mobile.jpg` }] },
+          { index: 2, path: "frame-2", variants: [{ kind: "mobile" as const, url: `${frameBasePath}/2-mobile.jpg` }] },
         ],
         frameCount: 3,
         progressMapping: {
@@ -180,6 +198,7 @@ function createManifest(): ProjectManifest {
           {
             id: "overlay-1",
             timing: { start: 0.05, end: 0.45 },
+            timingSource: "manual",
             content: {
               text: "First beat\n\nStart here",
               align: "start" as const,
@@ -191,6 +210,7 @@ function createManifest(): ProjectManifest {
           {
             id: "overlay-2",
             timing: { start: 0.5, end: 0.9 },
+            timingSource: "manual",
             content: {
               text: "Second beat\n\nMove here",
               align: "end" as const,
@@ -203,9 +223,9 @@ function createManifest(): ProjectManifest {
         moments: [],
         transitions: [],
         fallback: {
-          posterUrl: "/poster.png",
-          fallbackVideoUrl: "/fallback.mp4",
-          firstFrameUrl: "/first-frame.png",
+          posterUrl: `${frameBasePath}/poster.png`,
+          fallbackVideoUrl: `${frameBasePath}/fallback.mp4`,
+          firstFrameUrl: `${frameBasePath}/first-frame.png`,
           mobileBehavior: "video" as const,
           reducedMotionBehavior: "poster" as const,
         },
@@ -333,6 +353,65 @@ describe("runtime controlled progress", () => {
     expect((container as unknown as FakeElement).children.some((child) => child.tagName === "video")).toBe(false);
   });
 
+  it("prefers fallback video in controlled mode when the frame sequence is too sparse for smooth playback", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const canvas = new FakeCanvasElement() as unknown as HTMLCanvasElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: Array.from({ length: 47 }, (_, index) => ({
+            index,
+            path: `frame-${index}`,
+            variants: [{ kind: "mobile" as const, url: `/frames/${index}-mobile.jpg` }],
+          })),
+          frameCount: 47,
+          progressMapping: {
+            startProgress: 0,
+            endProgress: 1,
+            frameCount: 47,
+            frameRange: {
+              start: 0,
+              end: 46,
+            },
+          },
+          motion: {
+            ...section.motion,
+            durationSeconds: 28.3,
+          },
+          fallback: {
+            ...section.fallback,
+            fallbackVideoUrl: "/fallback.mp4",
+          },
+        },
+      ],
+    }, {
+      mode: "mobile",
+      interactionMode: "controlled",
+      reducedMotion: false,
+      overlayRoot,
+      canvas,
+    });
+
+    controller.setOverlayTransitionsEnabled(true);
+    controller.setProgress(0.5);
+
+    const video = (container as unknown as FakeElement).children.find((child) => child.tagName === "video");
+    const drawCalls = ((canvas as unknown as FakeCanvasElement).context.drawImage as ReturnType<typeof vi.fn>).mock.calls;
+
+    expect(video?.src).toBe("/fallback.mp4");
+    expect(video?.poster).toBe("/poster.png");
+    expect(video?.preload).toBe("auto");
+    expect(video?.play).toHaveBeenCalled();
+    expect(drawCalls).toHaveLength(0);
+  });
+
   it("renders overlays in layer stack order even when manifest rows are out of order", async () => {
     const { createScrollSection } = await import("../src");
     const container = new FakeElement("div") as unknown as HTMLElement;
@@ -455,16 +534,17 @@ describe("runtime controlled progress", () => {
               {
                 ...section.overlays[0]!,
                 timing: { start: 0.1, end: 0.9 },
+                timingSource: "manual",
                 content: {
                   ...section.overlays[0]!.content,
-                  animation: {
-                    preset: "slide-up",
+                  enterAnimation: {
+                    type: "slide-up-fade",
                     easing: "ease-out",
                     duration: 0.4,
                     delay: 0,
                   },
-                  transition: {
-                    preset: "blur-dissolve",
+                  exitAnimation: {
+                    type: "fade",
                     easing: "ease-in-out",
                     duration: 0.3,
                   },
@@ -490,9 +570,125 @@ describe("runtime controlled progress", () => {
 
     controller.setProgress(0.5);
     expect(Number(card!.style.opacity)).toBeCloseTo(1, 2);
+    expect(card!.style.filter ?? "blur(0px)").toBe("blur(0px)");
 
     controller.setProgress(0.84);
-    expect(card!.style.filter).not.toBe("blur(0px)");
+    expect(Number(card!.style.opacity)).toBeCloseTo(1, 2);
+    expect(card!.style.filter ?? "blur(0px)").toBe("blur(0px)");
+    expect(card!.style.clipPath ?? "inset(0% 0% 0% 0%)").toBe("inset(0% 0% 0% 0%)");
+  });
+
+  it("uses the manifest durationSeconds for enter and exit timing instead of raw frame count", async () => {
+    const { getOverlayAnimationState } = await import("../src");
+    const manifest = createManifest();
+    const section = {
+      ...manifest.sections[0]!,
+      frameCount: 24,
+      progressMapping: {
+        startProgress: 0,
+        endProgress: 1,
+        frameCount: 24,
+        frameRange: {
+          start: 0,
+          end: 23,
+        },
+      },
+      motion: {
+        ...manifest.sections[0]!.motion,
+        durationSeconds: 3,
+      },
+      overlays: [
+        {
+          id: "overlay-duration",
+          timing: { start: 0, end: 1 },
+          timingSource: "manual" as const,
+          content: {
+            text: "Duration test",
+            align: "start" as const,
+            theme: "light" as const,
+            treatment: "default" as const,
+            layer: 0,
+            enterAnimation: {
+              type: "fade" as const,
+              easing: "ease-out" as const,
+              duration: 0.2,
+              delay: 0,
+            },
+            exitAnimation: {
+              type: "fade" as const,
+              easing: "ease-in-out" as const,
+              duration: 0.2,
+            },
+          },
+        },
+      ],
+    };
+
+    const stateBeforeExit = getOverlayAnimationState(
+      section.overlays[0]!,
+      section,
+      0.5,
+    );
+    const stateNearEnd = getOverlayAnimationState(
+      section.overlays[0]!,
+      section,
+      0.96,
+    );
+
+    expect(stateBeforeExit.opacity).toBeCloseTo(1, 2);
+    expect(stateNearEnd.opacity).toBeLessThan(1);
+  });
+
+  it("does not redraw the canvas again when controlled playback stays on the same frame", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const canvas = new FakeCanvasElement() as unknown as HTMLCanvasElement;
+
+    const controller = createScrollSection(container, createManifest(), {
+      mode: "mobile",
+      interactionMode: "controlled",
+      reducedMotion: false,
+      overlayRoot,
+      canvas,
+    });
+
+    await flushPromises();
+
+    const drawImage = (canvas as unknown as FakeCanvasElement).context
+      .drawImage as ReturnType<typeof vi.fn>;
+    drawImage.mockClear();
+
+    controller.setProgress(0.1);
+    await flushPromises();
+
+    expect(drawImage).not.toHaveBeenCalled();
+  });
+
+  it("invalidates cached sequence frames when the manifest swaps to a new processed source", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const canvas = new FakeCanvasElement() as unknown as HTMLCanvasElement;
+
+    const controller = createScrollSection(container, createManifest("/frames-a"), {
+      mode: "mobile",
+      interactionMode: "controlled",
+      reducedMotion: false,
+      overlayRoot,
+      canvas,
+    });
+
+    await flushPromises();
+
+    let drawCalls = ((canvas as unknown as FakeCanvasElement).context.drawImage as ReturnType<typeof vi.fn>).mock.calls;
+    expect(drawCalls.at(-1)?.[0]?.src).toBe("/frames-a/0-mobile.jpg");
+
+    controller.updateManifest(createManifest("/frames-b"));
+    await flushPromises();
+
+    drawCalls = ((canvas as unknown as FakeCanvasElement).context.drawImage as ReturnType<typeof vi.fn>).mock.calls;
+    expect(drawCalls.at(-1)?.[0]?.src).toBe("/frames-b/0-mobile.jpg");
   });
 
   it("seeds the controlled placeholder from the current playhead frame", async () => {

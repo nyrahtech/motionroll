@@ -9,6 +9,9 @@ import {
   getDirectGroupChildren,
   getRootOverlayId,
   normalizeOverlayLayers,
+  getSceneRangeTiming,
+  getSceneBoundOverlayTiming,
+  scaleSceneRangeOverlays,
   duplicateRootOverlays,
   deleteRootOverlays,
   reorderOverlayLayers,
@@ -24,6 +27,7 @@ function makeOverlay(
   return {
     id,
     timing: { start: 0, end: 1 },
+    timingSource: "manual",
     content: {
       type: "text",
       text: id,
@@ -37,8 +41,8 @@ function makeOverlay(
                italic: false, underline: false, textTransform: "none", buttonLike: false },
       background: { enabled: false, mode: "transparent", color: "#000", opacity: 0,
                     radius: 14, paddingX: 18, paddingY: 14, borderColor: "#fff", borderOpacity: 0 },
-      animation: { preset: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
-      transition: { preset: "crossfade", easing: "ease-in-out", duration: 0.4 },
+      enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
+      exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
       layout: { x: 0.08, y: 0.12, width: 420 },
     },
   };
@@ -181,6 +185,36 @@ describe("duplicateRootOverlays", () => {
     const dupGroupId = duplicateIds[0]!;
     const dupChildren = result.filter((o) => o.content.parentGroupId === dupGroupId);
     expect(dupChildren).toHaveLength(1);
+  });
+});
+
+describe("scene range timing", () => {
+  it("derives overlay timing from the scene frame range", () => {
+    const timing = getSceneRangeTiming(24, 72, 96);
+    expect(timing.start).toBeCloseTo(24 / 95, 5);
+    expect(timing.end).toBeCloseTo(72 / 95, 5);
+  });
+
+  it("creates a bounded default timing window around the playhead", () => {
+    const timing = getSceneBoundOverlayTiming(0.52, { start: 0.2, end: 0.8 });
+    expect(timing.start).toBeGreaterThanOrEqual(0.2);
+    expect(timing.end).toBeLessThanOrEqual(0.8);
+    expect(timing.end - timing.start).toBeGreaterThan(0);
+    expect(timing.end - timing.start).toBeLessThan(0.8 - 0.2);
+  });
+
+  it("scales block lifetimes when the scene frame range changes", () => {
+    const overlays = [
+      { ...makeOverlay("scene"), timing: { start: 0.3, end: 0.45 } },
+      { ...makeOverlay("manual"), timingSource: "manual" as const, timing: { start: 0.2, end: 0.4 } },
+    ];
+
+    const synced = scaleSceneRangeOverlays(overlays, 10, 30, 5, 35, 40);
+
+    expect(synced[0]?.timing.start).toBeCloseTo(0.1936, 3);
+    expect(synced[0]?.timing.end).toBeCloseTo(0.4186, 3);
+    expect(synced[1]?.timing.start).toBeCloseTo(0.1282, 3);
+    expect(synced[1]?.timing.end).toBeCloseTo(0.3436, 3);
   });
 });
 

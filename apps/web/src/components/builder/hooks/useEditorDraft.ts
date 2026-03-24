@@ -5,6 +5,7 @@
  * composes and re-exports so callers see a single unified interface.
  */
 import { useCallback, useRef, useState } from "react";
+import type { OverlayAnimationType } from "@motionroll/shared";
 import type { HydratedOverlayDefinition, EditorDraft } from "../editor-draft-types";
 import type { TimelineTrackModel } from "../timeline-model";
 import { useOverlayMutations } from "./useOverlayMutations";
@@ -31,14 +32,16 @@ export type UseEditorDraftReturn = {
   handleUndo: () => void;
   handleRedo: () => void;
   // All overlay/clip mutations (from useOverlayMutations)
-  addOverlay: (type: string, playhead: number) => string | null;
-  handleGroupSelection: (multiSelectedOverlayIds: string[], playhead: number) => void;
+  addOverlay: (type: string, playhead: number, frameCount: number) => string | null;
+  handleGroupSelection: (multiSelectedOverlayIds: string[], playhead: number, frameCount: number) => void;
   handleUngroupOverlay: (overlayId: string, onAfter?: (childId: string) => void) => void;
   handleDuplicateClip: (clipId: string, tracks: TimelineTrackModel[]) => string | null;
   handleDeleteClip: (clipId: string, tracks: TimelineTrackModel[]) => void;
   handleCommitClipMove: (move: { clipId: string; start: number; end: number; targetLayer?: number }, tracks: TimelineTrackModel[]) => void;
   handleMoveClipToLayer: (clipId: string, targetLayer: number, tracks: TimelineTrackModel[]) => void;
   handleMoveClipToNewLayer: (clipId: string, tracks: TimelineTrackModel[]) => void;
+  handleSetClipEnterAnimationType: (clipId: string, type: OverlayAnimationType, tracks: TimelineTrackModel[]) => void;
+  handleSetClipExitAnimationType: (clipId: string, type: OverlayAnimationType, tracks: TimelineTrackModel[]) => void;
   handleReorderOverlays: (fromIndex: number, toIndex: number) => void;
   handleAddLayer: () => void;
   handleDeleteLayer: (layerRowIndex: number) => void;
@@ -47,7 +50,6 @@ export type UseEditorDraftReturn = {
   handleDuplicateSelection: (multiSelectedOverlayIds: string[], selectedOverlayId: string) => { duplicateIds: string[] };
   handleDeleteSelection: (multiSelectedOverlayIds: string[], selectedOverlayId: string) => void;
   handleOverlayStyleQuickChange: (overlayId: string, changes: Record<string, unknown>) => void;
-  handleSetClipTransitionPreset: (clipId: string, preset: string | undefined, tracks: TimelineTrackModel[]) => void;
   updateSelectedOverlay: (selectedOverlayId: string, transform: (overlay: HydratedOverlayDefinition) => HydratedOverlayDefinition) => void;
 };
 

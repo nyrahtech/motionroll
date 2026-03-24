@@ -1,5 +1,6 @@
 import { SignIn } from "@clerk/nextjs";
 import { AuthSetupCard } from "@/components/auth/auth-setup-card";
+import { clerkDarkAppearance } from "@/components/auth/clerk-appearance";
 import { isClerkAuthConfigured } from "@/lib/auth";
 
 export default function SignInPage() {
@@ -13,7 +14,8 @@ export default function SignInPage() {
           path="/sign-in"
           routing="path"
           signUpUrl="/sign-up"
-          forceRedirectUrl="/"
+          fallbackRedirectUrl="/library"
+          appearance={clerkDarkAppearance}
         />
       ) : (
         <AuthSetupCard />

@@ -11,6 +11,7 @@ function makeOverlay(id: string): HydratedOverlayDefinition {
   return {
     id,
     timing: { start: 0.1, end: 0.8 },
+    timingSource: "manual",
     content: {
       type: "text",
       text: "hello",
@@ -28,8 +29,8 @@ function makeOverlay(id: string): HydratedOverlayDefinition {
         enabled: false, mode: "transparent", color: "#0d1016", opacity: 0.82,
         radius: 14, paddingX: 18, paddingY: 14, borderColor: "#d6f6ff", borderOpacity: 0,
       },
-      animation: { preset: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
-      transition: { preset: "crossfade", easing: "ease-in-out", duration: 0.4 },
+      enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
+      exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
     },
   };
 }
@@ -37,7 +38,7 @@ function makeOverlay(id: string): HydratedOverlayDefinition {
 function makeDraft(overlayId: string): EditorDraft {
   return {
     title: "Test", presetId: "product-reveal" as const,
-    sectionTitle: "Scene", sectionHeightVh: 240, scrubStrength: 1,
+    sectionTitle: "Scene", sceneTransitionPreset: "none", sectionHeightVh: 240, scrubStrength: 1,
     frameRangeStart: 0, frameRangeEnd: 180, layerCount: 1,
     overlays: [makeOverlay(overlayId)],
   };
@@ -87,6 +88,7 @@ describe("useOverlayCallbacks", () => {
       const { result } = render();
       act(() => result.current.onOverlayFieldChange("start", 0.05));
       expect(draft.overlays[0]!.timing.start).toBeCloseTo(0.05);
+      expect(draft.overlays[0]!.timingSource).toBe("manual");
     });
 
     it("does nothing when no overlay is selected", () => {
@@ -145,29 +147,29 @@ describe("useOverlayCallbacks", () => {
     });
   });
 
-  // ── onOverlayAnimationChange ────────────────────────────────────────────
+  // ── onOverlayEnterAnimationChange ───────────────────────────────────────
 
-  describe("onOverlayAnimationChange", () => {
-    it("updates animation preset", () => {
+  describe("onOverlayEnterAnimationChange", () => {
+    it("updates enter animation type", () => {
       const { result } = render();
-      act(() => result.current.onOverlayAnimationChange("preset", "slide-up"));
-      expect(draft.overlays[0]!.content.animation?.preset).toBe("slide-up");
+      act(() => result.current.onOverlayEnterAnimationChange("type", "slide-up-fade"));
+      expect(draft.overlays[0]!.content.enterAnimation?.type).toBe("slide-up-fade");
     });
 
-    it("updates animation duration", () => {
+    it("updates enter animation duration", () => {
       const { result } = render();
-      act(() => result.current.onOverlayAnimationChange("duration", 0.8));
-      expect(draft.overlays[0]!.content.animation?.duration).toBe(0.8);
+      act(() => result.current.onOverlayEnterAnimationChange("duration", 0.8));
+      expect(draft.overlays[0]!.content.enterAnimation?.duration).toBe(0.8);
     });
   });
 
-  // ── onOverlayTransitionChange ───────────────────────────────────────────
+  // ── onOverlayExitAnimationChange ────────────────────────────────────────
 
-  describe("onOverlayTransitionChange", () => {
-    it("updates transition preset", () => {
+  describe("onOverlayExitAnimationChange", () => {
+    it("updates exit animation type", () => {
       const { result } = render();
-      act(() => result.current.onOverlayTransitionChange("preset", "wipe"));
-      expect(draft.overlays[0]!.content.transition?.preset).toBe("wipe");
+      act(() => result.current.onOverlayExitAnimationChange("type", "fade"));
+      expect(draft.overlays[0]!.content.exitAnimation?.type).toBe("fade");
     });
   });
 

@@ -3,6 +3,7 @@ import path from "node:path";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import type { OverlayDefinition } from "@motionroll/shared";
 
 import { SidebarPanel } from "./editor-sidebar";
 
@@ -18,8 +19,8 @@ describe("editor shell", () => {
         onOverlayFieldChange={() => undefined}
         onOverlayStyleChange={() => undefined}
         onOverlayStyleLiveChange={() => undefined}
-        onOverlayAnimationChange={() => undefined}
-        onOverlayTransitionChange={() => undefined}
+        onOverlayEnterAnimationChange={() => undefined}
+        onOverlayExitAnimationChange={() => undefined}
         onAddContent={() => undefined}
       />,
     );
@@ -52,10 +53,77 @@ describe("editor shell", () => {
     expect(sidebarSource).not.toContain('title={usesMedia ? "Media" : "Text"}');
     expect(sidebarSource).not.toContain("SelectionHeader");
     expect(inspectorSource).toContain("SelectTrigger");
+    expect(inspectorSource).toContain("<SectionLabel>Content</SectionLabel>");
+    expect(inspectorSource).toContain("<SectionLabel>Style</SectionLabel>");
+    expect(inspectorSource).toContain("<SectionLabel>Animation</SectionLabel>");
+    expect(inspectorSource).toContain("Enter");
+    expect(inspectorSource).toContain("Exit");
     expect(inspectorSource).toContain('label="Background"');
     expect(inspectorSource).toContain("ColorPicker");
     expect(inspectorSource).toContain('opacity={backgroundOpacity}');
+    expect(inspectorSource).not.toContain("This block stays visible for the full timeline clip");
+    expect(inspectorSource).not.toContain("Lifetime:");
+    expect(inspectorSource).not.toContain("Range");
     expect(inspectorSource).not.toContain("backgroundEnabled");
+  });
+
+  it("renders logical inspector sections for a selected text overlay", () => {
+    const selectedOverlay = {
+      id: "overlay-1",
+      timing: { start: 0.1, end: 0.5 },
+      content: {
+        type: "text",
+        text: "Hello MotionRoll",
+        linkHref: "",
+        style: {
+          fontFamily: "Inter",
+          fontSize: 34,
+          fontWeight: 600,
+          color: "#ffffff",
+          textAlign: "start",
+        },
+        background: {
+          enabled: true,
+          color: "#0d1016",
+          opacity: 0.82,
+        },
+        enterAnimation: {
+          type: "fade",
+          easing: "ease-out",
+          duration: 0.45,
+          delay: 0,
+        },
+        exitAnimation: {
+          type: "none",
+          easing: "ease-in-out",
+          duration: 0.35,
+        },
+      },
+    } as OverlayDefinition;
+
+    const markup = renderToStaticMarkup(
+      <SidebarPanel
+        projectId="project-1"
+        activeContext="edit"
+        selectedOverlay={selectedOverlay}
+        onContextChange={() => undefined}
+        onOverlayFieldChange={() => undefined}
+        onOverlayStyleChange={() => undefined}
+        onOverlayStyleLiveChange={() => undefined}
+        onOverlayEnterAnimationChange={() => undefined}
+        onOverlayExitAnimationChange={() => undefined}
+        onAddContent={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain(">Content<");
+    expect(markup).toContain(">Style<");
+    expect(markup).toContain(">Animation<");
+    expect(markup).toContain(">Enter<");
+    expect(markup).toContain(">Exit<");
+    expect(markup).toContain(">Text<");
+    expect(markup).toContain(">Link<");
+    expect(markup).toContain(">Background<");
   });
 
   it("keeps viewport controls in the top bar source", () => {
@@ -66,6 +134,7 @@ describe("editor shell", () => {
 
     expect(source).toContain("Desktop");
     expect(source).toContain("Mobile");
+    expect(source).toContain('label: "Save"');
     expect(source).toContain("Retry sync");
     expect(source).toContain("Sync now");
     expect(source).not.toContain("RotateCcw");
@@ -92,14 +161,26 @@ describe("editor shell", () => {
     expect(rowSource).toContain('title="Open clip actions"');
   });
 
-  it("disables preview-stage sub-controls at the source level", () => {
+  it("keeps preview-stage free of sub-controls at the source level", () => {
     const source = fs.readFileSync(
       path.resolve(componentDir, "preview-stage.tsx"),
       "utf8",
     );
 
     expect(source).toContain("showControls={false}");
-    expect(source).not.toContain("Live preview");
+    expect(source).not.toContain("PreviewControls");
+  });
+
+  it("restarts the preview when the runtime playback strategy changes", () => {
+    const source = fs.readFileSync(
+      path.resolve(componentDir, "runtime-preview.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("choosePlaybackMode");
+    expect(source).toContain("const playbackStrategy = useMemo");
+    expect(source).toContain("interactionMode: isControlledRuntime ? \"controlled\" : \"scroll\"");
+    expect(source).toContain("playbackStrategy,");
   });
 
   it("keeps a background sync path in the editor source", () => {

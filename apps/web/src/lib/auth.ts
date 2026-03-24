@@ -20,7 +20,7 @@ export function isClerkAuthConfigured() {
   );
 }
 
-function isTestAuthBypassEnabled() {
+export function isTestAuthBypassEnabled() {
   return process.env.MOTIONROLL_TEST_AUTH_BYPASS?.trim() === "true";
 }
 

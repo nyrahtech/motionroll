@@ -6,6 +6,7 @@
 import { clampProgress } from "../../../shared/src/timing";
 import {
   type MotionEasing,
+  type OverlayAnimationType,
   type OverlayDefinition,
   type ProjectSectionManifest,
   type ResolvedFallbackStrategy,
@@ -129,6 +130,25 @@ export function choosePlaybackMode(
   const mode =
     options.mode ?? (matchesMediaQuery("(max-width: 767px)") ? "mobile" : "desktop");
   const interactionMode = options.interactionMode ?? "scroll";
+  const durationSeconds = getSectionDurationSeconds(section);
+  const visibleFrameCount = Math.max(
+    section.progressMapping.frameRange.end - section.progressMapping.frameRange.start + 1,
+    1,
+  );
+  const effectiveSequenceFps = visibleFrameCount / Math.max(durationSeconds, 0.1);
+
+  if (
+    interactionMode === "controlled" &&
+    !options.forceSequence &&
+    section.fallback.fallbackVideoUrl &&
+    section.frameAssets.length > 0 &&
+    effectiveSequenceFps < 10
+  ) {
+    return {
+      mode,
+      fallback: "video" as ResolvedFallbackStrategy,
+    };
+  }
 
   if (
     section.frameAssets.length > 0 &&
@@ -189,6 +209,14 @@ export function getOverlayPixelPlacement(
 }
 
 export function getSectionDurationSeconds(section: ProjectSectionManifest) {
+  if (
+    typeof section.motion.durationSeconds === "number" &&
+    Number.isFinite(section.motion.durationSeconds) &&
+    section.motion.durationSeconds > 0
+  ) {
+    return section.motion.durationSeconds;
+  }
+
   const totalFrameCount = Math.max(
     section.progressMapping.frameCount,
     section.frameCount,
@@ -243,99 +271,103 @@ export function getBaseOverlayTranslate(overlay: OverlayDefinition) {
     : { x: 0, y: 0, unit: "px" as const };
 }
 
-export function getOverlayHiddenOffset(
+function getAnimationType(
   overlay: OverlayDefinition,
-  entrance: ProjectSectionManifest["runtimeProfile"]["overlayEntrance"],
-) {
-  const animationPreset = overlay.content.animation?.preset ?? "fade";
-
-  if (overlay.content.align === "center") {
-    if (animationPreset === "scale-in") {
-      return { x: -50, y: -50, unit: "%" as const, scale: 0.94 };
-    }
-    return {
-      x: -50,
-      y: entrance === "crossfade" ? -50 : -50 + 18,
-      unit: entrance === "crossfade" ? "%" as const : "calc-percent-plus-px" as const,
-      scale: 1,
-    };
-  }
-
-  if (animationPreset === "slide-up") {
-    return { x: 0, y: 22, unit: "px" as const, scale: 1 };
-  }
-  if (animationPreset === "slide-down") {
-    return { x: 0, y: -22, unit: "px" as const, scale: 1 };
-  }
-  if (animationPreset === "scale-in") {
-    return { x: 0, y: 0, unit: "px" as const, scale: 0.94 };
-  }
-  return {
-    x: 0,
-    y: entrance === "crossfade" ? 0 : 18,
-    unit: "px" as const,
-    scale: 1,
+  phase: "enter" | "exit",
+): OverlayAnimationType {
+  const content = overlay.content as OverlayDefinition["content"] & {
+    animation?: { preset?: string };
+    transition?: { preset?: string };
   };
+
+  if (phase === "enter") {
+    if (overlay.content.enterAnimation?.type) {
+      return overlay.content.enterAnimation.type;
+    }
+    switch (content.animation?.preset) {
+      case "slide-up":
+        return "slide-up-fade";
+      case "scale-in":
+        return "scale-fade";
+      case "fade":
+      case "slide-down":
+      case "blur-in":
+      default:
+        return "fade";
+    }
+  }
+
+  if (overlay.content.exitAnimation?.type) {
+    return overlay.content.exitAnimation.type;
+  }
+  switch (content.transition?.preset) {
+    case "zoom-dissolve":
+      return "scale-fade";
+    case "fade":
+    case "crossfade":
+    case "wipe":
+    case "blur-dissolve":
+      return "fade";
+    default:
+      return "none";
+  }
+}
+
+function getTransformOffset(
+  type: OverlayAnimationType,
+  phase: "enter" | "exit",
+) {
+  if (type === "slide-up-fade") {
+    return { x: 0, y: phase === "enter" ? 22 : -22, scale: 1 };
+  }
+  if (type === "slide-left-fade") {
+    return { x: phase === "enter" ? 22 : -22, y: 0, scale: 1 };
+  }
+  if (type === "scale-fade") {
+    return { x: 0, y: 0, scale: 0.94 };
+  }
+  return { x: 0, y: 0, scale: 1 };
+}
+
+function formatTranslateAxis(
+  baseValue: number,
+  baseUnit: "px" | "%",
+  offsetPx: number,
+) {
+  if (baseUnit === "%") {
+    if (Math.abs(offsetPx) < 0.001) {
+      return `${baseValue}%`;
+    }
+    return `calc(${baseValue}% + ${formatPx(offsetPx)})`;
+  }
+
+  return formatPx(baseValue + offsetPx);
 }
 
 export function getOverlayTransform(
   overlay: OverlayDefinition,
-  entrance: ProjectSectionManifest["runtimeProfile"]["overlayEntrance"],
-  introProgress: number,
-  outroProgress: number,
+  _entrance: ProjectSectionManifest["runtimeProfile"]["overlayEntrance"],
+  enterProgress: number,
+  exitProgress = 0,
 ) {
   const baseTranslate = getBaseOverlayTranslate(overlay);
-  const hidden = getOverlayHiddenOffset(overlay, entrance);
-  const introT = applyMotionEasing(introProgress, overlay.content.animation?.easing);
-  const exitT = applyMotionEasing(outroProgress, overlay.content.transition?.easing);
-  let translateX = baseTranslate.x;
-  let translateY = baseTranslate.y;
-  let scale = 1;
+  const enterType = getAnimationType(overlay, "enter");
+  const exitType = getAnimationType(overlay, "exit");
+  const enterOffset = getTransformOffset(enterType, "enter");
+  const exitOffset = getTransformOffset(exitType, "exit");
+  const offsetX = enterOffset.x * (1 - enterProgress) + exitOffset.x * exitProgress;
+  const offsetY = enterOffset.y * (1 - enterProgress) + exitOffset.y * exitProgress;
+  const enteredScale = mix(enterOffset.scale, 1, enterProgress);
+  const finalScale = mix(enteredScale, exitOffset.scale, exitProgress);
 
-  if (baseTranslate.unit === "px") {
-    translateX += hidden.x * (1 - introT);
-    translateY += hidden.y * (1 - introT);
-  }
-
-  scale = mix(hidden.scale ?? 1, 1, introT);
-
-  const transitionPreset = overlay.content.transition?.preset ?? "crossfade";
-  if (transitionPreset === "zoom-dissolve") {
-    scale *= mix(1, 1.04, exitT);
-  }
-
-  if (overlay.content.align === "center") {
-    if (hidden.unit === "calc-percent-plus-px") {
-      const yOffsetPx = 18;
-      const nextYOffset = formatPx(yOffsetPx * (1 - introT));
-      return `translate3d(-50%, calc(-50% + ${nextYOffset}), 0) scale(${formatScale(scale)})`;
-    }
-
-    return `translate3d(-50%, -50%, 0) scale(${formatScale(scale)})`;
-  }
-
-  return `translate3d(${formatPx(translateX)}, ${formatPx(translateY)}, 0) scale(${formatScale(scale)})`;
+  return `translate3d(${formatTranslateAxis(baseTranslate.x, baseTranslate.unit, offsetX)}, ${formatTranslateAxis(baseTranslate.y, baseTranslate.unit, offsetY)}, 0) scale(${formatScale(finalScale)})`;
 }
 
 export function getOverlayTransitionStyle(overlay: OverlayDefinition) {
-  const transition = overlay.content.transition;
-  if (!transition) {
-    return "";
-  }
-
-  if (transition.preset === "wipe") {
-    return "clip-path 220ms ease, opacity 220ms ease, transform 220ms ease";
-  }
-
-  if (transition.preset === "zoom-dissolve") {
-    return "opacity 240ms ease, transform 240ms ease, filter 240ms ease";
-  }
-
-  if (transition.preset === "blur-dissolve") {
-    return "opacity 220ms ease, filter 220ms ease, transform 220ms ease";
-  }
-
-  return "opacity 200ms ease, transform 200ms ease";
+  const enterDurationMs = Math.round((overlay.content.enterAnimation?.duration ?? 0.45) * 1000);
+  const exitDurationMs = Math.round((overlay.content.exitAnimation?.duration ?? 0.35) * 1000);
+  const durationMs = Math.max(160, Math.min(Math.max(enterDurationMs, exitDurationMs), 280));
+  return `opacity ${durationMs}ms ease, transform ${durationMs}ms ease, filter ${durationMs}ms ease`;
 }
 
 export function getTimedProgress(
@@ -358,49 +390,44 @@ export function getOverlayAnimationState(
 ) {
   const normalized = clampProgress(progress);
   const durationSeconds = getSectionDurationSeconds(section);
-  const introDelay = clampProgress((overlay.content.animation?.delay ?? 0) / durationSeconds);
-  const introDuration = clampProgress((overlay.content.animation?.duration ?? 0.45) / durationSeconds);
-  const outroDuration = clampProgress((overlay.content.transition?.duration ?? 0.4) / durationSeconds);
-  const introProgress = getTimedProgress(normalized, overlay.timing.start, introDelay, introDuration);
-  const outroStart = Math.max(overlay.timing.start, overlay.timing.end - outroDuration);
-  const outroProgress = clamp(
-    outroDuration <= Number.EPSILON ? (normalized >= overlay.timing.end ? 1 : 0) : (normalized - outroStart) / Math.max(overlay.timing.end - outroStart, Number.EPSILON),
-    0,
-    1,
+  const activeWindow = Math.max(overlay.timing.end - overlay.timing.start, 0.0001);
+  const enterDelay = clampProgress((overlay.content.enterAnimation?.delay ?? 0) / durationSeconds);
+  const availableEnterWindow = Math.max(activeWindow - enterDelay, 0);
+  const enterDuration = Math.min(
+    clampProgress((overlay.content.enterAnimation?.duration ?? 0.45) / durationSeconds),
+    Math.max(availableEnterWindow, 0.0001),
   );
-  const introOpacity = introProgress;
-  let outroOpacity = 1;
-  const transitionPreset = overlay.content.transition?.preset ?? "crossfade";
-  if (transitionPreset === "fade" || transitionPreset === "crossfade") {
-    outroOpacity = 1 - applyMotionEasing(outroProgress, overlay.content.transition?.easing);
-  } else if (transitionPreset === "wipe") {
-    outroOpacity = mix(1, 0.78, applyMotionEasing(outroProgress, overlay.content.transition?.easing));
-  } else {
-    outroOpacity = 1 - applyMotionEasing(outroProgress, overlay.content.transition?.easing) * 0.92;
-  }
+  const exitDuration = Math.min(
+    clampProgress((overlay.content.exitAnimation?.duration ?? 0.35) / durationSeconds),
+    Math.max(activeWindow, 0.0001),
+  );
+  const enterProgress = getTimedProgress(
+    normalized,
+    overlay.timing.start,
+    enterDelay,
+    overlay.content.enterAnimation?.type === "none" ? 0 : enterDuration,
+  );
+  const exitStart = Math.max(overlay.timing.start, overlay.timing.end - exitDuration);
+  const exitProgress =
+    overlay.content.exitAnimation?.type === "none"
+      ? 0
+      : getTimedProgress(normalized, exitStart, 0, exitDuration);
+  const easedEnterProgress = applyMotionEasing(
+    enterProgress,
+    overlay.content.enterAnimation?.easing,
+  );
+  const easedExitProgress = applyMotionEasing(
+    exitProgress,
+    overlay.content.exitAnimation?.easing,
+  );
 
   const opacity = clamp(
     (overlay.content.style?.opacity ?? 1) *
-      clamp(introOpacity, 0, 1) *
-      clamp(outroOpacity, 0, 1),
+      clamp(easedEnterProgress, 0, 1) *
+      clamp(1 - easedExitProgress, 0, 1),
     0,
     1,
   );
-  const filterBlur =
-    mix(
-      overlay.content.animation?.preset === "blur-in" ? 10 : 0,
-      0,
-      applyMotionEasing(introProgress, overlay.content.animation?.easing),
-    ) +
-    mix(
-      0,
-      transitionPreset === "blur-dissolve" ? 10 : transitionPreset === "zoom-dissolve" ? 1.5 : 0,
-      applyMotionEasing(outroProgress, overlay.content.transition?.easing),
-    );
-  const clipRightInset =
-    transitionPreset === "wipe"
-      ? mix(0, 100, applyMotionEasing(outroProgress, overlay.content.transition?.easing))
-      : 0;
   const active =
     normalized >= overlay.timing.start &&
     normalized < overlay.timing.end + 0.0001 &&
@@ -412,13 +439,10 @@ export function getOverlayAnimationState(
     transform: getOverlayTransform(
       overlay,
       section.runtimeProfile.overlayEntrance,
-      introProgress,
-      outroProgress,
+      easedEnterProgress,
+      easedExitProgress,
     ),
-    filter: filterBlur > 0.05 ? `blur(${Number(filterBlur.toFixed(3))}px)` : "blur(0px)",
-    clipPath:
-      clipRightInset > 0.05
-        ? `inset(0% ${Number(clipRightInset.toFixed(3))}% 0% 0%)`
-        : "inset(0% 0% 0% 0%)",
+    filter: "blur(0px)",
+    clipPath: "inset(0% 0% 0% 0%)",
   };
 }

@@ -36,6 +36,7 @@ import {
   choosePlaybackMode,
   getOverlayAnimationState,
   getOverlayPixelPlacement,
+  getSectionDurationSeconds,
   getOverlayTransform,
   getOverlayTransitionStyle,
   getStageScale,
@@ -88,12 +89,27 @@ function createSequenceState(initialProgress = 0): SequenceProgressState {
   };
 }
 
+function didSequenceMediaChange(
+  previousSection: ProjectSectionManifest,
+  nextSection: ProjectSectionManifest,
+) {
+  return (
+    previousSection.frameAssets !== nextSection.frameAssets ||
+    previousSection.frameCount !== nextSection.frameCount ||
+    previousSection.progressMapping.frameRange.start !== nextSection.progressMapping.frameRange.start ||
+    previousSection.progressMapping.frameRange.end !== nextSection.progressMapping.frameRange.end ||
+    previousSection.fallback.posterUrl !== nextSection.fallback.posterUrl ||
+    previousSection.fallback.firstFrameUrl !== nextSection.fallback.firstFrameUrl ||
+    previousSection.fallback.fallbackVideoUrl !== nextSection.fallback.fallbackVideoUrl
+  );
+}
+
 export function createScrollSection(
   container: HTMLElement,
   manifest: ProjectManifest,
   options: CreateScrollSectionOptions = {},
 ): ScrollSectionController {
-  const section = chooseSection(manifest);
+  let section = chooseSection(manifest);
   const { mode, fallback } = choosePlaybackMode(section, options);
   const interactionMode = options.interactionMode ?? "scroll";
   const stageRoot = ensureStageRoot(container, interactionMode);
@@ -119,6 +135,8 @@ export function createScrollSection(
   let lastRenderedFrameIndex: number | null = null;
   let animationFrame = 0;
   let tickActive = false;
+  let overlayTransitionsEnabled = options.enableOverlayTransitions ?? false;
+  let overlayPresentationDirty = false;
 
   container.style.position = "relative";
   container.style.height =
@@ -126,6 +144,55 @@ export function createScrollSection(
   container.style.minHeight = interactionMode === "controlled" ? "0" : "100vh";
   container.style.overflow = interactionMode === "controlled" ? "hidden" : "visible";
   container.dataset.presetKind = section.runtimeProfile.kind;
+
+  function updateOverlayTransitionsEnabled(enabled: boolean) {
+    overlayTransitionsEnabled = enabled;
+    overlayRoot.dataset.overlayTransitions =
+      interactionMode === "controlled" && !enabled ? "disabled" : "enabled";
+    for (const overlay of section.overlays) {
+      const card = overlayRoot.querySelector<HTMLElement>(`[data-overlay-id="${overlay.id}"]`);
+      if (!card) continue;
+      card.style.transition =
+        interactionMode === "controlled" && !enabled
+          ? "none"
+          : getOverlayTransitionStyle(overlay);
+    }
+  }
+
+  function rebuildOverlayRoot(nextSection: ProjectSectionManifest) {
+    section = nextSection;
+    overlayRoot.replaceChildren();
+    ensureOverlayRoot(
+      stageRoot,
+      section,
+      mode,
+      interactionMode,
+      overlayTransitionsEnabled,
+      overlayRoot,
+    );
+    overlayPresentationDirty = false;
+  }
+
+  function getEffectivePreloadWindow() {
+    if (!isControlled) {
+      return section.motion.preloadWindow;
+    }
+
+    const durationSeconds =
+      typeof section.motion.durationSeconds === "number" && section.motion.durationSeconds > 0
+        ? section.motion.durationSeconds
+        : Math.max(section.progressMapping.frameCount, section.frameCount, 1) / 24;
+    const visibleFrameCount = Math.max(
+      section.progressMapping.frameRange.end - section.progressMapping.frameRange.start + 1,
+      1,
+    );
+    const estimatedFps = Math.max(
+      1,
+      Math.round(visibleFrameCount / Math.max(durationSeconds, 0.1)),
+    );
+
+    return Math.min(40, Math.max(section.motion.preloadWindow, estimatedFps));
+  }
 
   function stopTick() {
     if (animationFrame && typeof cancelAnimationFrame === "function") {
@@ -182,7 +249,10 @@ export function createScrollSection(
       return;
     }
 
-    syncOverlayPresentationStyles(overlayRoot, section, stageRoot, mode);
+    if (overlayPresentationDirty) {
+      syncOverlayPresentationStyles(overlayRoot, section, stageRoot, mode);
+      overlayPresentationDirty = false;
+    }
 
     if (section.frameAssets.length === 0) {
       renderOverlayState(overlayRoot, section, progress);
@@ -257,14 +327,15 @@ export function createScrollSection(
     }
 
     const image = frameCache.get(frame.index);
-    if (image) {
+    if (image && lastRenderedFrameIndex !== frame.index) {
       renderSequenceFrame(canvas, image);
       posterPlaceholder?.remove();
       lastRenderedFrameIndex = frame.index;
     }
 
     const preloadTargets = new Set<number>();
-    for (let offset = 1; offset <= section.motion.preloadWindow; offset += 1) {
+    const effectivePreloadWindow = getEffectivePreloadWindow();
+    for (let offset = 1; offset <= effectivePreloadWindow; offset += 1) {
       const forward = desiredFrameIndex + offset;
       const backward = desiredFrameIndex - offset;
       if (forward <= section.progressMapping.frameRange.end) preloadTargets.add(forward);
@@ -327,8 +398,40 @@ export function createScrollSection(
   }
 
   if (fallback !== "sequence") {
-    cleanups.push(renderFallback(stageRoot, section, mode, fallback));
+    const fallbackResult = renderFallback(stageRoot, section, mode, fallback, interactionMode);
+    const fallbackVideo = fallbackResult.video;
+    const fallbackDurationSeconds = getSectionDurationSeconds(section);
+    cleanups.push(fallbackResult.cleanup);
+
+    function syncFallbackVideo(progress: number) {
+      if (!fallbackVideo || fallback !== "video") {
+        return;
+      }
+      const nextTime = clampProgress(progress) * fallbackDurationSeconds;
+      const currentTime =
+        typeof fallbackVideo.currentTime === "number" ? fallbackVideo.currentTime : 0;
+      if (Math.abs(currentTime - nextTime) > 0.05) {
+        fallbackVideo.currentTime = nextTime;
+      }
+    }
+
+    if (fallbackVideo && fallback === "video") {
+      const handleFallbackVideoReady = () => {
+        syncFallbackVideo(sequenceState.currentProgress);
+        if (overlayTransitionsEnabled && interactionMode === "controlled" && typeof fallbackVideo.play === "function") {
+          void fallbackVideo.play().catch(() => undefined);
+        }
+      };
+      fallbackVideo.addEventListener("loadedmetadata", handleFallbackVideoReady);
+      fallbackVideo.addEventListener("loadeddata", handleFallbackVideoReady);
+      cleanups.push(() => {
+        fallbackVideo.removeEventListener("loadedmetadata", handleFallbackVideoReady);
+        fallbackVideo.removeEventListener("loadeddata", handleFallbackVideoReady);
+      });
+    }
+
     renderOverlayState(overlayRoot, section, 0);
+    syncFallbackVideo(sequenceState.currentProgress);
 
     return {
       destroy() {
@@ -343,14 +446,42 @@ export function createScrollSection(
       },
       refresh() {
         renderOverlayState(overlayRoot, section, sequenceState.currentProgress);
+        syncFallbackVideo(sequenceState.currentProgress);
       },
       setProgress(progress: number) {
         setImmediateProgress(progress);
         renderOverlayState(overlayRoot, section, sequenceState.currentProgress);
+        if (!overlayTransitionsEnabled || interactionMode !== "controlled") {
+          syncFallbackVideo(sequenceState.currentProgress);
+        }
       },
       setTargetProgress(progress: number) {
         setImmediateProgress(progress);
         renderOverlayState(overlayRoot, section, sequenceState.currentProgress);
+        if (!overlayTransitionsEnabled || interactionMode !== "controlled") {
+          syncFallbackVideo(sequenceState.currentProgress);
+        }
+      },
+      setOverlayTransitionsEnabled(enabled: boolean) {
+        updateOverlayTransitionsEnabled(enabled);
+        if (fallbackVideo && fallback === "video" && interactionMode === "controlled") {
+          if (enabled) {
+            syncFallbackVideo(sequenceState.currentProgress);
+            if (typeof fallbackVideo.play === "function") {
+              void fallbackVideo.play().catch(() => undefined);
+            }
+          } else {
+            if (typeof fallbackVideo.pause === "function") {
+              fallbackVideo.pause();
+            }
+            syncFallbackVideo(sequenceState.currentProgress);
+          }
+        }
+      },
+      updateManifest(nextManifest: ProjectManifest) {
+        rebuildOverlayRoot(chooseSection(nextManifest));
+        renderOverlayState(overlayRoot, section, sequenceState.currentProgress);
+        syncFallbackVideo(sequenceState.currentProgress);
       },
       getProgress() {
         return sequenceState.currentProgress;
@@ -361,7 +492,7 @@ export function createScrollSection(
     };
   }
 
-  const posterPlaceholder = createPosterPlaceholder(
+  let posterPlaceholder = createPosterPlaceholder(
     stageRoot,
     section,
     mode,
@@ -371,6 +502,7 @@ export function createScrollSection(
   const resizeObserver =
     typeof ResizeObserver !== "undefined"
       ? new ResizeObserver(() => {
+          overlayPresentationDirty = true;
           lastRenderedFrameIndex = null;
           void renderForProgress(sequenceState.currentProgress);
         })
@@ -393,6 +525,7 @@ export function createScrollSection(
   if (interactionMode === "scroll") {
     const handleScroll = () => syncScrollProgress();
     const handleResize = () => {
+      overlayPresentationDirty = true;
       lastRenderedFrameIndex = null;
       syncScrollProgress();
       void renderForProgress(sequenceState.currentProgress);
@@ -434,6 +567,7 @@ export function createScrollSection(
       }
     },
     refresh() {
+      overlayPresentationDirty = true;
       lastRenderedFrameIndex = null;
       syncScrollProgress();
       void renderForProgress(sequenceState.currentProgress);
@@ -444,6 +578,29 @@ export function createScrollSection(
     },
     setTargetProgress(progress: number) {
       updateTargetProgress(progress);
+    },
+    setOverlayTransitionsEnabled(enabled: boolean) {
+      updateOverlayTransitionsEnabled(enabled);
+    },
+    updateManifest(nextManifest: ProjectManifest) {
+      const nextSection = chooseSection(nextManifest);
+      const mediaChanged = didSequenceMediaChange(section, nextSection);
+      rebuildOverlayRoot(nextSection);
+      if (mediaChanged) {
+        frameCache.clear();
+        framePromiseCache.clear();
+        latestRequestedFrameIndex = null;
+        lastRenderedFrameIndex = null;
+        posterPlaceholder?.remove();
+        posterPlaceholder = createPosterPlaceholder(
+          stageRoot,
+          section,
+          mode,
+          sequenceState.currentProgress,
+        );
+      }
+      overlayPresentationDirty = false;
+      void renderForProgress(sequenceState.currentProgress);
     },
     getProgress() {
       return sequenceState.currentProgress;

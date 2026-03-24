@@ -33,6 +33,8 @@ export function ProjectSwitcher({
   scrubStrength,
   sectionHeightVh,
   projects,
+  open,
+  onOpenChange,
   onProjectTitleChange,
   onSectionTitleChange,
   onFrameRangeChange,
@@ -46,16 +48,27 @@ export function ProjectSwitcher({
   scrubStrength: number;
   sectionHeightVh: number;
   projects: SwitcherProject[];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   onProjectTitleChange: (value: string) => void;
   onSectionTitleChange: (value: string) => void;
   onFrameRangeChange: (field: "start" | "end", value: number) => void;
   onSectionFieldChange: (field: "scrubStrength" | "sectionHeightVh", value: number) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [query, setQuery] = useState("");
   const [renameValue, setRenameValue] = useState(currentProjectTitle);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const isControlled = typeof open === "boolean";
+  const resolvedOpen = open ?? uncontrolledOpen;
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!isControlled) {
+      setUncontrolledOpen(nextOpen);
+    }
+    onOpenChange?.(nextOpen);
+  }
 
   useEffect(() => {
     setMounted(true);
@@ -83,7 +96,7 @@ export function ProjectSwitcher({
     }
 
     onProjectTitleChange(nextTitle);
-    setOpen(false);
+    handleOpenChange(false);
   }
 
   async function duplicateCurrentProject() {
@@ -143,7 +156,7 @@ export function ProjectSwitcher({
   }
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Root open={resolvedOpen} onOpenChange={handleOpenChange}>
       <Popover.Trigger asChild>{trigger}</Popover.Trigger>
 
       <Popover.Portal>

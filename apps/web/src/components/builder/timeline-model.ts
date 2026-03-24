@@ -15,6 +15,7 @@ export type TimelineFrameStripSource = {
     url: string;
   }>;
   frameCount: number;
+  fallbackUrl?: string;
 };
 
 export type TimelineClipModel = {
@@ -24,17 +25,19 @@ export type TimelineClipModel = {
   start: number;
   end: number;
   tint?: "accent" | "muted";
-  metadata?: {
-    overlayId?: string;
-    theme?: string;
-    frameStrip?: string[];
-    frameStripSource?: TimelineFrameStripSource;
-    text?: string;
-    transitionPreset?: string;
-    contentType?: string;
-    layerIndex?: number;
-    isGroup?: boolean;
-    childCount?: number;
+    metadata?: {
+      overlayId?: string;
+      theme?: string;
+      frameStrip?: string[];
+      frameStripSource?: TimelineFrameStripSource;
+      text?: string;
+      contentType?: string;
+      enterAnimationType?: string;
+      exitAnimationType?: string;
+      sceneTransitionPreset?: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+      layerIndex?: number;
+      isGroup?: boolean;
+      childCount?: number;
   };
 };
 
@@ -202,12 +205,19 @@ function getTimelineFrameStripSource(
   section: ProjectManifest["sections"][number],
   mode: "desktop" | "mobile",
 ): TimelineFrameStripSource {
+  const frames = section.frameAssets.flatMap((frameAsset) => {
+    const url = getTimelineFrameAssetUrl(frameAsset, mode);
+    return url ? [{ index: frameAsset.index, url }] : [];
+  });
+  const fallbackUrl =
+    section.fallback.posterUrl ??
+    section.fallback.firstFrameUrl ??
+    frames[0]?.url;
+
   return {
-    frames: section.frameAssets.flatMap((frameAsset) => {
-      const url = getTimelineFrameAssetUrl(frameAsset, mode);
-      return url ? [{ index: frameAsset.index, url }] : [];
-    }),
+    frames,
     frameCount: Math.max(section.frameCount, 1),
+    fallbackUrl,
   };
 }
 
@@ -293,15 +303,16 @@ function createOverlayClip(
     start: overlay.timing.start,
     end: overlay.timing.end,
     tint: "accent",
-    metadata: {
-      overlayId: overlay.id,
-      theme: overlay.content.theme,
-      text: overlay.content.text,
-      transitionPreset: overlay.content.transition?.preset,
-      contentType: overlay.content.type ?? "text",
-      layerIndex,
-      isGroup: overlay.content.type === "group",
-      childCount,
+      metadata: {
+        overlayId: overlay.id,
+        theme: overlay.content.theme,
+        text: overlay.content.text,
+        contentType: overlay.content.type ?? "text",
+        enterAnimationType: overlay.content.enterAnimation?.type ?? "fade",
+        exitAnimationType: overlay.content.exitAnimation?.type ?? "none",
+        layerIndex,
+        isGroup: overlay.content.type === "group",
+        childCount,
     },
   };
 }
@@ -338,6 +349,8 @@ export function deriveTimelineTracks(
     metadata: {
       frameStrip: getFrameStrip(section, mode),
       frameStripSource: getTimelineFrameStripSource(section, mode),
+      sceneTransitionPreset:
+        section.transitions.find((transition) => transition.scope === "sequence")?.preset ?? "none",
     },
   };
 

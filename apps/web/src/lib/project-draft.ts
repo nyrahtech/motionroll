@@ -59,6 +59,8 @@ export function buildProjectDraftDocument(
     presetId: project.selectedPreset,
     sectionTitle:
       projectSection?.title ?? manifestSection?.title ?? "Primary cinematic section",
+    sceneTransitionPreset:
+      manifestSection?.transitions.find((transition) => transition.scope === "sequence")?.preset ?? "none",
     sectionHeightVh:
       projectSection?.commonConfig.sectionHeightVh ??
       manifestSection?.motion.sectionHeightVh ??

@@ -109,7 +109,7 @@ test.describe("Editor layout flow", () => {
 
     await dragLocator(page, page.getByRole("button", { name: "Drag overlay" }), { x: 140, y: 80 });
 
-    await expect(page.getByRole("status", { name: /save status: saved/i })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("status", { name: /save status: save/i })).toBeVisible({ timeout: 15_000 });
 
     const afterMove = await waitForOverlay(
       request,
@@ -131,7 +131,7 @@ test.describe("Editor layout flow", () => {
       { x: 160, y: 90 },
     );
 
-    await expect(page.getByRole("status", { name: /save status: saved/i })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("status", { name: /save status: save/i })).toBeVisible({ timeout: 15_000 });
 
     const resizedOverlay = await waitForOverlay(
       request,

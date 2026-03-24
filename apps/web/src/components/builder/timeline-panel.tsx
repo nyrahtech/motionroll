@@ -15,15 +15,7 @@ import {
   SkipForward,
   Ungroup,
 } from "lucide-react";
-import { clampProgress, progressToFrameBoundaryIndex } from "@motionroll/shared";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { clampProgress, progressToFrameBoundaryIndex, type OverlayAnimationType } from "@motionroll/shared";
 import { collectSnapPoints, getTimelineFrameStripForProgressRange, getTimelineTimeLabel, type TimelineClipModel, type TimelineSelection, type TimelineTrackModel, type TimelineTrackType } from "./timeline-model";
 import type {
   ClipDragMode,
@@ -41,12 +33,15 @@ import { TimelinePlayhead } from "./timeline/TimelinePlayhead";
 import { TimelineScrollArea } from "./timeline/TimelineScrollArea";
 import { TimelineTrackRow } from "./timeline/TimelineTrackRow";
 import { TimelineLayerLabel } from "./timeline/TimelineLayerLabel";
+import type { EditorPlaybackController } from "./hooks/useEditorPlayback";
+import { usePlaybackProgress } from "./hooks/useEditorPlayback";
+import { TIMELINE_START_OFFSET } from "./timeline-layout";
 
 type TimelinePanelProps = {
   tracks: TimelineTrackModel[];
   selection: TimelineSelection;
   selectedClipIds: string[];
-  playhead: number;
+  playback: EditorPlaybackController;
   durationSeconds: number;
   isPlaying: boolean;
   canUndo: boolean;
@@ -69,8 +64,13 @@ type TimelinePanelProps = {
   onDeleteClip: (clipId: string) => void;
   onMoveClipToLayer: (clipId: string, layerIndex: number) => void;
   onMoveClipToNewLayer: (clipId: string) => void;
+  onSetClipEnterAnimationType: (clipId: string, type: OverlayAnimationType) => void;
+  onSetClipExitAnimationType: (clipId: string, type: OverlayAnimationType) => void;
+  onOpenSceneAnimation: () => void;
+  onSetSceneTransitionPreset: (
+    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve",
+  ) => void;
   onReorderTracks: (fromIndex: number, toIndex: number) => void;
-  onSetClipTransitionPreset: (clipId: string, preset?: string) => void;
 };
 
 // Drag and state types live in timeline-types.ts to avoid circular deps
@@ -84,6 +84,7 @@ const EDGE_SCROLL_MAX_STEP = 18;
 const FRAME_STRIP_TARGET_TILE_WIDTH = 72;
 const FRAME_STRIP_MIN_SAMPLES = 4;
 const FRAME_STRIP_MAX_SAMPLES = 18;
+const PLAYHEAD_SCROLL_PADDING = 96;
 
 function isResizeMode(mode: ClipDragMode) {
   return mode === "resize-start" || mode === "resize-end";
@@ -149,10 +150,10 @@ function TimelineControlButton({
 }
 
 function PlaybackStrip({
-  playhead, duration, isPlaying, canUndo, canRedo, canGroupSelection, canUngroupSelection,
+  playback, duration, isPlaying, canUndo, canRedo, canGroupSelection, canUngroupSelection,
   onFrameChange, onTogglePlay, onUndo, onRedo, onGroupSelection, onUngroupSelection, onAddLayer,
 }: {
-  playhead: number; duration: number; isPlaying: boolean;
+  playback: EditorPlaybackController; duration: number; isPlaying: boolean;
   canUndo: boolean;
   canRedo: boolean;
   canGroupSelection: boolean;
@@ -165,6 +166,7 @@ function PlaybackStrip({
   onUngroupSelection: () => void;
   onAddLayer: () => void;
 }) {
+  const playhead = usePlaybackProgress(playback);
   const currentSec = playhead * duration;
   const ib = "flex h-8 w-8 items-center justify-center rounded-md text-[var(--editor-text-dim)] transition-colors hover:bg-[var(--editor-hover)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)] disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-[var(--editor-text-dim)]";
   return (
@@ -222,12 +224,16 @@ function PlaybackStrip({
 }
 
 export function TimelinePanel({
-  tracks, selection, selectedClipIds, playhead, durationSeconds, isPlaying, canUndo, canRedo,
+  tracks, selection, selectedClipIds, playback, durationSeconds, isPlaying, canUndo, canRedo,
   canGroupSelection, canUngroupSelection, onPlayToggle, onUndo, onRedo, onGroupSelection, onUngroupSelection, onPlayheadChange, onSelectionChange,
   onClipTimingChange, onCommitClipMove, onAddLayer, onDeleteLayer, onAddAtPlayhead, onDuplicateClip, onDeleteClip,
   onMoveClipToLayer,
   onMoveClipToNewLayer,
-  onReorderTracks, onSetClipTransitionPreset,
+  onSetClipEnterAnimationType,
+  onSetClipExitAnimationType,
+  onOpenSceneAnimation,
+  onSetSceneTransitionPreset,
+  onReorderTracks,
 }: TimelinePanelProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const trackAreaRef = useRef<HTMLDivElement | null>(null);
@@ -254,8 +260,7 @@ export function TimelinePanel({
   const [deletingTrackId, setDeletingTrackId] = useState<string | null>(null);
   const previousLayerTrackIdsRef = useRef<string[]>([]);
   const totalW = Math.max(960, Math.round(durationSeconds * PX_PER_SEC));
-  const playheadX = LABEL_W + playhead * totalW;
-  const rulerTicks = Math.max(6, Math.ceil(durationSeconds));
+  const totalTrackW = totalW + TIMELINE_START_OFFSET;
   const sceneTrack = tracks.find((t) => t.type === "section");
   const layerTracks = tracks.filter((t) => t.type === "layer");
   const draggedClip = draggingClipId
@@ -294,6 +299,34 @@ export function TimelinePanel({
     }
     return cache;
   }, [clipTimingPreview, totalW, tracks]);
+
+  useEffect(() => {
+    const syncScrollToPlayhead = () => {
+      const scroll = scrollRef.current;
+      if (!scroll) return;
+
+      const trackViewportWidth = Math.max(scroll.clientWidth - LABEL_W, 1);
+      const maxScrollLeft = Math.max(0, scroll.scrollWidth - scroll.clientWidth);
+      const playheadX = TIMELINE_START_OFFSET + playback.getPlayhead() * totalW;
+      const visibleStart = scroll.scrollLeft;
+      const visibleEnd = visibleStart + trackViewportWidth;
+
+      if (playheadX <= visibleStart + PLAYHEAD_SCROLL_PADDING) {
+        scroll.scrollLeft = Math.max(0, playheadX - PLAYHEAD_SCROLL_PADDING);
+        return;
+      }
+
+      if (playheadX >= visibleEnd - PLAYHEAD_SCROLL_PADDING) {
+        scroll.scrollLeft = Math.min(
+          maxScrollLeft,
+          playheadX - trackViewportWidth + PLAYHEAD_SCROLL_PADDING,
+        );
+      }
+    };
+
+    syncScrollToPlayhead();
+    return playback.subscribe(syncScrollToPlayhead);
+  }, [playback, totalW]);
 
   useEffect(() => {
     const previousIds = previousLayerTrackIdsRef.current;
@@ -337,8 +370,7 @@ export function TimelinePanel({
   }, [onDeleteLayer]);
 
 
-  // Layer rows memoized — playhead scrubbing must not re-render clip DOM
-  const layerRows = React.useMemo(
+  const layerRowDescriptors = React.useMemo(
     () => layerTracks.map((track, originalIndex) => {
       const isDropTarget = dropTrackIndex === originalIndex;
       const isDraggingRow = draggingTrackIndex === originalIndex;
@@ -350,7 +382,9 @@ export function TimelinePanel({
         isBlockMoveDrag && clipMovePreview?.targetTrackIndex === originalIndex
           ? clipMovePreview
           : null;
-      const previewLeft = movePreviewForTrack ? movePreviewForTrack.targetStart * totalW : 0;
+      const previewLeft = movePreviewForTrack
+        ? TIMELINE_START_OFFSET + movePreviewForTrack.targetStart * totalW
+        : 0;
       const previewWidth = movePreviewForTrack
         ? Math.max(18, (movePreviewForTrack.targetEnd - movePreviewForTrack.targetStart) * totalW)
         : 0;
@@ -363,17 +397,114 @@ export function TimelinePanel({
         dropTrackIndex != null &&
         draggingTrackIndex !== dropTrackIndex &&
         isDropTarget;
+      const showDropZone =
+        isDropTarget &&
+        ((isLayerReorderDrag && draggingTrackIndex !== originalIndex) || movePreviewForTrack != null);
+      return {
+        track,
+        originalIndex,
+        isDropTarget,
+        isDraggingRow,
+        isLayerReorderDrag,
+        isBlockMoveDrag,
+        isRecentlyAdded,
+        isDeleting,
+        movePreviewForTrack,
+        previewLeft,
+        previewWidth,
+        previewTimeLabel,
+        showInsertionCue,
+        showDropZone,
+      };
+    }),
+    [layerTracks, dropTrackIndex, draggingTrackIndex, dragGhost,
+     draggingClipMode, draggingClipId, clipMovePreview, recentlyAddedTrackId,
+     deletingTrackId, durationSeconds, totalW],
+  );
+
+  const layerLabelRows = React.useMemo(
+    () => layerRowDescriptors.map((descriptor) => (
+      <div
+        key={descriptor.track.id}
+        className="relative border-b transition-[background,transform,opacity,box-shadow]"
+        style={{
+          borderColor: "var(--editor-border)",
+          opacity: descriptor.isDeleting
+            ? 0
+            : (descriptor.isLayerReorderDrag &&
+                draggingTrackIndex != null &&
+                !descriptor.isDraggingRow)
+              ? 0.94
+              : 1,
+          animation: descriptor.isDeleting
+            ? "timeline-layer-removing 140ms ease forwards"
+            : descriptor.isRecentlyAdded
+              ? "timeline-layer-added 220ms ease"
+              : undefined,
+          pointerEvents: descriptor.isDeleting ? "none" : undefined,
+          overflow: descriptor.isDeleting ? "hidden" : undefined,
+        }}
+      >
+        {descriptor.showInsertionCue ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 z-[12] h-0.5"
+            style={{ background: "var(--editor-accent)", boxShadow: "0 0 10px rgba(103,232,249,0.45)" }}
+          />
+        ) : null}
+        <TimelineLayerLabel
+          track={descriptor.track}
+          originalIndex={descriptor.originalIndex}
+          labelW={LABEL_W}
+          isDraggingRow={descriptor.isDraggingRow}
+          isLayerReorderDrag={descriptor.isLayerReorderDrag}
+          isDropTarget={descriptor.isDropTarget}
+          showInsertionCue={descriptor.showInsertionCue}
+          movePreviewForTrack={descriptor.movePreviewForTrack}
+          previewTimeLabel={descriptor.previewTimeLabel}
+          draggedClipLabel={draggedClip?.label}
+          beginTrackReorder={beginTrackReorder}
+          onDeleteLayer={(idx) => handleDeleteLayerWithAnimation(descriptor.track.id, idx)}
+        />
+      </div>
+    )),
+    [beginTrackReorder, draggedClip?.label, handleDeleteLayerWithAnimation, layerRowDescriptors],
+  );
+
+  // Layer rows memoized — playhead scrubbing must not re-render clip DOM
+  const layerRows = React.useMemo(
+    () => layerRowDescriptors.map((descriptor) => {
+      const {
+        track,
+        originalIndex,
+        isDropTarget,
+        isDraggingRow,
+        isLayerReorderDrag,
+        isBlockMoveDrag,
+        isRecentlyAdded,
+        isDeleting,
+        movePreviewForTrack,
+        previewLeft,
+        previewWidth,
+        previewTimeLabel,
+        showInsertionCue,
+        showDropZone,
+      } = descriptor;
+
       return (
         <div
           key={track.id}
           ref={(node) => { rowRefs.current[`layer-${originalIndex}`] = node; }}
-          className="relative flex border-b transition-[background,transform,opacity,box-shadow]"
+          className="relative border-b transition-[background,transform,opacity,box-shadow]"
           style={{
             borderColor: "var(--editor-border)",
-            background: isDropTarget ? "rgba(103,232,249,0.05)" : "transparent",
+            background: showDropZone ? "rgba(103,232,249,0.09)" : isDropTarget ? "rgba(103,232,249,0.05)" : "transparent",
             opacity: isDeleting ? 0 : (isLayerReorderDrag && draggingTrackIndex != null && !isDraggingRow) ? 0.94 : 1,
             transform: isLayerReorderDrag && isDraggingRow ? "translateX(4px)" : undefined,
-            boxShadow: isLayerReorderDrag && isDraggingRow ? "inset 0 0 0 1px rgba(103,232,249,0.35), 0 10px 24px rgba(0,0,0,0.18)" : undefined,
+            boxShadow: isLayerReorderDrag && isDraggingRow
+              ? "inset 0 0 0 1px rgba(103,232,249,0.35), 0 10px 24px rgba(0,0,0,0.18)"
+              : showDropZone
+                ? "inset 0 0 0 1px rgba(103,232,249,0.24)"
+                : undefined,
             animation: isDeleting
               ? "timeline-layer-removing 140ms ease forwards"
               : isRecentlyAdded
@@ -383,69 +514,69 @@ export function TimelinePanel({
             overflow: isDeleting ? "hidden" : undefined,
           }}
         >
+          {showDropZone ? (
+            <div
+              className="pointer-events-none absolute inset-x-2 inset-y-1 z-[10] rounded-lg border border-dashed"
+              style={{
+                borderColor: "rgba(103,232,249,0.5)",
+                background: "linear-gradient(90deg, rgba(103,232,249,0.12) 0%, rgba(103,232,249,0.04) 100%)",
+                boxShadow: "inset 0 0 0 1px rgba(103,232,249,0.12), 0 0 18px rgba(103,232,249,0.08)",
+              }}
+            >
+              <div
+                className="absolute inset-y-2 left-0 w-1 rounded-full"
+                style={{ background: "var(--editor-accent)", boxShadow: "0 0 12px rgba(103,232,249,0.45)" }}
+              />
+            </div>
+          ) : null}
           {showInsertionCue ? (
             <div
               className="pointer-events-none absolute inset-x-0 top-0 z-[12] h-0.5"
               style={{ background: "var(--editor-accent)", boxShadow: "0 0 10px rgba(103,232,249,0.45)" }}
             />
           ) : null}
-          <TimelineLayerLabel
-            track={track}
-            originalIndex={originalIndex}
-            labelW={LABEL_W}
-            isDraggingRow={isDraggingRow}
-            isLayerReorderDrag={isLayerReorderDrag}
-            isDropTarget={isDropTarget}
-            showInsertionCue={showInsertionCue}
-            movePreviewForTrack={movePreviewForTrack}
-            previewTimeLabel={previewTimeLabel}
-            draggedClipLabel={draggedClip?.label}
-            beginTrackReorder={beginTrackReorder}
-            onDeleteLayer={(idx) => handleDeleteLayerWithAnimation(track.id, idx)}
-          />
-          <div className="relative min-w-0 flex-1">
-            {movePreviewForTrack ? (
-              <div className="pointer-events-none absolute inset-0 z-[11] p-2">
+          {movePreviewForTrack ? (
+            <div className="pointer-events-none absolute inset-0 z-[11] p-2">
+              <div
+                className="absolute top-3 h-10 overflow-hidden rounded-md border border-dashed"
+                style={{
+                  left: previewLeft,
+                  width: previewWidth,
+                  borderColor: "rgba(103,232,249,0.58)",
+                  background: "rgba(103,232,249,0.08)",
+                  boxShadow: "inset 0 0 0 1px rgba(103,232,249,0.18), 0 0 18px rgba(103,232,249,0.12)",
+                }}
+              >
                 <div
-                  className="absolute top-3 h-10 overflow-hidden rounded-md border border-dashed"
-                  style={{
-                    left: previewLeft,
-                    width: previewWidth,
-                    borderColor: "rgba(103,232,249,0.58)",
-                    background: "rgba(103,232,249,0.08)",
-                    boxShadow: "inset 0 0 0 1px rgba(103,232,249,0.18), 0 0 18px rgba(103,232,249,0.12)",
-                  }}
-                >
-                  <div
-                    className="absolute inset-y-1 left-0 w-px"
-                    style={{ background: "rgba(103,232,249,0.72)", boxShadow: "0 0 10px rgba(103,232,249,0.3)" }}
-                  />
-                  <div
-                    className="absolute inset-y-1 right-0 w-px"
-                    style={{ background: "rgba(103,232,249,0.72)", boxShadow: "0 0 10px rgba(103,232,249,0.3)" }}
-                  />
-                  <div className="flex h-full items-center justify-between gap-2 px-2">
-                    <div className="min-w-0">
-                      <span className="block truncate text-xs font-medium text-[var(--editor-accent)]">
-                        {draggedClip?.label ?? movePreviewForTrack.draggedClipId}
-                      </span>
-                      <span className="block truncate text-[10px] uppercase tracking-[0.1em]" style={{ color: "rgba(103,232,249,0.78)" }}>
-                        {movePreviewForTrack.isCrossLayerMove ? `Move to ${track.label}` : `Drop at ${previewTimeLabel}`}
-                      </span>
-                    </div>
-                    {movePreviewForTrack.isSnapped ? (
-                      <span
-                        className="rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em]"
-                        style={{ background: "rgba(103,232,249,0.14)", color: "var(--editor-accent)" }}
-                      >
-                        Snapped
-                      </span>
-                    ) : null}
+                  className="absolute inset-y-1 left-0 w-px"
+                  style={{ background: "rgba(103,232,249,0.72)", boxShadow: "0 0 10px rgba(103,232,249,0.3)" }}
+                />
+                <div
+                  className="absolute inset-y-1 right-0 w-px"
+                  style={{ background: "rgba(103,232,249,0.72)", boxShadow: "0 0 10px rgba(103,232,249,0.3)" }}
+                />
+                <div className="flex h-full items-center justify-between gap-2 px-2">
+                  <div className="min-w-0">
+                    <span className="block truncate text-xs font-medium text-[var(--editor-accent)]">
+                      {draggedClip?.label ?? movePreviewForTrack.draggedClipId}
+                    </span>
+                    <span className="block truncate text-[10px] uppercase tracking-[0.1em]" style={{ color: "rgba(103,232,249,0.78)" }}>
+                      {movePreviewForTrack.isCrossLayerMove ? `Move to ${track.label}` : `Drop at ${previewTimeLabel}`}
+                    </span>
                   </div>
+                  {movePreviewForTrack.isSnapped ? (
+                    <span
+                      className="rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em]"
+                      style={{ background: "rgba(103,232,249,0.14)", color: "var(--editor-accent)" }}
+                    >
+                      Snapped
+                    </span>
+                  ) : null}
                 </div>
               </div>
-            ) : null}
-            <TimelineTrackRow
+            </div>
+          ) : null}
+          <TimelineTrackRow
                 track={track}
                 totalW={totalW}
                 tint="rgba(255,255,255,0.06)"
@@ -459,29 +590,29 @@ export function TimelinePanel({
                 canGroupSelection={canGroupSelection}
                 layerTracks={layerTracks}
                 onPlayheadChange={onPlayheadChange}
-                onSetClipTransitionPreset={onSetClipTransitionPreset}
                 onGroupSelection={onGroupSelection}
                 onUngroupSelection={onUngroupSelection}
                 onMoveClipToNewLayer={onMoveClipToNewLayer}
                 onMoveClipToLayer={onMoveClipToLayer}
                 onDuplicateClip={onDuplicateClip}
                 onDeleteClip={onDeleteClip}
+                onSetClipEnterAnimationType={onSetClipEnterAnimationType}
+                onSetClipExitAnimationType={onSetClipExitAnimationType}
+                onOpenSceneAnimation={onOpenSceneAnimation}
+                onSetSceneTransitionPreset={onSetSceneTransitionPreset}
                 shouldSuppressClick={shouldSuppressClick}
                 beginClipDrag={beginClipDrag}
               />
-          </div>
         </div>
       );
     }),
     // playhead intentionally excluded: clip bars don't render the scrub position
-    [layerTracks, dropTrackIndex, draggingTrackIndex, dragGhost,
-     draggingClipMode, draggingClipId, clipMovePreview, recentlyAddedTrackId,
-     deletingTrackId, selection, selectedClipIds, canGroupSelection,
+    [layerRowDescriptors, selection, selectedClipIds, canGroupSelection,
      clipTimingPreview, totalW, durationSeconds, draggedClip, frameStripCache,
-     onDeleteLayer, onPlayheadChange, beginTrackReorder, onSetClipTransitionPreset,
-     onGroupSelection, onUngroupSelection, onMoveClipToNewLayer,
+     onPlayheadChange, onGroupSelection, onUngroupSelection, onMoveClipToNewLayer,
      onMoveClipToLayer, onDuplicateClip, onDeleteClip,
-     shouldSuppressClick, beginClipDrag, handleDeleteLayerWithAnimation],
+     onSetClipEnterAnimationType, onSetClipExitAnimationType,
+     shouldSuppressClick, beginClipDrag],
   );
 
   return (
@@ -497,7 +628,7 @@ export function TimelinePanel({
       `}</style>
 
       <PlaybackStrip
-        playhead={playhead}
+        playback={playback}
         duration={durationSeconds}
         isPlaying={isPlaying}
         canUndo={canUndo}
@@ -513,28 +644,58 @@ export function TimelinePanel({
         onUngroupSelection={onUngroupSelection}
       />
 
-      <TimelineScrollArea ref={scrollRef} minWidth={totalW + LABEL_W}>
+      <TimelineScrollArea ref={scrollRef} minWidth={totalTrackW + LABEL_W}>
         <>
-          <TimelineRuler
-            totalW={totalW}
-            durationSeconds={durationSeconds}
-            labelW={LABEL_W}
-            playheadProgress={playhead}
-            onPlayheadPointerDown={handlePlayheadPointerDown}
-            trackAreaRef={trackAreaRef}
-          />
-
-          <div className="flex border-b" style={{ borderColor: "var(--editor-border)" }}>
+          <div className="flex min-h-full">
             <div
-              className="sticky left-0 z-[8] flex h-14 shrink-0 items-center border-r px-4"
-              style={{ width: LABEL_W, background: "var(--editor-panel)", borderColor: "var(--editor-border)" }}
+              className="sticky left-0 z-[60] flex min-h-full w-[168px] shrink-0 flex-col self-stretch"
+              style={{
+                background: "var(--editor-panel)",
+                borderRight: "1px solid var(--editor-border)",
+              }}
             >
-              <span className="truncate text-xs font-medium tracking-[0.03em]" style={{ color: "var(--editor-text)" }}>
-                Scene range
-              </span>
+              <div
+                className="flex h-8 items-center border-b px-3"
+                style={{
+                  background: "var(--editor-panel-elevated)",
+                  borderColor: "var(--editor-border)",
+                }}
+              >
+                <span
+                  className="truncate text-[10px] font-medium uppercase tracking-[0.12em]"
+                  style={{ color: "var(--editor-text-dim)" }}
+                >
+                  Layers
+                </span>
+              </div>
+              <div
+                className="flex h-14 items-center border-b px-4"
+                style={{ borderColor: "var(--editor-border)" }}
+              >
+                <span
+                  className="truncate text-xs font-medium tracking-[0.03em]"
+                  style={{ color: "var(--editor-text)" }}
+                >
+                  Scene clip
+                </span>
+              </div>
+              {layerLabelRows}
+              <div className="min-h-0 flex-1" />
             </div>
-            <div className="min-w-0 flex-1">
-              <TimelineTrackRow
+
+            <div className="relative min-w-0 flex-1" style={{ width: totalTrackW }}>
+              <TimelineRuler
+                totalW={totalW}
+                durationSeconds={durationSeconds}
+                labelW={LABEL_W}
+                playback={playback}
+                onPlayheadPointerDown={handlePlayheadPointerDown}
+                trackAreaRef={trackAreaRef}
+                hideLabelColumn
+              />
+
+              <div className="border-b" style={{ borderColor: "var(--editor-border)" }}>
+                <TimelineTrackRow
               track={sceneTrack}
               totalW={totalW}
               showFrameStrip
@@ -548,22 +709,30 @@ export function TimelinePanel({
               canGroupSelection={canGroupSelection}
               layerTracks={layerTracks}
               onPlayheadChange={onPlayheadChange}
-              onSetClipTransitionPreset={onSetClipTransitionPreset}
               onGroupSelection={onGroupSelection}
               onUngroupSelection={onUngroupSelection}
               onMoveClipToNewLayer={onMoveClipToNewLayer}
               onMoveClipToLayer={onMoveClipToLayer}
               onDuplicateClip={onDuplicateClip}
               onDeleteClip={onDeleteClip}
+              onSetClipEnterAnimationType={onSetClipEnterAnimationType}
+              onSetClipExitAnimationType={onSetClipExitAnimationType}
+              onOpenSceneAnimation={onOpenSceneAnimation}
+              onSetSceneTransitionPreset={onSetSceneTransitionPreset}
               shouldSuppressClick={shouldSuppressClick}
               beginClipDrag={beginClipDrag}
-              />
+                />
+              </div>
+
+              {layerRows}
+
+              <div
+                className="pointer-events-none absolute inset-0 z-[48] overflow-hidden"
+              >
+                <TimelinePlayhead playback={playback} totalW={totalW} />
+              </div>
             </div>
           </div>
-
-          {layerRows}
-
-          <TimelinePlayhead playheadX={playheadX} />
         </>
 
         {dragGhost ? (
@@ -601,7 +770,7 @@ export function TimelinePanel({
 
         {clipGhost ? (
           <div
-            className="pointer-events-none fixed z-[30] overflow-hidden rounded-md border"
+            className="pointer-events-none absolute z-[30] overflow-hidden rounded-md border"
             style={{
               top: clipGhost.top,
               left: clipGhost.left,
@@ -615,11 +784,7 @@ export function TimelinePanel({
             <div className="flex h-full items-center justify-between gap-2 px-2">
               <div className="min-w-0">
                 <span className="block truncate text-xs font-medium text-white">{clipGhost.label}</span>
-                {clipGhost.transitionLabel ? (
-                  <span className="block truncate text-[10px] uppercase tracking-[0.08em]" style={{ color: "rgba(103,232,249,0.78)" }}>
-                    {clipGhost.transitionLabel}
-                  </span>
-                ) : clipGhost.contentType ? (
+                {clipGhost.contentType ? (
                   <span className="block truncate text-[10px] uppercase tracking-[0.08em]" style={{ color: "rgba(255,255,255,0.56)" }}>
                     {clipGhost.contentType}
                   </span>
@@ -628,6 +793,17 @@ export function TimelinePanel({
             </div>
           </div>
         ) : null}
+
+        <div
+          className="pointer-events-auto absolute bottom-0 left-0 z-[70]"
+          style={{
+            width: LABEL_W,
+            height: 12,
+            background: "var(--editor-panel)",
+            borderTop: "1px solid var(--editor-border)",
+            boxShadow: "10px 0 0 var(--editor-panel)",
+          }}
+        />
       </TimelineScrollArea>
     </div>
   );

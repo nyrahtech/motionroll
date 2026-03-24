@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { clampProgress } from "@motionroll/shared";
 import type { ProjectManifest } from "@motionroll/shared";
-import { withOpacity, type ScrollSectionController } from "@motionroll/runtime";
+import { choosePlaybackMode, withOpacity } from "@motionroll/runtime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { OverlayManipulator } from "./overlay-manipulator";
 import { useRuntimeController } from "./hooks/useRuntimeController";
+import type { EditorPlaybackController } from "./hooks/useEditorPlayback";
 
 const DESIGN_STAGE_WIDTH = 1440;
 const DESIGN_STAGE_HEIGHT = 810;
@@ -39,7 +40,7 @@ type RuntimePreviewProps = {
   mode?: "desktop" | "mobile";
   standalone?: boolean;
   isPlaying?: boolean;
-  playheadProgress?: number;
+  playback?: EditorPlaybackController;
   onPlayheadChange?: (progress: number) => void;
   onModeChange?: (mode: "desktop" | "mobile") => void;
   onPlayToggle?: () => void;
@@ -85,7 +86,6 @@ type RuntimePreviewProps = {
 function applyManifestOverlayStyles(
   manifest: ProjectManifest,
   container: HTMLElement,
-  controller: ScrollSectionController,
   onWireInteractivity: () => void,
 ): void {
   const sec = manifest.sections[0];
@@ -227,8 +227,6 @@ function applyManifestOverlayStyles(
       if (style?.buttonLike) actionLink.style.padding = `${Math.round(9 * scale)}px ${Math.round(14 * scale)}px`;
     }
   }
-
-  controller.setProgress(controller.getProgress());
   onWireInteractivity();
 }
 
@@ -237,7 +235,7 @@ export function RuntimePreview({
   mode: controlledMode,
   standalone = false,
   isPlaying = false,
-  playheadProgress,
+  playback,
   onPlayheadChange,
   onModeChange,
   onPlayToggle,
@@ -277,12 +275,22 @@ export function RuntimePreview({
 
   // ── Derived ────────────────────────────────────────────────────────────
   const mode = controlledMode ?? internalMode;
-  const isControlledRuntime = typeof playheadProgress === "number";
+  const isControlledRuntime = Boolean(playback);
   const section = renderManifest.sections[0];
   const hasRenderableMedia =
     (section?.frameAssets.length ?? 0) > 0 ||
     Boolean(section?.fallback.posterUrl) ||
     Boolean(section?.fallback.fallbackVideoUrl);
+  const playbackStrategy = useMemo(() => {
+    if (!section) {
+      return "none";
+    }
+
+    return choosePlaybackMode(section, {
+      mode,
+      interactionMode: isControlledRuntime ? "controlled" : "scroll",
+    }).fallback;
+  }, [isControlledRuntime, mode, section]);
 
   const selectedOverlay = useMemo(
     () => section?.overlays.find((o: { id: string }) => o.id === selectedOverlayId),
@@ -311,7 +319,6 @@ export function RuntimePreview({
     const s = renderManifest.sections[0];
     return JSON.stringify({
       mode,
-      isPlaying,
       isControlledRuntime,
       hasRenderableMedia,
       frameCount: s?.frameCount ?? 0,
@@ -322,23 +329,9 @@ export function RuntimePreview({
       fallbackVideoUrl: s?.fallback.fallbackVideoUrl ?? "",
       firstFrameUrl: s?.fallback.firstFrameUrl ?? "",
       presetId: s?.presetId ?? "",
-      // Overlay layout + timing: these are what setProgress re-applies via
-      // syncOverlayPresentationStyles, so the runtime must hold current values.
-      overlayGeometry: s?.overlays.map((o) => ({
-        id: o.id,
-        layer: o.content.layer ?? 0,
-        x: o.content.layout?.x,
-        y: o.content.layout?.y,
-        w: o.content.layout?.width,
-        h: o.content.layout?.height,
-        align: o.content.align,
-        animationPreset: o.content.animation?.preset,
-        transitionPreset: o.content.transition?.preset,
-        ts: o.timing.start,
-        te: o.timing.end,
-      })),
+      playbackStrategy,
     });
-  }, [hasRenderableMedia, isControlledRuntime, isPlaying, mode, renderManifest]);
+  }, [hasRenderableMedia, isControlledRuntime, mode, playbackStrategy, renderManifest]);
 
   // ── Interaction gate ───────────────────────────────────────────────────
   function setInteracting(active: boolean) {
@@ -424,7 +417,7 @@ export function RuntimePreview({
     isPlaying,
     isControlledRuntime,
     hasRenderableMedia,
-    playheadProgress,
+    playback,
     selectedOverlayId,
     mountNodeRef,
     onPlayheadChange,
@@ -458,7 +451,6 @@ export function RuntimePreview({
       applyManifestOverlayStyles(
         manifest,
         container,
-        controllerRef.current,
         scheduleWireInteractivity,
       );
     }); // end requestAnimationFrame

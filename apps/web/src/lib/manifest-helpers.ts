@@ -8,11 +8,13 @@ import {
   getPresetRuntimeProfile,
   resolveFallbackStrategy,
 } from "@motionroll/shared";
+import { resolveStorageReadUrl } from "./storage/public-urls";
 import motionrollDemoMetadata from "../../public/motionroll_demo_sequence/metadata.json";
 
 type FrameVariantRow = {
   kind: string;
   publicUrl: string;
+  storageKey?: string;
   metadata: unknown;
 };
 
@@ -58,6 +60,35 @@ type TransitionRow = {
   durationMs: number;
 };
 
+function getSectionDurationSecondsFromAssets(input: {
+  assets: AssetRow[];
+  frameCount: number;
+  sequenceFrameCount: number;
+}) {
+  const sourceAsset = input.assets.find((asset) => asset.kind === "source_video");
+  const sourceDurationMs = (sourceAsset?.metadata as { durationMs?: number } | undefined)?.durationMs;
+  if (typeof sourceDurationMs === "number" && sourceDurationMs > 0) {
+    return sourceDurationMs / 1000;
+  }
+
+  const frameSequenceAsset = input.assets.find((asset) => asset.kind === "frame_sequence");
+  const sequenceMetadata = (frameSequenceAsset?.metadata as { durationMs?: number; fps?: number } | undefined) ?? {};
+  if (typeof sequenceMetadata.durationMs === "number" && sequenceMetadata.durationMs > 0) {
+    return sequenceMetadata.durationMs / 1000;
+  }
+  if (typeof sequenceMetadata.fps === "number" && sequenceMetadata.fps > 0 && input.sequenceFrameCount > 0) {
+    return input.sequenceFrameCount / sequenceMetadata.fps;
+  }
+
+  const fallbackVideoAsset = input.assets.find((asset) => asset.kind === "fallback_video");
+  const fallbackDurationMs = (fallbackVideoAsset?.metadata as { durationMs?: number } | undefined)?.durationMs;
+  if (typeof fallbackDurationMs === "number" && fallbackDurationMs > 0) {
+    return fallbackDurationMs / 1000;
+  }
+
+  return Math.max(input.frameCount / 24, 0.1);
+}
+
 export function normalizeFrameAssets(assets: AssetRow[]) {
   const seenIndexes = new Set<number>();
 
@@ -77,7 +108,7 @@ export function normalizeFrameAssets(assets: AssetRow[]) {
               | "original"
               | "poster"
               | "fallback_video",
-            url: variant.publicUrl,
+            url: resolveStorageReadUrl(variant.publicUrl, variant.storageKey),
             width: (variant.metadata as { width?: number }).width,
             height: (variant.metadata as { height?: number }).height,
           }))
@@ -276,6 +307,11 @@ export function buildSectionManifest(input: {
   );
   const posterAsset = input.assets.find((asset) => asset.kind === "poster");
   const fallbackVideoAsset = input.assets.find((asset) => asset.kind === "fallback_video");
+  const posterUrl = resolveStorageReadUrl(posterAsset?.publicUrl, posterAsset?.storageKey);
+  const fallbackVideoUrl = resolveStorageReadUrl(
+    fallbackVideoAsset?.publicUrl,
+    fallbackVideoAsset?.storageKey,
+  );
   const frameSequenceAsset = input.assets.find((asset) => asset.kind === "frame_sequence");
   const rawSequenceFrameCount =
     (frameSequenceAsset?.metadata as { frameCount?: number } | undefined)?.frameCount ?? 0;
@@ -293,6 +329,11 @@ export function buildSectionManifest(input: {
     Math.max(frameAssets.length, sequenceFrameCount) || input.section.commonConfig.frameRange.end + 1;
   const normalizedRange = normalizeFrameRange(input.section.commonConfig.frameRange, frameCount);
   const overlays = normalizeOverlayRows(input.overlays);
+  const durationSeconds = getSectionDurationSecondsFromAssets({
+    assets: input.assets,
+    frameCount,
+    sequenceFrameCount,
+  });
 
   return {
     id: input.section.id,
@@ -309,6 +350,7 @@ export function buildSectionManifest(input: {
     overlays: overlays.map((overlay) => ({
       id: overlay.overlayKey,
       timing: overlay.timing,
+      timingSource: "sceneRange",
       content: overlay.content,
     })),
     moments: (input.moments ?? []).map((moment) => ({
@@ -331,12 +373,13 @@ export function buildSectionManifest(input: {
       requestedMobileBehavior: input.section.commonConfig.fallbackBehavior.mobile,
       requestedReducedMotionBehavior: input.section.commonConfig.fallbackBehavior.reducedMotion,
       frameAssets,
-      posterUrl: posterAsset?.publicUrl,
-      fallbackVideoUrl: fallbackVideoAsset?.publicUrl,
+      posterUrl: posterUrl || undefined,
+      fallbackVideoUrl: fallbackVideoUrl || undefined,
     }),
     motion: {
       sectionHeightVh: input.section.commonConfig.sectionHeightVh,
       scrubStrength: input.section.commonConfig.scrubStrength,
+      durationSeconds,
       easing: input.section.commonConfig.motion.easing,
       pin: input.section.commonConfig.motion.pin,
       preloadWindow: input.section.commonConfig.motion.preloadWindow,

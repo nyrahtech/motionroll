@@ -18,6 +18,7 @@ function makeOverlay(
   return {
     id,
     timing: { start: 0, end: 1 },
+    timingSource: "sceneRange",
     content: {
       type: "text",
       text: id,
@@ -36,8 +37,8 @@ function makeOverlay(
         enabled: false, mode: "transparent", color: "#000", opacity: 0,
         radius: 14, paddingX: 18, paddingY: 14, borderColor: "#fff", borderOpacity: 0,
       },
-      animation: { preset: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
-      transition: { preset: "crossfade", easing: "ease-in-out", duration: 0.4 },
+      enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
+      exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
     },
   };
 }
@@ -47,6 +48,7 @@ function makeDraft(overlays: HydratedOverlayDefinition[] = []): EditorDraft {
     title: "Test",
     presetId: "product-reveal" as const,
     sectionTitle: "Scene 01",
+    sceneTransitionPreset: "none",
     sectionHeightVh: 240,
     scrubStrength: 1,
     frameRangeStart: 0,

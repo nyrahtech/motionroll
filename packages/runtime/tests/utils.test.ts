@@ -17,6 +17,7 @@ describe("getActiveOverlayId", () => {
           {
             id: "intro",
             timing: { start: 0, end: 0.2 },
+            timingSource: "manual",
             content: {
               text: "Intro\n\nIntro body",
               align: "start",
@@ -27,6 +28,7 @@ describe("getActiveOverlayId", () => {
           {
             id: "detail",
             timing: { start: 0.4, end: 0.6 },
+            timingSource: "manual",
             content: {
               text: "Detail\n\nDetail body",
               align: "end",
@@ -47,6 +49,7 @@ describe("getActiveOverlayId", () => {
           {
             id: "headline",
             timing: { start: 0.2, end: 0.7 },
+            timingSource: "manual",
             content: {
               text: "Headline\n\nBody",
               align: "start",
@@ -58,6 +61,7 @@ describe("getActiveOverlayId", () => {
           {
             id: "cta",
             timing: { start: 0.55, end: 0.85 },
+            timingSource: "manual",
             content: {
               text: "CTA\n\nCTA body",
               align: "end",
@@ -79,6 +83,7 @@ describe("getActiveOverlayId", () => {
           {
             id: "bottom",
             timing: { start: 0.2, end: 0.8 },
+            timingSource: "manual",
             content: {
               text: "Bottom\n\nBody",
               align: "start",
@@ -90,6 +95,7 @@ describe("getActiveOverlayId", () => {
           {
             id: "top",
             timing: { start: 0.2, end: 0.8 },
+            timingSource: "manual",
             content: {
               text: "Top\n\nBody",
               align: "start",
@@ -111,6 +117,7 @@ describe("getOverlaysInStackOrder", () => {
       {
         id: "top",
         timing: { start: 0, end: 1 },
+        timingSource: "manual",
         content: {
           text: "Top\n\nBody",
           align: "start",
@@ -122,6 +129,7 @@ describe("getOverlaysInStackOrder", () => {
       {
         id: "bottom",
         timing: { start: 0, end: 1 },
+        timingSource: "manual",
         content: {
           text: "Bottom\n\nBody",
           align: "start",

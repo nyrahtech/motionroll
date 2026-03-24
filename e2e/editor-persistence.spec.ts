@@ -50,7 +50,7 @@ test.describe("Editor persistence", () => {
       .toBe(renamedTitle);
 
     await expect(
-      page.getByRole("status", { name: /save status: saved/i }),
+      page.getByRole("status", { name: /save status: save/i }),
     ).toBeVisible({ timeout: 15_000 });
 
     await page.reload();

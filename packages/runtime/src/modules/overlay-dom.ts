@@ -8,17 +8,10 @@ import {
 } from "../../../shared/src/index";
 import { getActiveOverlayId, getOverlaysInStackOrder } from "../utils";
 import {
-  applyMotionEasing,
-  formatPx,
-  formatScale,
-  getBaseOverlayTranslate,
   getOverlayAnimationState,
-  getOverlayHiddenOffset,
   getOverlayPixelPlacement,
-  getOverlayTransform,
   getOverlayTransitionStyle,
   getStageScale,
-  getTimedProgress,
   hexToRgbTuple,
   normalizeRichTextHtml,
   sanitizeRichTextHtml,
@@ -410,5 +403,4 @@ export function ensureOverlayRoot(
 
   return overlayRoot;
 }
-
 

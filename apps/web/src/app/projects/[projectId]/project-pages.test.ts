@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const requirePageAuth = vi.fn();
@@ -99,5 +101,15 @@ describe("project pages", () => {
 
     expect(buildProjectManifest).not.toHaveBeenCalled();
     expect(getPublishReadiness).not.toHaveBeenCalled();
+  });
+
+  it("preview page uses a client-safe exit control", () => {
+    const previewSource = fs.readFileSync(
+      path.resolve(process.cwd(), "src/app/projects/[projectId]/preview/page.tsx"),
+      "utf8",
+    );
+
+    expect(previewSource).toContain("PreviewExitButton");
+    expect(previewSource).not.toContain("onClick={() => window.close()}");
   });
 });

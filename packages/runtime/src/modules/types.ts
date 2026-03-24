@@ -16,11 +16,18 @@ export interface CreateScrollSectionOptions {
   initialProgress?: number;
 }
 
+export interface RenderFallbackResult {
+  cleanup: () => void;
+  video?: HTMLVideoElement;
+}
+
 export interface ScrollSectionController {
   destroy(): void;
   refresh(): void;
   setProgress(progress: number): void;
   setTargetProgress(progress: number): void;
+  setOverlayTransitionsEnabled(enabled: boolean): void;
+  updateManifest(manifest: import("../../../shared/src/index").ProjectManifest): void;
   getProgress(): number;
   getTargetProgress(): number;
 }

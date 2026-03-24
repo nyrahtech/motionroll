@@ -30,9 +30,15 @@ export type SidebarPanelProps = {
   onOverlayFieldChange: (field: string, value: string | number) => void;
   onOverlayStyleChange: (field: string, value: string | number | boolean) => void;
   onOverlayStyleLiveChange?: (field: string, value: string | number) => void;
-  onOverlayAnimationChange: (field: string, value: string | number) => void;
-  onOverlayTransitionChange: (field: string, value: string | number) => void;
+  onOverlayEnterAnimationChange: (field: string, value: string | number) => void;
+  onOverlayExitAnimationChange: (field: string, value: string | number) => void;
   onAddContent: (type: string) => void;
+  onUploadQueued?: () => void | Promise<void>;
+  processingJobs?: Array<{
+    id: string;
+    status: string;
+    failureReason: string | null;
+  }>;
 };
 
 import { ActionButton, ToolPanel } from "./editor-inspector-primitives";
@@ -53,9 +59,11 @@ export function SidebarPanel({
   onOverlayFieldChange,
   onOverlayStyleChange,
   onOverlayStyleLiveChange,
-  onOverlayAnimationChange,
-  onOverlayTransitionChange,
+  onOverlayEnterAnimationChange,
+  onOverlayExitAnimationChange,
   onAddContent,
+  onUploadQueued,
+  processingJobs,
 }: SidebarPanelProps) {
   const showUploadTool = activeContext === "upload";
   const showAiTool = activeContext === "ai";
@@ -96,7 +104,12 @@ export function SidebarPanel({
 
           {showUploadTool ? (
             <ToolPanel title="Import Video">
-              <UploadPanel projectId={projectId} embedded />
+              <UploadPanel
+                projectId={projectId}
+                embedded
+                onUploadQueued={onUploadQueued}
+                processingJobs={processingJobs}
+              />
             </ToolPanel>
           ) : null}
 
@@ -125,8 +138,8 @@ export function SidebarPanel({
               onOverlayFieldChange={onOverlayFieldChange}
               onOverlayStyleChange={onOverlayStyleChange}
               onOverlayStyleLiveChange={onOverlayStyleLiveChange}
-              onOverlayAnimationChange={onOverlayAnimationChange}
-              onOverlayTransitionChange={onOverlayTransitionChange}
+              onOverlayEnterAnimationChange={onOverlayEnterAnimationChange}
+              onOverlayExitAnimationChange={onOverlayExitAnimationChange}
               selectedGroupChildren={selectedGroupChildren}
               canUngroupSelection={canUngroupSelection}
               onUngroupSelection={onUngroupSelection}

@@ -28,23 +28,30 @@ export type TextTransform = z.infer<typeof TextTransformSchema>;
 export const BackgroundModeSchema = z.enum(["transparent", "solid"]);
 export type BackgroundMode = z.infer<typeof BackgroundModeSchema>;
 
-export const AnimationPresetSchema = z.enum([
+export const OverlayAnimationTypeSchema = z.enum([
+  "none",
+  "fade",
+  "slide-up-fade",
+  "slide-left-fade",
+  "scale-fade",
+]);
+export type OverlayAnimationType = z.infer<typeof OverlayAnimationTypeSchema>;
+
+const LegacyAnimationPresetSchema = z.enum([
   "fade",
   "slide-up",
   "slide-down",
   "scale-in",
   "blur-in",
 ]);
-export type AnimationPreset = z.infer<typeof AnimationPresetSchema>;
 
-export const TransitionPresetSchema = z.enum([
+const LegacyTransitionPresetSchema = z.enum([
   "fade",
   "crossfade",
   "wipe",
   "zoom-dissolve",
   "blur-dissolve",
 ]);
-export type TransitionPreset = z.infer<typeof TransitionPresetSchema>;
 
 export const MotionEasingSchema = z.enum([
   "linear",
@@ -93,20 +100,20 @@ export const OverlayBackgroundSchema = z.object({
 });
 export type OverlayBackground = z.infer<typeof OverlayBackgroundSchema>;
 
-export const OverlayAnimationSchema = z.object({
-  preset: AnimationPresetSchema.default("fade"),
+export const OverlayEnterAnimationSchema = z.object({
+  type: OverlayAnimationTypeSchema.default("fade"),
   easing: MotionEasingSchema.default("ease-out"),
   duration: z.number().min(0.08).max(2.5).default(0.45),
   delay: z.number().min(0).max(1.5).default(0),
 });
-export type OverlayAnimation = z.infer<typeof OverlayAnimationSchema>;
+export type OverlayEnterAnimation = z.infer<typeof OverlayEnterAnimationSchema>;
 
-export const OverlayTransitionSchema = z.object({
-  preset: TransitionPresetSchema.default("crossfade"),
+export const OverlayExitAnimationSchema = z.object({
+  type: OverlayAnimationTypeSchema.default("none"),
   easing: MotionEasingSchema.default("ease-in-out"),
-  duration: z.number().min(0.08).max(2.5).default(0.4),
+  duration: z.number().min(0.08).max(2.5).default(0.35),
 });
-export type OverlayTransition = z.infer<typeof OverlayTransitionSchema>;
+export type OverlayExitAnimation = z.infer<typeof OverlayExitAnimationSchema>;
 
 export const CtaConfigSchema = z.object({
   label: z.string().min(1),
@@ -119,6 +126,9 @@ export const OverlayTimingSchema = z.object({
   end: z.number().min(0).max(1),
 });
 export type OverlayTiming = z.infer<typeof OverlayTimingSchema>;
+
+export const OverlayTimingSourceSchema = z.enum(["sceneRange", "manual"]);
+export type OverlayTimingSource = z.infer<typeof OverlayTimingSourceSchema>;
 
 function joinLegacyTextParts(parts: Array<string | undefined>) {
   const values = parts
@@ -174,11 +184,83 @@ const OverlayContentInputSchema = z.object({
   layout: OverlayLayoutSchema.optional(),
   style: OverlayStyleInputSchema.optional(),
   background: OverlayBackgroundSchema.optional(),
-  animation: OverlayAnimationSchema.optional(),
-  transition: OverlayTransitionSchema.optional(),
+  enterAnimation: OverlayEnterAnimationSchema.optional(),
+  exitAnimation: OverlayExitAnimationSchema.optional(),
+  animation: z.object({
+    preset: LegacyAnimationPresetSchema.default("fade"),
+    easing: MotionEasingSchema.default("ease-out"),
+    duration: z.number().min(0.08).max(2.5).default(0.45),
+    delay: z.number().min(0).max(1.5).default(0),
+  }).optional(),
+  transition: z.object({
+    preset: LegacyTransitionPresetSchema.default("crossfade"),
+    easing: MotionEasingSchema.default("ease-in-out"),
+    duration: z.number().min(0.08).max(2.5).default(0.4),
+  }).optional(),
   layer: z.number().int().min(0).max(999).optional(),
   parentGroupId: z.string().min(1).optional(),
 });
+
+type OverlayContentInput = z.input<typeof OverlayContentInputSchema>;
+
+function mapLegacyEnterAnimationType(
+  preset: z.infer<typeof LegacyAnimationPresetSchema> | undefined,
+): OverlayAnimationType | undefined {
+  switch (preset) {
+    case "fade":
+      return "fade";
+    case "slide-up":
+      return "slide-up-fade";
+    case "scale-in":
+      return "scale-fade";
+    case "slide-down":
+    case "blur-in":
+      return "fade";
+    default:
+      return undefined;
+  }
+}
+
+function mapLegacyExitAnimationType(
+  preset: z.infer<typeof LegacyTransitionPresetSchema> | undefined,
+): OverlayAnimationType | undefined {
+  switch (preset) {
+    case "fade":
+    case "crossfade":
+    case "wipe":
+    case "blur-dissolve":
+      return "fade";
+    case "zoom-dissolve":
+      return "scale-fade";
+    default:
+      return undefined;
+  }
+}
+
+function normalizeEnterAnimation(content: OverlayContentInput): OverlayEnterAnimation {
+  if (content.enterAnimation) {
+    return OverlayEnterAnimationSchema.parse(content.enterAnimation);
+  }
+
+  return OverlayEnterAnimationSchema.parse({
+    type: mapLegacyEnterAnimationType(content.animation?.preset) ?? "fade",
+    easing: content.animation?.easing ?? "ease-out",
+    duration: content.animation?.duration ?? 0.45,
+    delay: content.animation?.delay ?? 0,
+  });
+}
+
+function normalizeExitAnimation(content: OverlayContentInput): OverlayExitAnimation {
+  if (content.exitAnimation) {
+    return OverlayExitAnimationSchema.parse(content.exitAnimation);
+  }
+
+  return OverlayExitAnimationSchema.parse({
+    type: mapLegacyExitAnimationType(content.transition?.preset) ?? "none",
+    easing: content.transition?.easing ?? "ease-in-out",
+    duration: content.transition?.duration ?? 0.35,
+  });
+}
 
 export const OverlayContentSchema = OverlayContentInputSchema.transform((content) => {
   const normalizedText =
@@ -228,8 +310,8 @@ export const OverlayContentSchema = OverlayContentInputSchema.transform((content
         }
       : {}),
     ...(content.background ? { background: content.background } : {}),
-    ...(content.animation ? { animation: content.animation } : {}),
-    ...(content.transition ? { transition: content.transition } : {}),
+    enterAnimation: normalizeEnterAnimation(content),
+    exitAnimation: normalizeExitAnimation(content),
     ...(typeof content.layer === "number" ? { layer: content.layer } : {}),
     ...(content.parentGroupId ? { parentGroupId: content.parentGroupId } : {}),
   };
@@ -247,8 +329,8 @@ export type OverlayContent = {
   layout?: OverlayLayout;
   style?: OverlayStyle;
   background?: OverlayBackground;
-  animation?: OverlayAnimation;
-  transition?: OverlayTransition;
+  enterAnimation: OverlayEnterAnimation;
+  exitAnimation: OverlayExitAnimation;
   layer?: number;
   parentGroupId?: string;
 };
@@ -256,10 +338,12 @@ export type OverlayContent = {
 export const OverlayDefinitionSchema = z.object({
   id: z.string().min(1),
   timing: OverlayTimingSchema,
+  timingSource: OverlayTimingSourceSchema.default("manual"),
   content: OverlayContentSchema,
 });
 export type OverlayDefinition = {
   id: string;
   timing: OverlayTiming;
+  timingSource: OverlayTimingSource;
   content: OverlayContent;
 };

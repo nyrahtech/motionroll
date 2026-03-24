@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useEffect, useRef, useState } from "react";
 import type { RefObject, PointerEvent as ReactPointerEvent } from "react";
 import { clampProgress } from "@motionroll/shared";
@@ -80,6 +81,8 @@ export function OverlayManipulator({
   const [isDragging, setIsDragging] = useState(false);
   // Ref always holds the latest box; closures read from here, not state.
   const boxRef = useRef<Box | null>(null);
+  const interactionActiveRef = useRef(false);
+  const measureRafRef = useRef<number | null>(null);
 
   // ── DOM refs for all chrome elements ──────────────────────────────────
   const outlineRef   = useRef<HTMLDivElement | null>(null);
@@ -153,9 +156,22 @@ export function OverlayManipulator({
     return selectionCardIds
       .map((overlayId) => {
         const card = containerRef.current?.querySelector<HTMLElement>(`[data-overlay-id="${overlayId}"]`) ?? null;
-        return card ? { overlayId, card } : null;
+        if (!card) {
+          return null;
+        }
+        const isActive =
+          card.dataset.state === "active" &&
+          card.style.visibility !== "hidden" &&
+          card.ariaHidden !== "true";
+        return isActive ? { overlayId, card } : null;
       })
       .filter((entry): entry is { overlayId: string; card: HTMLElement } => Boolean(entry));
+  }
+
+  function hasSelectionDomCards() {
+    return selectionCardIds.some((overlayId) =>
+      Boolean(containerRef.current?.querySelector<HTMLElement>(`[data-overlay-id="${overlayId}"]`)),
+    );
   }
 
   function getSelectionBox(container: HTMLElement): Box | null {
@@ -173,10 +189,52 @@ export function OverlayManipulator({
       return unionBoxes(cardBoxes);
     }
 
+    if (hasSelectionDomCards()) {
+      return null;
+    }
+
     const overlays = selectionOverlays?.length ? selectionOverlays : [overlay];
     return unionBoxes(
       overlays.map((item) => overlayToBox(item, container, boxRef.current?.height ?? 100)),
     );
+  }
+
+  function boxesMatch(a: Box | null, b: Box | null) {
+    if (!a || !b) {
+      return a === b;
+    }
+    const tolerance = 0.5;
+    return (
+      Math.abs(a.left - b.left) < tolerance
+      && Math.abs(a.top - b.top) < tolerance
+      && Math.abs(a.width - b.width) < tolerance
+      && Math.abs(a.height - b.height) < tolerance
+    );
+  }
+
+  function measureSelectionBox() {
+    const container = containerRef.current;
+    if (!container) return;
+    const next = getSelectionBox(container);
+    if (boxesMatch(boxRef.current, next)) {
+      if (!boxRef.current) {
+        setBox(null);
+      }
+      return;
+    }
+    boxRef.current = next;
+    setBox(next);
+  }
+
+  function scheduleSelectionMeasure() {
+    if (interactionActiveRef.current) return;
+    if (measureRafRef.current !== null) {
+      cancelAnimationFrame(measureRafRef.current);
+    }
+    measureRafRef.current = requestAnimationFrame(() => {
+      measureRafRef.current = null;
+      measureSelectionBox();
+    });
   }
 
   function applyBoxToCard(card: HTMLElement, b: Box) {
@@ -244,37 +302,48 @@ export function OverlayManipulator({
   // Use getBoundingClientRect so the selection box matches exactly what
   // the user sees, including padding, scaled font, and auto-height.
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const initial = getSelectionBox(container);
-    if (initial) {
-      boxRef.current = initial;
-      setBox(initial);
-    } else {
-      const fallback = overlayToBox(overlay, container, boxRef.current?.height ?? 100);
-      boxRef.current = fallback;
-      setBox(fallback);
-    }
+    scheduleSelectionMeasure();
+    return () => {
+      if (measureRafRef.current !== null) {
+        cancelAnimationFrame(measureRafRef.current);
+        measureRafRef.current = null;
+      }
+    };
   }, [overlay, selectedOverlayId, selectedOverlayIds, selectionOverlays, containerRef]);
 
   // ── Re-sync on container resize ───────────────────────────────────────
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const observer = new ResizeObserver(() => {
-      const next = getSelectionBox(container);
-      if (next) {
-        boxRef.current = next;
-        setBox(next);
-      } else {
-        const next = overlayToBox(overlay, container, boxRef.current?.height ?? 100);
-        boxRef.current = next;
-        setBox(next);
+    const resizeObserver = new ResizeObserver(() => {
+      scheduleSelectionMeasure();
+    });
+    resizeObserver.observe(container);
+    for (const { card } of getSelectionCards()) {
+      resizeObserver.observe(card);
+    }
+
+    const mutationObserver = new MutationObserver((mutations) => {
+      const shouldRemeasure = mutations.some((mutation) => {
+        const target = mutation.target;
+        return target instanceof HTMLElement && target.matches("[data-overlay-id]");
+      });
+      if (shouldRemeasure) {
+        scheduleSelectionMeasure();
       }
     });
-    observer.observe(container);
-    return () => observer.disconnect();
+    mutationObserver.observe(container, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["style", "class"],
+    });
+
+    window.addEventListener("resize", scheduleSelectionMeasure);
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      window.removeEventListener("resize", scheduleSelectionMeasure);
+    };
   }, [overlay, selectedOverlayId, selectedOverlayIds, selectionOverlays, containerRef]);
 
   // ── After React renders the chrome, sync DOM to boxRef ────────────────
@@ -301,6 +370,7 @@ export function OverlayManipulator({
 
     e.preventDefault();
     e.stopPropagation();
+    interactionActiveRef.current = true;
     setIsDragging(true);
     onInteractingChange?.(true);
 
@@ -351,6 +421,7 @@ export function OverlayManipulator({
       const nextBox = boxRef.current;
       if (!nextBox) {
         setIsDragging(false);
+        interactionActiveRef.current = false;
         onInteractingChange?.(false);
         return;
       }
@@ -366,11 +437,14 @@ export function OverlayManipulator({
       // effect in runtime-preview will restore fractional styles once committed.
       setBox(nextBox);
       setIsDragging(false);
+      interactionActiveRef.current = false;
       onInteractingChange?.(false);
+      scheduleSelectionMeasure();
     }
 
     function cleanup() {
       setIsDragging(false);
+      interactionActiveRef.current = false;
       document.body.style.userSelect = "";
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -393,6 +467,7 @@ export function OverlayManipulator({
 
     e.preventDefault();
     e.stopPropagation();
+    interactionActiveRef.current = true;
     onInteractingChange?.(true);
 
     const initialBox: Box = startBox;
@@ -458,6 +533,7 @@ export function OverlayManipulator({
       cleanup();
       const nextBox = boxRef.current;
       if (!nextBox) {
+        interactionActiveRef.current = false;
         onInteractingChange?.(false);
         return;
       }
@@ -470,10 +546,13 @@ export function OverlayManipulator({
         backgroundChanges: resize.backgroundChanges,
       });
       setBox(nextBox);
+      interactionActiveRef.current = false;
       onInteractingChange?.(false);
+      scheduleSelectionMeasure();
     }
 
     function cleanup() {
+      interactionActiveRef.current = false;
       document.body.style.userSelect = "";
       if (resizeRaf !== null) {
         cancelAnimationFrame(resizeRaf);

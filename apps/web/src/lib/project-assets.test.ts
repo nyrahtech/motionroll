@@ -30,6 +30,29 @@ describe("project asset helpers", () => {
     expect(asset?.id).toBe("newer");
   });
 
+  it("handles JSON date strings when choosing the primary source asset", () => {
+    const asset = getPrimarySourceAsset([
+      {
+        id: "older",
+        kind: "source_video",
+        isPrimary: true,
+        storageKey: "older.mp4",
+        publicUrl: "/older.mp4",
+        updatedAt: "2026-03-10T00:00:00.000Z",
+      },
+      {
+        id: "newer",
+        kind: "source_video",
+        isPrimary: true,
+        storageKey: "newer.mp4",
+        publicUrl: "/newer.mp4",
+        updatedAt: "2026-03-11T00:00:00.000Z",
+      },
+    ]);
+
+    expect(asset?.id).toBe("newer");
+  });
+
   it("filters source assets out of the derived snapshot", () => {
     const derived = getDerivedAssetsSnapshot([
       { kind: "source_video", storageKey: "source.mp4", publicUrl: "/source.mp4" },
@@ -50,6 +73,19 @@ describe("project asset helpers", () => {
         ],
       ),
     ).toBe("/poster.png");
+  });
+
+  it("rewrites storage-hosted previews through the app storage route", () => {
+    expect(
+      getRenderableAssetPreview(
+        {
+          kind: "poster",
+          storageKey: "project/derived/poster.jpg",
+          publicUrl: "http://127.0.0.1:9000/motionroll-assets/project/derived/poster.jpg",
+        },
+        [],
+      ),
+    ).toBe("http://localhost:3000/api/storage/project/derived/poster.jpg");
   });
 
   it("validates processable source assets consistently", () => {

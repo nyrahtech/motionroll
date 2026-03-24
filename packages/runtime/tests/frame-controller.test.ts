@@ -8,8 +8,8 @@ import {
   getFrameUrlForProgress,
   getSequenceRangeLocalProgress,
   isSequenceMediaVisibleAtProgress,
-} from "../../modules/frame-controller";
-import type { ProjectSectionManifest } from "../../../../shared/src/index";
+} from "../src/modules/frame-controller";
+import type { ProjectSectionManifest } from "../../shared/src/index";
 
 function makeSection(
   frameCount: number,

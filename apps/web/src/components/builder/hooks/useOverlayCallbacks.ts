@@ -1,6 +1,6 @@
 /**
  * useOverlayCallbacks — stable callback handlers for overlay field, style,
- * animation and transition changes. Extracted from project-builder to keep
+ * animation changes. Extracted from project-builder to keep
  * the render tree clean and avoid re-creating closures on every render.
  */
 import { useCallback } from "react";
@@ -51,6 +51,8 @@ export function useOverlayCallbacks({
         return {
           ...hydrated,
           timing: nextTiming,
+          timingSource:
+            field === "start" || field === "end" ? "manual" : hydrated.timingSource,
           content: {
             ...hydrated.content,
             text: field === "text" ? String(value) : hydrated.content.text,
@@ -127,7 +129,7 @@ export function useOverlayCallbacks({
     [selectedOverlayId, handleOverlayStyleQuickChange],
   );
 
-  const onOverlayAnimationChange = useCallback(
+  const onOverlayEnterAnimationChange = useCallback(
     (field: string, value: unknown) => {
       if (!selectedOverlayId) return;
       updateSelectedOverlay(selectedOverlayId, (overlay) => {
@@ -136,7 +138,7 @@ export function useOverlayCallbacks({
           ...hydrated,
           content: {
             ...hydrated.content,
-            animation: { ...hydrated.content.animation, [field]: value },
+            enterAnimation: { ...hydrated.content.enterAnimation, [field]: value },
           },
         };
       });
@@ -144,7 +146,7 @@ export function useOverlayCallbacks({
     [selectedOverlayId, updateSelectedOverlay],
   );
 
-  const onOverlayTransitionChange = useCallback(
+  const onOverlayExitAnimationChange = useCallback(
     (field: string, value: unknown) => {
       if (!selectedOverlayId) return;
       updateSelectedOverlay(selectedOverlayId, (overlay) => {
@@ -153,7 +155,7 @@ export function useOverlayCallbacks({
           ...hydrated,
           content: {
             ...hydrated.content,
-            transition: { ...hydrated.content.transition, [field]: value },
+            exitAnimation: { ...hydrated.content.exitAnimation, [field]: value },
           },
         };
       });
@@ -237,8 +239,8 @@ export function useOverlayCallbacks({
     onOverlayFieldChange,
     onOverlayStyleChange,
     onOverlayStyleLiveChange,
-    onOverlayAnimationChange,
-    onOverlayTransitionChange,
+    onOverlayEnterAnimationChange,
+    onOverlayExitAnimationChange,
     onOverlayLayoutChange,
     onInlineTextChange,
   };

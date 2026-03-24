@@ -300,6 +300,7 @@ export async function getProjectOverlayDefinitions(sectionId: string): Promise<O
   return overlays.map((overlay: (typeof overlays)[number]) => ({
     id: overlay.overlayKey,
     timing: overlay.timing,
+    timingSource: "sceneRange",
     content: overlay.content,
   }));
 }

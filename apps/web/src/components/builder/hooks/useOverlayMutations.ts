@@ -11,8 +11,8 @@ import {
   clampProgress,
   normalizeTimingRange,
   type FontFamily,
+  type OverlayAnimationType,
   type OverlayDefinition,
-  type TransitionPreset,
 } from "@motionroll/shared";
 import type { HydratedOverlayDefinition, EditorDraft } from "../editor-draft-types";
 import {
@@ -20,6 +20,8 @@ import {
   getRequiredLayerCount,
   buildOverlayId,
   createDefaultOverlay,
+  getSceneRangeTiming,
+  getSceneBoundOverlayTiming,
   getOverlayById,
   getOverlayAbsoluteBounds,
   isGroupOverlay,
@@ -28,6 +30,7 @@ import {
   duplicateRootOverlays,
   deleteRootOverlays,
   reorderOverlayLayers,
+  scaleSceneRangeOverlays,
   DESIGN_STAGE_WIDTH,
   DESIGN_STAGE_HEIGHT,
 } from "../editor-overlay-utils";
@@ -59,7 +62,7 @@ export function useOverlayMutations({
   // ── Overlay add ───────────────────────────────────────────────────────────
 
   const addOverlay = useCallback(
-    (type: string, playhead: number): string | null => {
+    (type: string, _playhead: number, frameCount: number): string | null => {
       if (type === "video") return null;
       const normalizedType = type === "section" ? "moment" : type;
       const contentType =
@@ -67,10 +70,18 @@ export function useOverlayMutations({
           ? (normalizedType as "image" | "logo" | "icon")
           : "text";
       const overlayId = buildOverlayId(normalizedType);
-      const overlay = createDefaultOverlay(overlayId, contentType, playhead, undefined);
+      const current = draftRef.current;
+      const sceneTiming = getSceneRangeTiming(
+        current.frameRangeStart,
+        current.frameRangeEnd,
+        frameCount,
+      );
+      const overlay = createDefaultOverlay(overlayId, contentType, {
+        timing: getSceneBoundOverlayTiming(_playhead, sceneTiming),
+      });
       if (normalizedType === "moment") {
         overlay.content.text = "Moment\n\nNew section beat";
-        overlay.content.transition = { preset: "wipe", easing: "ease-in-out", duration: 0.42 };
+        overlay.content.exitAnimation = { type: "fade", easing: "ease-in-out", duration: 0.42 };
       }
       updateDraft((current) => ({
         ...current,
@@ -88,13 +99,13 @@ export function useOverlayMutations({
       }));
       return overlayId;
     },
-    [updateDraft],
+    [draftRef, updateDraft],
   );
 
   // ── Group / ungroup ───────────────────────────────────────────────────────
 
   const handleGroupSelection = useCallback(
-    (multiSelectedOverlayIds: string[], playhead: number) => {
+    (multiSelectedOverlayIds: string[], _playhead: number, frameCount: number) => {
       updateDraft((current) => {
         if (!getGroupSelectionEligibility(current.overlays, multiSelectedOverlayIds)) return current;
         const selected = multiSelectedOverlayIds
@@ -118,11 +129,16 @@ export function useOverlayMutations({
         );
 
         const groupId = buildOverlayId("group");
-        const group = createDefaultOverlay(groupId, "group", playhead);
-        group.timing = normalizeTimingRange(
-          { start: Math.min(...selected.map((o) => o.timing.start)), end: Math.max(...selected.map((o) => o.timing.end)) },
+        const groupTiming = normalizeTimingRange(
+          {
+            start: Math.min(...selected.map((o) => o.timing.start)),
+            end: Math.max(...selected.map((o) => o.timing.end)),
+          },
           0.08,
         );
+        const group = createDefaultOverlay(groupId, "group", { timing: groupTiming });
+        group.timingSource = "manual";
+        group.timing = groupTiming;
         group.content.layer = Math.max(...selected.map((o) => o.content.layer ?? 0));
         group.content.layout = {
           x: clampProgress(bounds.left),
@@ -214,11 +230,28 @@ export function useOverlayMutations({
       updateDraft((current) => {
         if (clip.trackType === "section") {
           const nextFrameRange = getFrameRangeFromClip(timing, frameCount);
-          return { ...current, frameRangeStart: nextFrameRange.start, frameRangeEnd: nextFrameRange.end };
+          return {
+            ...current,
+            frameRangeStart: nextFrameRange.start,
+            frameRangeEnd: nextFrameRange.end,
+            overlays: scaleSceneRangeOverlays(
+              current.overlays,
+              current.frameRangeStart,
+              current.frameRangeEnd,
+              nextFrameRange.start,
+              nextFrameRange.end,
+              frameCount,
+            ),
+          };
         }
         const overlayId = clip.metadata?.overlayId;
         if (!overlayId) return current;
-        return { ...current, overlays: current.overlays.map((o) => o.id === overlayId ? { ...o, timing } : o) };
+        return {
+          ...current,
+          overlays: current.overlays.map((o) =>
+            o.id === overlayId ? { ...o, timing, timingSource: "manual" as const } : o,
+          ),
+        };
       });
     },
     [updateDraft],
@@ -234,7 +267,12 @@ export function useOverlayMutations({
         if (!overlay) return current;
         const nextOverlays = current.overlays.map((item) => {
           if (item.id === overlayId) {
-            return { ...item, timing: { start: move.start, end: move.end }, content: { ...item.content, layer: move.targetLayer ?? item.content.layer ?? 0 } };
+            return {
+              ...item,
+              timing: { start: move.start, end: move.end },
+              timingSource: "manual" as const,
+              content: { ...item.content, layer: move.targetLayer ?? item.content.layer ?? 0 },
+            };
           }
           if (isGroupOverlay(overlay) && item.content.parentGroupId === overlayId) {
             return { ...item, content: { ...item.content, layer: move.targetLayer ?? overlay.content.layer ?? item.content.layer ?? 0 } };
@@ -275,6 +313,67 @@ export function useOverlayMutations({
           ),
         };
       });
+    },
+    [updateDraft],
+  );
+
+  const handleSetClipEnterAnimationType = useCallback(
+    (clipId: string, type: OverlayAnimationType, tracks: TimelineTrackModel[]) => {
+      const clip = findClip(tracks, clipId);
+      const overlayId = clip?.metadata?.overlayId;
+      if (!overlayId) return;
+      updateDraft((current) => ({
+        ...current,
+        overlays: current.overlays.map((overlay) =>
+          overlay.id === overlayId
+            ? {
+                ...overlay,
+                content: {
+                  ...overlay.content,
+                  enterAnimation: {
+                    ...(overlay.content.enterAnimation ?? {
+                      type: "fade",
+                      easing: "ease-out",
+                      duration: 0.45,
+                      delay: 0,
+                    }),
+                    type,
+                  },
+                },
+              }
+            : overlay,
+        ),
+      }));
+    },
+    [updateDraft],
+  );
+
+  const handleSetClipExitAnimationType = useCallback(
+    (clipId: string, type: OverlayAnimationType, tracks: TimelineTrackModel[]) => {
+      const clip = findClip(tracks, clipId);
+      const overlayId = clip?.metadata?.overlayId;
+      if (!overlayId) return;
+      updateDraft((current) => ({
+        ...current,
+        overlays: current.overlays.map((overlay) =>
+          overlay.id === overlayId
+            ? {
+                ...overlay,
+                content: {
+                  ...overlay.content,
+                  exitAnimation: {
+                    ...(overlay.content.exitAnimation ?? {
+                      type: "none",
+                      easing: "ease-in-out",
+                      duration: 0.35,
+                    }),
+                    type,
+                  },
+                },
+              }
+            : overlay,
+        ),
+      }));
     },
     [updateDraft],
   );
@@ -359,34 +458,6 @@ export function useOverlayMutations({
     },
     [setDraftDirect, draftRef, onUnsyncedChange, onRemoteSyncState],
   );
-
-  const handleSetClipTransitionPreset = useCallback(
-    (clipId: string, preset: string | undefined, tracks: TimelineTrackModel[]) => {
-      const clip = findClip(tracks, clipId);
-      const overlayId = clip?.metadata?.overlayId;
-      if (!overlayId) return;
-      updateDraft((current) => ({
-        ...current,
-        overlays: current.overlays.map((overlay) =>
-          overlay.id === overlayId
-            ? {
-                ...overlay,
-                content: {
-                  ...overlay.content,
-                  transition: {
-                    ...(overlay.content.transition ?? { preset: "fade", easing: "ease-in-out", duration: 0.4 }),
-                    preset: (preset ?? "fade") as TransitionPreset,
-                  },
-                },
-              }
-            : overlay,
-        ),
-      }));
-    },
-    [updateDraft],
-  );
-
-
   const selectionMutations = useSelectionMutations({ updateDraft, draftRef });
 
   return {
@@ -400,10 +471,11 @@ export function useOverlayMutations({
     handleCommitClipMove,
     handleMoveClipToLayer,
     handleMoveClipToNewLayer,
+    handleSetClipEnterAnimationType,
+    handleSetClipExitAnimationType,
     handleReorderOverlays,
     handleAddLayer,
     handleDeleteLayer,
     handleOverlayStyleQuickChange,
-    handleSetClipTransitionPreset,
   };
 }

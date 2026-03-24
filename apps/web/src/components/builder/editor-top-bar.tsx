@@ -40,6 +40,8 @@ interface TopBarProps {
   onFrameRangeChange: (field: "start" | "end", value: number) => void;
   onSectionFieldChange: (field: "scrubStrength" | "sectionHeightVh", value: number) => void;
   onPreviewModeChange: (mode: "desktop" | "mobile") => void;
+  projectSwitcherOpen?: boolean;
+  onProjectSwitcherOpenChange?: (open: boolean) => void;
   onPreview: () => void | Promise<void>;
   onPublish: () => void | Promise<void>;
   onRetrySync?: () => void | Promise<void>;
@@ -57,10 +59,10 @@ function SaveIndicator({
       ? { color: "#facc15", label: "Saving" }
       : saveStatus.local === "error" || saveStatus.remote === "error" || saveStatus.hasUnsyncedChanges
         ? { color: "#f87171", label: "Unsaved" }
-        : { color: "var(--editor-accent)", label: "Saved" };
+        : { color: "var(--editor-accent)", label: "Save" };
 
   return (
-    <span className="flex items-center gap-2 text-xs">
+    <span className="flex items-center gap-2 text-xs w-50">
       <span
         role="status"
         aria-live="polite"
@@ -75,7 +77,7 @@ function SaveIndicator({
         <button
           type="button"
           onClick={() => void onRetrySync()}
-          className="rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-[var(--editor-hover)]"
+          className="rounded border px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-[var(--editor-hover)]"
           style={{
             borderColor: "var(--editor-border)",
             color: "var(--editor-text)",
@@ -92,7 +94,7 @@ function SaveIndicator({
         <button
           type="button"
           onClick={() => void onRetrySync()}
-          className="rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-[var(--editor-hover)]"
+          className="rounded border px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-[var(--editor-hover)]"
           style={{
             borderColor: "var(--editor-border)",
             color: "var(--editor-text-dim)",
@@ -122,6 +124,8 @@ export function TopBar({
   onFrameRangeChange,
   onSectionFieldChange,
   onPreviewModeChange,
+  projectSwitcherOpen,
+  onProjectSwitcherOpenChange,
   onPreview,
   onPublish,
   onRetrySync,
@@ -148,6 +152,8 @@ export function TopBar({
           scrubStrength={scrubStrength}
           sectionHeightVh={sectionHeightVh}
           projects={projects}
+          open={projectSwitcherOpen}
+          onOpenChange={onProjectSwitcherOpenChange}
           onProjectTitleChange={onProjectTitleChange}
           onSectionTitleChange={onSectionTitleChange}
           onFrameRangeChange={onFrameRangeChange}

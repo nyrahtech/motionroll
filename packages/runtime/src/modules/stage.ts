@@ -3,6 +3,7 @@
  * Creates the sticky viewport, poster placeholder, and fallback media elements.
  */
 import type { ProjectSectionManifest, ResolvedFallbackStrategy } from "../../../shared/src/index";
+import type { RenderFallbackResult } from "./types";
 import { getFirstFrameUrl, getFrameUrlForProgress } from "./frame-controller";
 
 export function ensureStageRoot(
@@ -46,25 +47,36 @@ export function renderFallback(
   section: ProjectSectionManifest,
   mode: "desktop" | "mobile",
   fallback: ResolvedFallbackStrategy,
-): () => void {
+  interactionMode: "scroll" | "controlled" = "scroll",
+): RenderFallbackResult {
   if (fallback === "video" && section.fallback.fallbackVideoUrl) {
     const video = document.createElement("video");
     video.src = section.fallback.fallbackVideoUrl;
-    video.autoplay = true;
+    video.autoplay = interactionMode !== "controlled";
     video.loop = true;
     video.muted = true;
     video.playsInline = true;
+    video.preload = "auto";
+    video.poster =
+      section.fallback.posterUrl ??
+      getFirstFrameUrl(section, mode) ??
+      "";
     video.style.cssText =
       "width:100%;height:100%;object-fit:cover;background:#000;position:absolute;inset:0";
     stageRoot.appendChild(video);
-    return () => video.remove();
+    return {
+      video,
+      cleanup: () => video.remove(),
+    };
   }
 
   const source =
     fallback === "first-frame"
       ? getFirstFrameUrl(section, mode)
       : section.fallback.posterUrl ?? getFirstFrameUrl(section, mode);
-  if (!source) return () => undefined;
+  if (!source) {
+    return { cleanup: () => undefined };
+  }
 
   const poster = document.createElement("img");
   poster.src = source;
@@ -72,5 +84,7 @@ export function renderFallback(
   poster.style.cssText =
     "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000";
   stageRoot.appendChild(poster);
-  return () => poster.remove();
+  return {
+    cleanup: () => poster.remove(),
+  };
 }

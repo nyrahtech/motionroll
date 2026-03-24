@@ -30,6 +30,7 @@ export type FallbackConfig = z.infer<typeof FallbackConfigSchema>;
 export const MotionSettingsSchema = z.object({
   sectionHeightVh: z.number().min(100).max(600),
   scrubStrength: z.number().min(0.05).max(4),
+  durationSeconds: z.number().positive().optional(),
   easing: z.enum(["linear", "power2.out", "power3.out"]),
   pin: z.boolean(),
   preloadWindow: z.number().int().min(2).max(40),

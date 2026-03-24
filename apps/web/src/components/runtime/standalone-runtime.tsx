@@ -31,6 +31,9 @@ export function StandaloneRuntime({
     if (!hasRenderableMedia) {
       controllerRef.current?.destroy();
       controllerRef.current = null;
+      if (typeof window !== "undefined" && window.parent !== window) {
+        window.parent.postMessage({ type: "motionroll-preview-ready", status: "empty" }, "*");
+      }
       return;
     }
 
@@ -48,6 +51,9 @@ export function StandaloneRuntime({
       allowWheelScrub: false,
       forceSequence,
     });
+    if (typeof window !== "undefined" && window.parent !== window) {
+      window.parent.postMessage({ type: "motionroll-preview-ready", status: "ready" }, "*");
+    }
 
     return () => {
       controllerRef.current?.destroy();

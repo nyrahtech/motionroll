@@ -8,14 +8,16 @@
 "use client";
 
 import React, { Fragment, type MouseEvent } from "react";
-import { Ellipsis, Layers3 } from "lucide-react";
-import { clampProgress } from "@motionroll/shared";
+import { Check, Ellipsis, Layers3 } from "lucide-react";
+import { clampProgress, type OverlayAnimationType } from "@motionroll/shared";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "../../ui/dropdown-menu";
 import type {
@@ -23,6 +25,10 @@ import type {
   TimelineSelection,
   TimelineTrackModel,
 } from "../timeline-model";
+import { TIMELINE_START_OFFSET } from "../timeline-layout";
+
+type SceneTransitionPreset =
+  "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
 
 export type TimelineTrackRowProps = {
   track: TimelineTrackModel | undefined;
@@ -43,13 +49,16 @@ export type TimelineTrackRowProps = {
   canGroupSelection: boolean;
   layerTracks: TimelineTrackModel[];
   onPlayheadChange: (value: number) => void;
-  onSetClipTransitionPreset: (clipId: string, preset?: string) => void;
   onGroupSelection: () => void;
   onUngroupSelection: () => void;
   onMoveClipToNewLayer: (clipId: string) => void;
   onMoveClipToLayer: (clipId: string, layerIndex: number) => void;
   onDuplicateClip: (clipId: string) => void;
   onDeleteClip: (clipId: string) => void;
+  onSetClipEnterAnimationType: (clipId: string, type: OverlayAnimationType) => void;
+  onSetClipExitAnimationType: (clipId: string, type: OverlayAnimationType) => void;
+  onOpenSceneAnimation?: () => void;
+  onSetSceneTransitionPreset?: (preset: SceneTransitionPreset) => void;
   // Drag handlers (stable refs from parent)
   shouldSuppressClick: () => boolean;
   beginClipDrag: (
@@ -76,19 +85,46 @@ function TimelineTrackRowInner({
   canGroupSelection,
   layerTracks,
   onPlayheadChange,
-  onSetClipTransitionPreset,
   onGroupSelection,
   onUngroupSelection,
   onMoveClipToNewLayer,
   onMoveClipToLayer,
   onDuplicateClip,
   onDeleteClip,
+  onSetClipEnterAnimationType,
+  onSetClipExitAnimationType,
+  onOpenSceneAnimation,
+  onSetSceneTransitionPreset,
   shouldSuppressClick,
   beginClipDrag,
 }: TimelineTrackRowProps) {
-  if (!track) return <div className="relative h-14" style={{ width: totalW }} />;
+  if (!track) {
+    return <div className="relative h-14" style={{ width: totalW + TIMELINE_START_OFFSET }} />;
+  }
+  const resolvedTrack = track;
+
+  const animationTypeItems: Array<{ type: OverlayAnimationType; label: string }> = [
+    { type: "none", label: "None" },
+    { type: "fade", label: "Fade" },
+    { type: "slide-up-fade", label: "Slide up + fade" },
+    { type: "slide-left-fade", label: "Slide left + fade" },
+    { type: "scale-fade", label: "Scale + fade" },
+  ];
+  const sceneTransitionItems: Array<{
+    preset: SceneTransitionPreset;
+    label: string;
+  }> = [
+    { preset: "none", label: "None" },
+    { preset: "fade", label: "Fade" },
+    { preset: "crossfade", label: "Crossfade" },
+    { preset: "wipe", label: "Wipe" },
+    { preset: "zoom-dissolve", label: "Zoom dissolve" },
+    { preset: "blur-dissolve", label: "Blur dissolve" },
+  ];
 
   function renderFrameStrip(frameStrip: string[], clip: TimelineClipModel) {
+    const fallbackUrl = clip.metadata?.frameStripSource?.fallbackUrl;
+
     return (
       <div className="absolute inset-0 flex overflow-hidden rounded-md">
         {frameStrip.map((url, i) => (
@@ -103,32 +139,143 @@ function TimelineTrackRowInner({
               const local = frameStrip.length <= 1 ? 0 : i / (frameStrip.length - 1);
               onPlayheadChange(clampProgress(clip.start + local * (clip.end - clip.start)));
             }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={url} alt="" className="h-full w-full object-cover opacity-90" draggable={false} />
+            >
+            <TimelineStripImage url={url} fallbackUrl={fallbackUrl} />
           </button>
         ))}
       </div>
     );
   }
 
+  function renderClipMenuContent(clip: TimelineClipModel) {
+    if (resolvedTrack.type === "section") {
+      return (
+        <>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Animation</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {sceneTransitionItems.map((item) => (
+                <DropdownMenuItem
+                  key={`scene-transition-${item.preset}`}
+                  onClick={() => onSetSceneTransitionPreset?.(item.preset)}
+                >
+                  {clip.metadata?.sceneTransitionPreset === item.preset ? (
+                    <Check className="h-3.5 w-3.5 text-[var(--editor-accent)]" />
+                  ) : (
+                    <span className="w-3.5" />
+                  )}
+                  <span>{item.label}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuItem onClick={() => onOpenSceneAnimation?.()}>Scene settings</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem disabled variant="destructive">
+            Delete
+          </DropdownMenuItem>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Enter animation</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            {animationTypeItems.map((item) => (
+              <DropdownMenuItem
+                key={`enter-${clip.id}-${item.type}`}
+                onClick={() => onSetClipEnterAnimationType(clip.id, item.type)}
+              >
+                {clip.metadata?.enterAnimationType === item.type ? <Check className="h-3.5 w-3.5 text-[var(--editor-accent)]" /> : <span className="w-3.5" />}
+                <span>{item.label}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Exit animation</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            {animationTypeItems.map((item) => (
+              <DropdownMenuItem
+                key={`exit-${clip.id}-${item.type}`}
+                onClick={() => onSetClipExitAnimationType(clip.id, item.type)}
+              >
+                {clip.metadata?.exitAnimationType === item.type ? <Check className="h-3.5 w-3.5 text-[var(--editor-accent)]" /> : <span className="w-3.5" />}
+                <span>{item.label}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        {canGroupSelection ? <DropdownMenuSeparator /> : null}
+        {canGroupSelection ? <DropdownMenuItem onClick={onGroupSelection}>Group</DropdownMenuItem> : null}
+        {clip.metadata?.isGroup ? <DropdownMenuItem onClick={onUngroupSelection}>Ungroup</DropdownMenuItem> : null}
+        {layerTracks.length > 1 ? <DropdownMenuSeparator /> : null}
+        <DropdownMenuItem onClick={() => onMoveClipToNewLayer(clip.id)}>Move to New layer</DropdownMenuItem>
+        {layerTracks
+          .filter((lt) => lt.id !== resolvedTrack.id)
+          .map((lt) => (
+            <DropdownMenuItem
+              key={`${clip.id}-${lt.id}`}
+              onClick={() => {
+                if (typeof lt.metadata?.layerIndex === "number") {
+                  onMoveClipToLayer(clip.id, lt.metadata.layerIndex);
+                }
+              }}
+            >
+              Move to {lt.label}
+            </DropdownMenuItem>
+          ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onDuplicateClip(clip.id)}>Duplicate</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onDeleteClip(clip.id)}>Delete</DropdownMenuItem>
+      </>
+    );
+  }
+
+  function renderClipMenuTrigger(
+    clip: TimelineClipModel,
+    isVisible: boolean,
+    align: "start" | "end" = "end",
+  ) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            title="Open clip actions"
+            aria-label="Open clip actions"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[rgba(10,10,12,0.45)] text-[var(--editor-text-dim)] opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[rgba(255,255,255,0.08)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]"
+            style={{ opacity: isVisible ? 1 : undefined }}
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <Ellipsis className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align={align}>
+          {renderClipMenuContent(clip)}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
   return (
-    <div className="relative h-14" style={{ width: totalW }}>
+    <div className="relative h-14" style={{ width: totalW + TIMELINE_START_OFFSET }}>
       {track.clips.map((clip) => {
         const previewTiming = clipTimingPreview?.clipId === clip.id ? clipTimingPreview : null;
         const clipStart = previewTiming?.start ?? clip.start;
         const clipEnd = previewTiming?.end ?? clip.end;
-        const left = clipStart * totalW;
+        const left = TIMELINE_START_OFFSET + clipStart * totalW;
         const width = Math.max(14, (clipEnd - clipStart) * totalW);
         const isSelected = selection?.clipId === clip.id;
         const isMultiSelected = selectedClipIds.includes(clip.id);
         const isSelectionVisible = isSelected || isMultiSelected;
         const frameStrip = showFrameStrip ? frameStripCache.get(clip.id) : undefined;
-        const transitionLabel = clip.metadata?.transitionPreset?.replace(/-/g, " ") ?? null;
         const isMoveDragging = draggingClipId === clip.id && draggingClipMode === "move";
-        const clipStackIndex = track.clips.findIndex((entry) => entry.id === clip.id);
-        const stackZIndex = track.type === "section" ? 2 : isMoveDragging ? 40 : isSelected ? 30 : 10 + clipStackIndex;
-        const isDraggable = draggable && track.type !== "section";
+        const clipStackIndex = resolvedTrack.clips.findIndex((entry) => entry.id === clip.id);
+        const stackZIndex = resolvedTrack.type === "section" ? 2 : isMoveDragging ? 40 : isSelected ? 30 : 10 + clipStackIndex;
+        const isDraggable = draggable && resolvedTrack.type !== "section";
 
         return (
           <Fragment key={clip.id}>
@@ -171,6 +318,7 @@ function TimelineTrackRowInner({
               <div className="relative z-[1] flex h-full items-center justify-between gap-2 px-2">
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-1.5">
+                    {resolvedTrack.type === "section" ? renderClipMenuTrigger(clip, isSelectionVisible, "start") : null}
                     {clip.metadata?.isGroup ? (
                       <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md" style={{ background: "rgba(205,239,255,0.08)", color: "var(--editor-accent)" }}>
                         <Layers3 className="h-3 w-3" />
@@ -178,9 +326,7 @@ function TimelineTrackRowInner({
                     ) : null}
                     <span className="block truncate text-xs font-medium text-white">{clip.label ?? clip.id}</span>
                   </div>
-                  {transitionLabel ? (
-                    <span className="block truncate text-[10px] uppercase tracking-[0.08em]" style={{ color: "rgba(103,232,249,0.78)" }}>{transitionLabel}</span>
-                  ) : clip.metadata?.isGroup ? (
+                  {clip.metadata?.isGroup ? (
                     <span className="block truncate text-[10px] uppercase tracking-[0.08em]" style={{ color: "rgba(255,255,255,0.56)" }}>
                       {clip.metadata.childCount ?? 0} items
                     </span>
@@ -189,61 +335,7 @@ function TimelineTrackRowInner({
                   ) : null}
                 </div>
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      title="Open clip actions"
-                      aria-label="Open clip actions"
-                      className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgba(10,10,12,0.45)] text-[var(--editor-text-dim)] opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[rgba(255,255,255,0.08)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]"
-                      style={{ opacity: isSelectionVisible ? 1 : undefined }}
-                      onClick={(ev) => ev.stopPropagation()}
-                    >
-                      <Ellipsis className="h-3.5 w-3.5" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    {track.type === "section" ? (
-                      <>
-                        <DropdownMenuLabel>Scene</DropdownMenuLabel>
-                        <DropdownMenuItem onClick={() => onPlayheadChange(clip.start)}>Jump to start</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => onPlayheadChange(clip.end)}>Jump to end</DropdownMenuItem>
-                      </>
-                    ) : (
-                      <>
-                        <DropdownMenuLabel>Animation</DropdownMenuLabel>
-                        {(["fade", "crossfade", "wipe", "zoom-dissolve", "blur-dissolve"] as const).map((p) => (
-                          <DropdownMenuItem key={p} onClick={() => onSetClipTransitionPreset(clip.id, p)}>
-                            {p.replace(/-/g, " ")}
-                          </DropdownMenuItem>
-                        ))}
-                        <DropdownMenuItem onClick={() => onSetClipTransitionPreset(clip.id, undefined)}>None</DropdownMenuItem>
-                        {canGroupSelection ? <DropdownMenuSeparator /> : null}
-                        {canGroupSelection ? <DropdownMenuItem onClick={onGroupSelection}>Group</DropdownMenuItem> : null}
-                        {clip.metadata?.isGroup ? <DropdownMenuItem onClick={onUngroupSelection}>Ungroup</DropdownMenuItem> : null}
-                        {layerTracks.length > 1 ? <DropdownMenuSeparator /> : null}
-                        <DropdownMenuItem onClick={() => onMoveClipToNewLayer(clip.id)}>Move to New layer</DropdownMenuItem>
-                        {layerTracks
-                          .filter((lt) => lt.id !== track.id)
-                          .map((lt) => (
-                            <DropdownMenuItem
-                              key={`${clip.id}-${lt.id}`}
-                              onClick={() => {
-                                if (typeof lt.metadata?.layerIndex === "number") {
-                                  onMoveClipToLayer(clip.id, lt.metadata.layerIndex);
-                                }
-                              }}
-                            >
-                              Move to {lt.label}
-                            </DropdownMenuItem>
-                          ))}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => onDuplicateClip(clip.id)}>Duplicate</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => onDeleteClip(clip.id)}>Delete</DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {renderClipMenuTrigger(clip, isSelectionVisible)}
               </div>
 
               {/* Resize handles */}
@@ -262,6 +354,40 @@ function TimelineTrackRowInner({
         );
       })}
     </div>
+  );
+}
+
+function TimelineStripImage({
+  url,
+  fallbackUrl,
+}: {
+  url: string;
+  fallbackUrl?: string;
+}) {
+  const [src, setSrc] = React.useState(url);
+  const [hidden, setHidden] = React.useState(false);
+
+  React.useEffect(() => {
+    setSrc(url);
+    setHidden(false);
+  }, [url]);
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      className="h-full w-full object-cover opacity-90"
+      draggable={false}
+      style={hidden ? { visibility: "hidden" } : undefined}
+      onError={() => {
+        if (!hidden && fallbackUrl && src !== fallbackUrl) {
+          setSrc(fallbackUrl);
+          return;
+        }
+        setHidden(true);
+      }}
+    />
   );
 }
 

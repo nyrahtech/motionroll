@@ -53,7 +53,6 @@ function TimelineClipInner({
   const left = clipStart * totalW;
   const width = Math.max(14, (clipEnd - clipStart) * totalW);
   const isSelectionVisible = isSelected || isMultiSelected;
-  const transitionLabel = clip.metadata?.transitionPreset?.replace(/-/g, " ") ?? null;
 
   const accentColor =
     clip.tint === "accent"
@@ -132,8 +131,8 @@ function TimelineClipInner({
         </div>
       ) : null}
 
-      {/* Clip label + transition tag */}
-      <div className="pointer-events-none absolute inset-x-2 inset-y-0 flex items-center justify-between gap-1 overflow-hidden">
+      {/* Clip label */}
+      <div className="pointer-events-none absolute inset-x-2 inset-y-0 flex items-center gap-1 overflow-hidden">
         <span
           className="truncate text-xs font-medium leading-none"
           style={{
@@ -142,17 +141,6 @@ function TimelineClipInner({
         >
           {clip.label}
         </span>
-        {transitionLabel ? (
-          <span
-            className="shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.1em]"
-            style={{
-              background: "rgba(103,232,249,0.12)",
-              color: "rgba(103,232,249,0.75)",
-            }}
-          >
-            {transitionLabel}
-          </span>
-        ) : null}
       </div>
 
       {/* Resize handles — only shown when hovered or selected */}

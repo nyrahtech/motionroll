@@ -9,8 +9,8 @@ export type HydratedOverlayDefinition = OverlayDefinition & {
     layout: NonNullable<OverlayDefinition["content"]["layout"]>;
     style: NonNullable<OverlayDefinition["content"]["style"]>;
     background: NonNullable<OverlayDefinition["content"]["background"]>;
-    animation: NonNullable<OverlayDefinition["content"]["animation"]>;
-    transition: NonNullable<OverlayDefinition["content"]["transition"]>;
+    enterAnimation: NonNullable<OverlayDefinition["content"]["enterAnimation"]>;
+    exitAnimation: NonNullable<OverlayDefinition["content"]["exitAnimation"]>;
   };
 };
 
@@ -25,6 +25,7 @@ export type EditorDraft = {
   presetId: PresetId;
   /** Maps directly to ProjectDraftDocument.sectionTitle */
   sectionTitle: string;
+  sceneTransitionPreset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
   /** Maps directly to ProjectDraftDocument.sectionHeightVh */
   sectionHeightVh: number;
   scrubStrength: number;

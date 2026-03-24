@@ -15,9 +15,23 @@ export function formatPercent(value: number) {
 
 export function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
-      {children}
-    </p>
+    <div className="flex items-center gap-3">
+      <p className="shrink-0 text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
+        {children}
+      </p>
+      <div className="h-px flex-1 bg-[var(--border-subtle)]" />
+    </div>
+  );
+}
+
+export function SubsectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-3">
+      <p className="shrink-0 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--foreground-muted)]">
+        {children}
+      </p>
+      <div className="h-px flex-1 bg-[var(--border-subtle)]" />
+    </div>
   );
 }
 
@@ -54,14 +68,17 @@ export function ToolPanel({
   return (
     <div
       className={cn(
-        "space-y-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--panel-bg)] p-3",
+        "space-y-3",
         className,
       )}
     >
       {title ? (
-        <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
-          {title}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="shrink-0 text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
+            {title}
+          </p>
+          <div className="h-px flex-1 bg-[var(--border-subtle)]" />
+        </div>
       ) : null}
       {children}
     </div>

@@ -53,8 +53,6 @@ export function useEditorPersistence({
   draftVersionRef,
   hasUnsyncedChangesRef,
   replaceDraftStateFromDocument,
-  setProjectStateFromResponse,
-  setManifestStateFromResponse,
 }: {
   projectId: string;
   initialDraftRevision: number;
@@ -66,8 +64,6 @@ export function useEditorPersistence({
     doc: ProjectDraftDocument,
     options?: { clearHistory?: boolean; hasUnsyncedChanges?: boolean },
   ) => void;
-  setProjectStateFromResponse: (project: unknown) => void;
-  setManifestStateFromResponse: (manifest: unknown) => void;
 }): UseEditorPersistenceReturn {
   const [localSaveState, setLocalSaveState] = useState<LocalSaveState>("saved");
   const [remoteSyncState, setRemoteSyncState] = useState<RemoteSyncState>("synced");
@@ -78,6 +74,7 @@ export function useEditorPersistence({
   const syncPromiseRef = useRef<Promise<boolean> | null>(null);
   const pendingSyncAfterCurrentRef = useRef(false);
   const lastSyncedRevisionRef = useRef(initialDraftRevision);
+  const lastSyncedAtRef = useRef(initialUpdatedAt);
   const latestLocalSaveAtRef = useRef(initialUpdatedAt);
   const localSaveIndicatorTimeoutRef = useRef<number | null>(null);
   // Stable ref to scheduleRemoteSync so flushRemoteSync can call it without
@@ -121,7 +118,7 @@ export function useEditorPersistence({
         lastSyncedRevision: options.lastSyncedRevision ?? lastSyncedRevisionRef.current,
         dirty: options.dirty,
         lastLocalSaveAt: now,
-        lastSyncedAt: options.lastSyncedAt,
+        lastSyncedAt: options.lastSyncedAt ?? lastSyncedAtRef.current,
         pendingSyncAt: options.dirty ? now : undefined,
       };
 
@@ -168,34 +165,21 @@ export function useEditorPersistence({
         if (
           response.status === 409 &&
           data.conflict &&
-          data.draft &&
           typeof data.revision === "number" &&
           typeof data.updatedAt === "string"
         ) {
-          const localIsNewer =
-            latestLocalSaveAtRef.current >= data.updatedAt || hasUnsyncedChangesRef.current;
           console.warn(
             `[MotionRoll] Draft revision mismatch for ${projectId}. ` +
               `localRevision=${baseRevision} remoteRevision=${data.revision}`,
           );
           lastSyncedRevisionRef.current = data.revision;
-          if (localIsNewer) {
-            setRemoteSyncState("idle");
-            scheduleRemoteSyncRef.current(150);
-            return false;
-          }
-          replaceDraftStateFromDocument(data.draft, {
-            clearHistory: false,
-            hasUnsyncedChanges: false,
-          });
-          setRemoteSyncState("synced");
-          if (data.project) setProjectStateFromResponse(data.project);
-          if (data.manifest) setManifestStateFromResponse(data.manifest);
+          lastSyncedAtRef.current = data.updatedAt;
+          setRemoteSyncState("idle");
           await writeDraftLocally(
-            // We need to reconstruct EditorDraft from document here - pass doc to write
             draftRef.current,
-            { dirty: false, lastSyncedRevision: data.revision, lastSyncedAt: data.updatedAt },
+            { dirty: true, lastSyncedRevision: data.revision, lastSyncedAt: data.updatedAt },
           );
+          scheduleRemoteSyncRef.current(150);
           return false;
         }
 
@@ -215,8 +199,7 @@ export function useEditorPersistence({
         }
 
         lastSyncedRevisionRef.current = data.revision;
-        if (data.project) setProjectStateFromResponse(data.project);
-        if (data.manifest) setManifestStateFromResponse(data.manifest);
+        lastSyncedAtRef.current = data.updatedAt;
         const stillMatchesSyncedPayload = draftVersionRef.current === syncedDraftVersion;
         setHasUnsyncedChanges(!stillMatchesSyncedPayload);
         setRemoteSyncState(stillMatchesSyncedPayload ? "synced" : "idle");
@@ -249,9 +232,6 @@ export function useEditorPersistence({
     draftVersionRef,
     readSyncResponse,
     writeDraftLocally,
-    replaceDraftStateFromDocument,
-    setProjectStateFromResponse,
-    setManifestStateFromResponse,
   ]);
 
   const scheduleRemoteSync = useCallback((delay = 900) => {
@@ -291,8 +271,10 @@ export function useEditorPersistence({
           setRemoteSyncState("synced");
         }
         lastSyncedRevisionRef.current = localRecord.lastSyncedRevision;
+        lastSyncedAtRef.current = localRecord.lastSyncedAt ?? remoteUpdatedAt;
         latestLocalSaveAtRef.current = localRecord.lastLocalSaveAt;
       } else {
+        lastSyncedAtRef.current = remoteUpdatedAt;
         await writeDraftLocally(draftRef.current, {
           dirty: false,
           lastSyncedRevision: lastSyncedRevisionRef.current,
@@ -303,69 +285,6 @@ export function useEditorPersistence({
       persistenceReadyRef.current = true;
       if (localRecord?.dirty) {
         scheduleRemoteSyncRef.current(1800);
-      }
-
-      try {
-        const response = await fetch(`/api/projects/${projectId}/draft`, {
-          cache: "no-store",
-        });
-        if (!response.ok) {
-          const errorData = await readSyncResponse(response);
-          if (errorData.retryable) {
-            setRemoteSyncState("idle");
-            if (hasUnsyncedChangesRef.current) {
-              scheduleRemoteSyncRef.current(1800);
-            }
-            return;
-          }
-          setRemoteSyncState("error");
-          return;
-        }
-
-        const data = await readSyncResponse(response);
-        if (!data.draft || typeof data.revision !== "number" || typeof data.updatedAt !== "string") {
-          setRemoteSyncState("error");
-          return;
-        }
-
-        if (cancelled) return;
-
-        const localAfterFetch = await getLocalProjectDraft(projectId);
-        if (cancelled) return;
-
-        lastSyncedRevisionRef.current = data.revision;
-        if (
-          localAfterFetch &&
-          (localAfterFetch.dirty || localAfterFetch.lastLocalSaveAt > data.updatedAt)
-        ) {
-          console.warn(
-            `[MotionRoll] Keeping newer local draft for ${projectId} while remote cache refresh completed.`,
-          );
-          if (localAfterFetch.dirty) {
-            setRemoteSyncState("idle");
-            scheduleRemoteSyncRef.current(1800);
-          }
-          return;
-        }
-
-        if (data.project) setProjectStateFromResponse(data.project);
-        setManifestStateFromResponse(data.manifest);
-        replaceDraftStateFromDocument(data.draft, {
-          clearHistory: true,
-          hasUnsyncedChanges: false,
-        });
-        setRemoteSyncState("synced");
-        setHasUnsyncedChanges(false);
-        await writeDraftLocally(draftRef.current, {
-          dirty: false,
-          lastSyncedRevision: data.revision,
-          lastSyncedAt: data.updatedAt,
-        });
-      } catch {
-        setRemoteSyncState("idle");
-        if (hasUnsyncedChangesRef.current) {
-          scheduleRemoteSyncRef.current(1800);
-        }
       }
     }
 

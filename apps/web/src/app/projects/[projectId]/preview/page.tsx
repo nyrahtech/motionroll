@@ -3,6 +3,7 @@ import { requirePageAuth } from "@/lib/auth";
 import { StandaloneRuntime } from "@/components/runtime/standalone-runtime";
 import { getProjectById } from "@/lib/data/projects";
 import { buildProjectManifest } from "@/lib/manifest";
+import { PreviewExitButton } from "./preview-exit-button";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +15,16 @@ function resolveForceSequence(value?: string) {
   return value === "1" || value === "true";
 }
 
+function resolveEmbeddedPreview(value?: string) {
+  return value === "1" || value === "true";
+}
+
 export default async function ProjectPreviewPage({
   params,
   searchParams,
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams?: Promise<{ mode?: string; forceSequence?: string }>;
+  searchParams?: Promise<{ mode?: string; forceSequence?: string; embed?: string }>;
 }) {
   const { userId } = await requirePageAuth();
   const { projectId } = await params;
@@ -42,19 +47,14 @@ export default async function ProjectPreviewPage({
         reducedMotion={false}
         forceSequence={resolveForceSequence(resolvedSearchParams.forceSequence)}
       />
-      <div
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center pb-6"
-        style={{ background: "linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)", paddingTop: 48 }}
-      >
-        <button
-          type="button"
-          className="pointer-events-auto flex cursor-pointer items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-medium text-white shadow-xl backdrop-blur transition-opacity hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-white/40"
-          style={{ background: "rgba(10,12,18,0.88)", borderColor: "rgba(255,255,255,0.16)" }}
-          onClick={() => window.close()}
+      {resolveEmbeddedPreview(resolvedSearchParams.embed) ? null : (
+        <div
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center pb-6"
+          style={{ background: "linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)", paddingTop: 48 }}
         >
-          &lt;- Exit preview
-        </button>
-      </div>
+          <PreviewExitButton projectId={projectId} />
+        </div>
+      )}
     </main>
   );
 }
