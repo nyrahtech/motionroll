@@ -57,8 +57,8 @@ export type TimelineTrackRowProps = {
   onDeleteClip: (clipId: string) => void;
   onSetClipEnterAnimationType: (clipId: string, type: OverlayAnimationType) => void;
   onSetClipExitAnimationType: (clipId: string, type: OverlayAnimationType) => void;
-  onOpenSceneAnimation?: () => void;
-  onSetSceneTransitionPreset?: (preset: SceneTransitionPreset) => void;
+  onSetSceneEnterTransitionPreset?: (preset: SceneTransitionPreset) => void;
+  onSetSceneExitTransitionPreset?: (preset: SceneTransitionPreset) => void;
   // Drag handlers (stable refs from parent)
   shouldSuppressClick: () => boolean;
   beginClipDrag: (
@@ -93,8 +93,8 @@ function TimelineTrackRowInner({
   onDeleteClip,
   onSetClipEnterAnimationType,
   onSetClipExitAnimationType,
-  onOpenSceneAnimation,
-  onSetSceneTransitionPreset,
+  onSetSceneEnterTransitionPreset,
+  onSetSceneExitTransitionPreset,
   shouldSuppressClick,
   beginClipDrag,
 }: TimelineTrackRowProps) {
@@ -152,14 +152,14 @@ function TimelineTrackRowInner({
       return (
         <>
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger>Animation</DropdownMenuSubTrigger>
+            <DropdownMenuSubTrigger>Enter animation</DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
               {sceneTransitionItems.map((item) => (
                 <DropdownMenuItem
-                  key={`scene-transition-${item.preset}`}
-                  onClick={() => onSetSceneTransitionPreset?.(item.preset)}
+                  key={`scene-enter-transition-${item.preset}`}
+                  onClick={() => onSetSceneEnterTransitionPreset?.(item.preset)}
                 >
-                  {clip.metadata?.sceneTransitionPreset === item.preset ? (
+                  {clip.metadata?.sceneEnterTransitionPreset === item.preset ? (
                     <Check className="h-3.5 w-3.5 text-[var(--editor-accent)]" />
                   ) : (
                     <span className="w-3.5" />
@@ -169,7 +169,24 @@ function TimelineTrackRowInner({
               ))}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
-          <DropdownMenuItem onClick={() => onOpenSceneAnimation?.()}>Scene settings</DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Exit animation</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {sceneTransitionItems.map((item) => (
+                <DropdownMenuItem
+                  key={`scene-exit-transition-${item.preset}`}
+                  onClick={() => onSetSceneExitTransitionPreset?.(item.preset)}
+                >
+                  {clip.metadata?.sceneExitTransitionPreset === item.preset ? (
+                    <Check className="h-3.5 w-3.5 text-[var(--editor-accent)]" />
+                  ) : (
+                    <span className="w-3.5" />
+                  )}
+                  <span>{item.label}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuSeparator />
           <DropdownMenuItem disabled variant="destructive">
             Delete
@@ -246,8 +263,8 @@ function TimelineTrackRowInner({
             type="button"
             title="Open clip actions"
             aria-label="Open clip actions"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[rgba(10,10,12,0.45)] text-[var(--editor-text-dim)] opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[rgba(255,255,255,0.08)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]"
-            style={{ opacity: isVisible ? 1 : undefined }}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[rgba(10,10,12,0.45)] text-[var(--editor-text-dim)] opacity-100 transition-colors hover:bg-[rgba(255,255,255,0.08)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]"
+            style={{ opacity: isVisible ? 1 : 0.88 }}
             onClick={(ev) => ev.stopPropagation()}
           >
             <Ellipsis className="h-3.5 w-3.5" />
@@ -281,7 +298,7 @@ function TimelineTrackRowInner({
           <Fragment key={clip.id}>
             <div
               tabIndex={0}
-              className="motionroll-clip group absolute top-3 h-10 select-none rounded-md border transition-[background,border-color,box-shadow,transform,opacity] duration-150 hover:-translate-y-[1px] hover:border-[rgba(255,255,255,0.14)]"
+              className="motionroll-clip group absolute top-2 h-10 select-none rounded-md border transition-[background,border-color,box-shadow,transform,opacity] duration-150 hover:-translate-y-[1px] hover:border-[rgba(255,255,255,0.14)]"
               style={{
                 left,
                 width,
@@ -315,38 +332,52 @@ function TimelineTrackRowInner({
             >
               {frameStrip ? renderFrameStrip(frameStrip, clip) : null}
 
-              <div className="relative z-[1] flex h-full items-center justify-between gap-2 px-2">
-                <div className="min-w-0">
+              <div className="relative z-[1] h-full px-2">
+                <div className="absolute left-1 top-1/2 -translate-y-1/2">
+                  {renderClipMenuTrigger(clip, isSelectionVisible, "start")}
+                </div>
+                <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                  {renderClipMenuTrigger(clip, isSelectionVisible)}
+                </div>
+                <div className="flex h-full min-w-0 flex-col justify-center px-8">
                   <div className="flex min-w-0 items-center gap-1.5">
-                    {resolvedTrack.type === "section" ? renderClipMenuTrigger(clip, isSelectionVisible, "start") : null}
                     {clip.metadata?.isGroup ? (
-                      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md" style={{ background: "rgba(205,239,255,0.08)", color: "var(--editor-accent)" }}>
+                      <span
+                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md"
+                        style={{ background: "rgba(205,239,255,0.08)", color: "var(--editor-accent)" }}
+                      >
                         <Layers3 className="h-3 w-3" />
                       </span>
                     ) : null}
                     <span className="block truncate text-xs font-medium text-white">{clip.label ?? clip.id}</span>
                   </div>
                   {clip.metadata?.isGroup ? (
-                    <span className="block truncate text-[10px] uppercase tracking-[0.08em]" style={{ color: "rgba(255,255,255,0.56)" }}>
+                    <span
+                      className="block truncate text-[10px] uppercase tracking-[0.08em]"
+                      style={{ color: "rgba(255,255,255,0.56)" }}
+                    >
                       {clip.metadata.childCount ?? 0} items
                     </span>
                   ) : !frameStrip && clip.metadata?.contentType ? (
-                    <span className="block truncate text-[10px] uppercase tracking-[0.08em]" style={{ color: "rgba(255,255,255,0.56)" }}>{clip.metadata.contentType}</span>
+                    <span
+                      className="block truncate text-[10px] uppercase tracking-[0.08em]"
+                      style={{ color: "rgba(255,255,255,0.56)" }}
+                    >
+                      {clip.metadata.contentType}
+                    </span>
                   ) : null}
                 </div>
-
-                {renderClipMenuTrigger(clip, isSelectionVisible)}
               </div>
 
               {/* Resize handles */}
               <div
                 className="timeline-resize-handle absolute inset-y-0 left-0 z-[2] w-2 rounded-l-md cursor-ew-resize"
-                style={{ background: "rgba(191,227,255,0.55)", opacity: isSelected ? 0.95 : 0 }}
+                style={{ background: "rgba(191,227,255,0.55)", opacity: isSelectionVisible ? 0.95 : 0.6 }}
                 onMouseDown={(ev) => beginClipDrag(ev, "resize-start", clip, layerTrackIndex)}
               />
               <div
                 className="timeline-resize-handle absolute inset-y-0 right-0 z-[2] w-2 rounded-r-md cursor-ew-resize"
-                style={{ background: "rgba(191,227,255,0.55)", opacity: isSelected ? 0.95 : 0 }}
+                style={{ background: "rgba(191,227,255,0.55)", opacity: isSelectionVisible ? 0.95 : 0.6 }}
                 onMouseDown={(ev) => beginClipDrag(ev, "resize-end", clip, layerTrackIndex)}
               />
             </div>

@@ -9,7 +9,7 @@
  */
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { clampProgress } from "@motionroll/shared";
 import { TIMELINE_START_OFFSET } from "../timeline-layout";
 import {
@@ -82,6 +82,7 @@ export function useTimelineDrag({
   layerTracks, totalW, durationSeconds, snapPoints,
   onSelectionChange, onReorderTracks, onClipTimingChange, onCommitClipMove, onPlayheadChange,
 }: UseTimelineDragProps) {
+  const playheadScrubCleanupRef = useRef<(() => void) | null>(null);
 
   function disableDocumentSelection() {
     const previousUserSelect = document.body.style.userSelect;
@@ -190,29 +191,53 @@ export function useTimelineDrag({
     const trackArea = trackAreaRef.current;
     if (!trackArea) return;
     const rect = trackArea.getBoundingClientRect();
-    const scrollLeft = scrollRef.current?.scrollLeft ?? 0;
     const rawProgress =
-      (clientX - rect.left + scrollLeft - TIMELINE_START_OFFSET) / Math.max(totalW, 1);
+      (clientX - rect.left - TIMELINE_START_OFFSET) / Math.max(totalW, 1);
     onPlayheadChange(clampProgress(rawProgress));
   }
 
   function handlePlayheadPointerDown(e: React.PointerEvent) {
+    // If a previous scrub session did not cleanly terminate (e.g. edge-case pointer cancel),
+    // force-clean it before starting a new one so the ruler never gets "stuck".
+    playheadScrubCleanupRef.current?.();
     e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Some browsers can throw if capture is unavailable; window listeners still handle drag.
+    }
     updatePlayheadFromPointer(e.clientX);
     const previousUserSelect = document.body.style.userSelect;
     document.body.style.userSelect = "none";
 
-    function onMove(ev: PointerEvent) {
+    function onPointerMove(ev: PointerEvent) {
       updatePlayheadFromPointer(ev.clientX);
     }
-    function onUp() {
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+
+    function onMouseMove(ev: MouseEvent) {
+      updatePlayheadFromPointer(ev.clientX);
     }
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+
+    function cleanup() {
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", cleanup);
+      window.removeEventListener("blur", cleanup);
+      playheadScrubCleanupRef.current = null;
+    }
+
+    playheadScrubCleanupRef.current = cleanup;
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", cleanup);
+    window.addEventListener("pointercancel", cleanup);
+    // Fallback for environments where pointermove can drop at viewport edges.
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", cleanup);
+    window.addEventListener("blur", cleanup);
   }
 
   function updateClipDragFromPointer(clientX: number, clientY: number) {

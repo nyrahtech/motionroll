@@ -1,12 +1,11 @@
 "use client";
 
 import * as Popover from "@radix-ui/react-popover";
-import { Archive, ChevronDown, Copy, FolderOpen, Plus, Search } from "lucide-react";
+import { Archive, ChevronDown, Copy, FolderOpen, Plus, Search, Settings2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Slider } from "@/components/ui/slider";
+import { ProjectSettingsModal } from "./project-settings-modal";
 
 type SwitcherProject = {
   id: string;
@@ -32,13 +31,16 @@ export function ProjectSwitcher({
   frameRangeEnd,
   scrubStrength,
   sectionHeightVh,
+  sceneEnterTransition,
+  sceneExitTransition,
+  currentProjectCoverUrl,
+  hasThumbnailOverride,
   projects,
   open,
   onOpenChange,
-  onProjectTitleChange,
-  onSectionTitleChange,
-  onFrameRangeChange,
-  onSectionFieldChange,
+  onSaveSettings,
+  onThumbnailUpload,
+  onThumbnailReset,
 }: {
   currentProjectId: string;
   currentProjectTitle: string;
@@ -47,19 +49,43 @@ export function ProjectSwitcher({
   frameRangeEnd: number;
   scrubStrength: number;
   sectionHeightVh: number;
+  sceneEnterTransition: {
+    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+    duration: number;
+  };
+  sceneExitTransition: {
+    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+    duration: number;
+  };
+  currentProjectCoverUrl: string;
+  hasThumbnailOverride: boolean;
   projects: SwitcherProject[];
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  onProjectTitleChange: (value: string) => void;
-  onSectionTitleChange: (value: string) => void;
-  onFrameRangeChange: (field: "start" | "end", value: number) => void;
-  onSectionFieldChange: (field: "scrubStrength" | "sectionHeightVh", value: number) => void;
+  onSaveSettings: (values: {
+    projectTitle: string;
+    sectionTitle: string;
+    frameRangeStart: number;
+    frameRangeEnd: number;
+    scrubStrength: number;
+    sectionHeightVh: number;
+    sceneEnterTransition: {
+      preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+      duration: number;
+    };
+    sceneExitTransition: {
+      preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+      duration: number;
+    };
+  }) => Promise<void> | void;
+  onThumbnailUpload: (file: File) => Promise<void>;
+  onThumbnailReset: () => Promise<void>;
 }) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [query, setQuery] = useState("");
-  const [renameValue, setRenameValue] = useState(currentProjectTitle);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const isControlled = typeof open === "boolean";
   const resolvedOpen = open ?? uncontrolledOpen;
 
@@ -74,10 +100,6 @@ export function ProjectSwitcher({
     setMounted(true);
   }, []);
 
-  useEffect(() => {
-    setRenameValue(currentProjectTitle);
-  }, [currentProjectTitle]);
-
   const filteredProjects = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) {
@@ -88,16 +110,6 @@ export function ProjectSwitcher({
       `${project.title} ${project.slug}`.toLowerCase().includes(normalized),
     );
   }, [projects, query]);
-
-  function renameCurrentProject() {
-    const nextTitle = renameValue.trim();
-    if (!nextTitle || nextTitle === currentProjectTitle) {
-      return;
-    }
-
-    onProjectTitleChange(nextTitle);
-    handleOpenChange(false);
-  }
 
   async function duplicateCurrentProject() {
     setPendingAction("duplicate");
@@ -156,124 +168,80 @@ export function ProjectSwitcher({
   }
 
   return (
-    <Popover.Root open={resolvedOpen} onOpenChange={handleOpenChange}>
-      <Popover.Trigger asChild>{trigger}</Popover.Trigger>
+    <>
+      <Popover.Root open={resolvedOpen} onOpenChange={handleOpenChange}>
+        <Popover.Trigger asChild>{trigger}</Popover.Trigger>
 
-      <Popover.Portal>
-        <Popover.Content
-          sideOffset={10}
-          align="start"
-          className="z-[60] w-[360px] rounded-[14px] border border-[rgba(255,255,255,0.06)] bg-[#0b0e14] p-3 shadow-[0_24px_48px_rgba(0,0,0,0.34)]"
-        >
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
-                Project switcher
-              </p>
-              <label className="focus-ring flex items-center gap-2 rounded-[10px] border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3">
-                <Search className="h-3.5 w-3.5 text-[var(--foreground-faint)]" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search projects"
-                  className="h-9 w-full border-0 bg-transparent p-0 text-sm text-white outline-none placeholder:text-[var(--foreground-faint)]"
-                />
-              </label>
-            </div>
+        <Popover.Portal>
+          <Popover.Content
+            sideOffset={10}
+            align="start"
+            className="z-[60] w-[360px] rounded-[14px] border p-3 shadow-[0_24px_48px_rgba(0,0,0,0.34)]"
+            style={{
+              background: "var(--editor-panel)",
+              borderColor: "var(--editor-border)",
+              color: "var(--editor-text)",
+            }}
+          >
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
+                  Project switcher
+                </p>
+                <label className="focus-ring flex items-center gap-2 rounded-[10px] border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.03)] px-3">
+                  <Search className="h-3.5 w-3.5 text-[var(--foreground-faint)]" />
+                  <input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search projects"
+                    className="h-9 w-full border-0 bg-transparent p-0 text-sm text-white outline-none placeholder:text-[var(--foreground-faint)]"
+                  />
+                </label>
+              </div>
 
-            <div className="max-h-[220px] space-y-1 overflow-y-auto pr-1">
-              {filteredProjects.map((project) => {
-                const published = project.publishTargets?.find((target) => target.targetType === "hosted_embed");
-                return (
-                  <button
-                    key={project.id}
-                    type="button"
-                    onClick={() => window.location.assign(`/projects/${project.id}`)}
-                    className={`focus-ring flex w-full cursor-pointer items-center justify-between rounded-[10px] px-3 py-2 text-left transition ${
-                      project.id === currentProjectId
-                        ? "bg-[rgba(205,239,255,0.12)]"
-                        : "bg-[rgba(255,255,255,0.02)] hover:bg-[rgba(255,255,255,0.05)]"
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-white">{project.title}</p>
-                      <p className="truncate text-xs text-[var(--foreground-faint)]">
-                        {project.slug}
-                      </p>
-                    </div>
-                    <Badge variant={published?.publishedAt ? "accent" : "quiet"}>
-                      {published?.publishedAt ? "Published" : "Draft"}
-                    </Badge>
-                  </button>
-                );
-              })}
-            </div>
+              <div className="max-h-[220px] space-y-1 overflow-y-auto pr-1">
+                {filteredProjects.map((project) => {
+                  const published = project.publishTargets?.find((target) => target.targetType === "hosted_embed");
+                  return (
+                    <button
+                      key={project.id}
+                      type="button"
+                      onClick={() => window.location.assign(`/projects/${project.id}`)}
+                      className={`focus-ring flex w-full cursor-pointer items-center justify-between rounded-[10px] px-3 py-2 text-left transition ${
+                        project.id === currentProjectId
+                          ? "bg-[rgba(205,239,255,0.12)]"
+                          : "bg-[rgba(255,255,255,0.02)] hover:bg-[rgba(255,255,255,0.05)]"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-white">{project.title}</p>
+                        <p className="truncate text-xs text-[var(--foreground-faint)]">
+                          {project.slug}
+                        </p>
+                      </div>
+                      <Badge variant={published?.publishedAt ? "accent" : "quiet"}>
+                        {published?.publishedAt ? "Published" : "Draft"}
+                      </Badge>
+                    </button>
+                  );
+                })}
+              </div>
 
-            <div className="section-divider" />
+              <div className="section-divider" />
 
-            <div className="space-y-2">
-              <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
-                Current project
-              </p>
-              <div className="flex gap-2">
-                <Input
-                  aria-label="Project title"
-                  value={renameValue}
-                  onChange={(event) => {
-                    setRenameValue(event.target.value);
-                    onProjectTitleChange(event.target.value);
-                  }}
-                />
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="quiet"
                   size="sm"
-                  onClick={renameCurrentProject}
+                  onClick={() => {
+                    setIsSettingsOpen(true);
+                    handleOpenChange(false);
+                  }}
                 >
-                  Rename
+                  <Settings2 className="h-3.5 w-3.5" />
+                  Project settings
                 </Button>
-              </div>
-              <div className="space-y-3 rounded-[10px] border border-[rgba(255,255,255,0.05)] bg-[rgba(255,255,255,0.02)] p-3">
-                <div className="space-y-1.5">
-                  <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
-                    Project details
-                  </p>
-                  <Input
-                    aria-label="Section title"
-                    value={sectionTitle}
-                    onChange={(event) => onSectionTitleChange(event.target.value)}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    aria-label="Frame range start"
-                    type="number"
-                    value={frameRangeStart}
-                    onChange={(event) => onFrameRangeChange("start", Number(event.target.value))}
-                  />
-                  <Input
-                    aria-label="Frame range end"
-                    type="number"
-                    value={frameRangeEnd}
-                    onChange={(event) => onFrameRangeChange("end", Number(event.target.value))}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
-                    <span>Scroll strength</span>
-                    <span>{scrubStrength.toFixed(2)}x</span>
-                  </div>
-                  <Slider value={[scrubStrength]} min={0.2} max={2} step={0.05} onValueChange={([v]) => onSectionFieldChange("scrubStrength", v ?? scrubStrength)} />
-                </div>
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
-                    <span>Scene scroll height</span>
-                    <span>{Math.round(sectionHeightVh)}vh</span>
-                  </div>
-                  <Slider value={[sectionHeightVh]} min={120} max={500} step={10} onValueChange={([v]) => onSectionFieldChange("sectionHeightVh", v ?? sectionHeightVh)} />
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="quiet"
@@ -301,31 +269,51 @@ export function ProjectSwitcher({
                   </a>
                 </Button>
               </div>
-            </div>
 
-            <div className="section-divider" />
+              <div className="section-divider" />
 
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={Boolean(pendingAction)}
-                onClick={() => void createProject(`Project ${new Date().toLocaleDateString("en", { month: "short", day: "numeric" })}`)}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                New blank
-              </Button>
-              <Button asChild type="button" variant="quiet" size="sm">
-                <a href="/templates">
-                  <Copy className="h-3.5 w-3.5" />
-                  Browse templates
-                </a>
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={Boolean(pendingAction)}
+                  onClick={() => void createProject(`Project ${new Date().toLocaleDateString("en", { month: "short", day: "numeric" })}`)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New blank
+                </Button>
+                <Button asChild type="button" variant="quiet" size="sm">
+                  <a href="/templates">
+                    <Copy className="h-3.5 w-3.5" />
+                    Browse templates
+                  </a>
+                </Button>
+              </div>
             </div>
-          </div>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+
+      <ProjectSettingsModal
+        open={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        values={{
+          projectTitle: currentProjectTitle,
+          sectionTitle,
+          frameRangeStart,
+          frameRangeEnd,
+          scrubStrength,
+          sectionHeightVh,
+          sceneEnterTransition,
+          sceneExitTransition,
+        }}
+        coverUrl={currentProjectCoverUrl}
+        hasThumbnailOverride={hasThumbnailOverride}
+        onSave={onSaveSettings}
+        onThumbnailUpload={onThumbnailUpload}
+        onThumbnailReset={onThumbnailReset}
+      />
+    </>
   );
 }

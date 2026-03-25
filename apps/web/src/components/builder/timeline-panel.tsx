@@ -66,8 +66,10 @@ type TimelinePanelProps = {
   onMoveClipToNewLayer: (clipId: string) => void;
   onSetClipEnterAnimationType: (clipId: string, type: OverlayAnimationType) => void;
   onSetClipExitAnimationType: (clipId: string, type: OverlayAnimationType) => void;
-  onOpenSceneAnimation: () => void;
-  onSetSceneTransitionPreset: (
+  onSetSceneEnterTransitionPreset: (
+    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve",
+  ) => void;
+  onSetSceneExitTransitionPreset: (
     preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve",
   ) => void;
   onReorderTracks: (fromIndex: number, toIndex: number) => void;
@@ -231,8 +233,8 @@ export function TimelinePanel({
   onMoveClipToNewLayer,
   onSetClipEnterAnimationType,
   onSetClipExitAnimationType,
-  onOpenSceneAnimation,
-  onSetSceneTransitionPreset,
+  onSetSceneEnterTransitionPreset,
+  onSetSceneExitTransitionPreset,
   onReorderTracks,
 }: TimelinePanelProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -399,7 +401,8 @@ export function TimelinePanel({
         isDropTarget;
       const showDropZone =
         isDropTarget &&
-        ((isLayerReorderDrag && draggingTrackIndex !== originalIndex) || movePreviewForTrack != null);
+        isLayerReorderDrag &&
+        draggingTrackIndex !== originalIndex;
       return {
         track,
         originalIndex,
@@ -497,7 +500,14 @@ export function TimelinePanel({
           className="relative border-b transition-[background,transform,opacity,box-shadow]"
           style={{
             borderColor: "var(--editor-border)",
-            background: showDropZone ? "rgba(103,232,249,0.09)" : isDropTarget ? "rgba(103,232,249,0.05)" : "transparent",
+            background:
+              isLayerReorderDrag
+                ? showDropZone
+                  ? "rgba(103,232,249,0.09)"
+                  : isDropTarget
+                    ? "rgba(103,232,249,0.05)"
+                    : "transparent"
+                : "transparent",
             opacity: isDeleting ? 0 : (isLayerReorderDrag && draggingTrackIndex != null && !isDraggingRow) ? 0.94 : 1,
             transform: isLayerReorderDrag && isDraggingRow ? "translateX(4px)" : undefined,
             boxShadow: isLayerReorderDrag && isDraggingRow
@@ -538,7 +548,7 @@ export function TimelinePanel({
           {movePreviewForTrack ? (
             <div className="pointer-events-none absolute inset-0 z-[11] p-2">
               <div
-                className="absolute top-3 h-10 overflow-hidden rounded-md border border-dashed"
+                className="absolute top-2 h-10 overflow-hidden rounded-md border border-dashed"
                 style={{
                   left: previewLeft,
                   width: previewWidth,
@@ -598,8 +608,8 @@ export function TimelinePanel({
                 onDeleteClip={onDeleteClip}
                 onSetClipEnterAnimationType={onSetClipEnterAnimationType}
                 onSetClipExitAnimationType={onSetClipExitAnimationType}
-                onOpenSceneAnimation={onOpenSceneAnimation}
-                onSetSceneTransitionPreset={onSetSceneTransitionPreset}
+                onSetSceneEnterTransitionPreset={onSetSceneEnterTransitionPreset}
+                onSetSceneExitTransitionPreset={onSetSceneExitTransitionPreset}
                 shouldSuppressClick={shouldSuppressClick}
                 beginClipDrag={beginClipDrag}
               />
@@ -659,6 +669,7 @@ export function TimelinePanel({
                 style={{
                   background: "var(--editor-panel-elevated)",
                   borderColor: "var(--editor-border)",
+                  marginBottom: 1
                 }}
               >
                 <span
@@ -717,8 +728,8 @@ export function TimelinePanel({
               onDeleteClip={onDeleteClip}
               onSetClipEnterAnimationType={onSetClipEnterAnimationType}
               onSetClipExitAnimationType={onSetClipExitAnimationType}
-              onOpenSceneAnimation={onOpenSceneAnimation}
-              onSetSceneTransitionPreset={onSetSceneTransitionPreset}
+              onSetSceneEnterTransitionPreset={onSetSceneEnterTransitionPreset}
+              onSetSceneExitTransitionPreset={onSetSceneExitTransitionPreset}
               shouldSuppressClick={shouldSuppressClick}
               beginClipDrag={beginClipDrag}
                 />
@@ -798,10 +809,7 @@ export function TimelinePanel({
           className="pointer-events-auto absolute bottom-0 left-0 z-[70]"
           style={{
             width: LABEL_W,
-            height: 12,
-            background: "var(--editor-panel)",
-            borderTop: "1px solid var(--editor-border)",
-            boxShadow: "10px 0 0 var(--editor-panel)",
+            background: "var(--editor-panel)"
           }}
         />
       </TimelineScrollArea>

@@ -37,7 +37,7 @@ function TimelineRulerInner({
 
   return (
     <div
-      className="sticky top-0 z-[44] border-b"
+      className="sticky top-0 z-[44] border-b h-8"
       style={{
         background: "var(--editor-panel-elevated)",
         borderColor: "var(--editor-border)",
@@ -93,7 +93,11 @@ function TimelineRulerInner({
         <div
           className="pointer-events-auto absolute inset-y-0 z-[46] w-5 -translate-x-1/2 cursor-ew-resize"
           style={{ left: TIMELINE_START_OFFSET + playheadProgress * totalW }}
-          onPointerDown={onPlayheadPointerDown}
+          onPointerDown={(event) => {
+            // Prevent duplicate scrub session start from bubbling to ruler container.
+            event.stopPropagation();
+            onPlayheadPointerDown(event);
+          }}
           title="Drag to scrub"
         />
       </div>
