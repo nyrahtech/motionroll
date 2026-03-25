@@ -47,7 +47,7 @@ function TimelineLayerLabelInner({
 }: TimelineLayerLabelProps) {
   return (
     <div
-      className="flex h-14 w-full select-none items-center gap-2 border-r px-3"
+      className="flex h-14 w-full select-none items-center gap-2 px-3"
       style={{
         background:
           isLayerReorderDrag && isDraggingRow

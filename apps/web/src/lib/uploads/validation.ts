@@ -8,6 +8,12 @@ const acceptedVideoMimeTypes = new Set([
   "video/x-m4v",
 ]);
 
+const acceptedImageMimeTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
 const acceptedVideoExtensions = new Map([
   [".mp4", "video/mp4"],
   [".mov", "video/quicktime"],
@@ -69,4 +75,45 @@ export function validateVideoUpload(input: {
   };
 }
 
-export { acceptedVideoExtensions, acceptedVideoMimeTypes };
+export function validateImageUpload(input: {
+  filename: string;
+  contentType: string;
+  bytes: number;
+  maxBytes?: number;
+}) {
+  const trimmedFilename = input.filename.trim();
+  if (!trimmedFilename) {
+    throw new Error("Image upload must include a filename.");
+  }
+
+  const normalizedContentType = input.contentType.trim().toLowerCase();
+  if (!acceptedImageMimeTypes.has(normalizedContentType)) {
+    throw new Error("Unsupported image content type.");
+  }
+
+  const maxBytes = input.maxBytes ?? 10 * 1024 * 1024;
+  if (input.bytes <= 0 || input.bytes > maxBytes) {
+    throw new Error(`Image upload must be between 1 byte and ${maxBytes} bytes.`);
+  }
+
+  const extension =
+    normalizedContentType === "image/png"
+      ? ".png"
+      : normalizedContentType === "image/webp"
+        ? ".webp"
+        : ".jpg";
+  const safeBase = path
+    .parse(trimmedFilename)
+    .name.toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return {
+    filename: `${(safeBase || "thumbnail").slice(0, 80)}${extension}`,
+    contentType: normalizedContentType,
+    bytes: input.bytes,
+  };
+}
+
+export { acceptedImageMimeTypes, acceptedVideoExtensions, acceptedVideoMimeTypes };

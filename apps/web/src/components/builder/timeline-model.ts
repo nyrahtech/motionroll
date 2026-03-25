@@ -34,7 +34,8 @@ export type TimelineClipModel = {
       contentType?: string;
       enterAnimationType?: string;
       exitAnimationType?: string;
-      sceneTransitionPreset?: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+      sceneEnterTransitionPreset?: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+      sceneExitTransitionPreset?: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
       layerIndex?: number;
       isGroup?: boolean;
       childCount?: number;
@@ -349,8 +350,14 @@ export function deriveTimelineTracks(
     metadata: {
       frameStrip: getFrameStrip(section, mode),
       frameStripSource: getTimelineFrameStripSource(section, mode),
-      sceneTransitionPreset:
-        section.transitions.find((transition) => transition.scope === "sequence")?.preset ?? "none",
+      sceneEnterTransitionPreset:
+        section.transitions.find(
+          (transition) => transition.scope === "sequence" && transition.phase === "enter",
+        )?.preset ?? "none",
+      sceneExitTransitionPreset:
+        section.transitions.find(
+          (transition) => transition.scope === "sequence" && transition.phase === "exit",
+        )?.preset ?? "none",
     },
   };
 

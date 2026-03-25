@@ -22,6 +22,23 @@ type AssetLike = {
   variants?: VariantLike[];
 };
 
+type CoverProjectLike = {
+  assets: AssetLike[];
+  selectedPreset?: string;
+  template?: {
+    thumbnailUrl?: string | null;
+  } | null;
+};
+
+const presetThumbnailMap: Record<string, string> = {
+  "product-reveal": "/thumbnails/product-reveal.png",
+  "scroll-sequence": "/thumbnails/scroll-sequence.png",
+  "feature-walkthrough": "/thumbnails/feature-walkthrough.png",
+  "device-spin": "/thumbnails/device-spin.png",
+  "before-after": "/thumbnails/before-after.png",
+  "chaptered-scroll-story": "/thumbnails/chaptered-scroll-story.png",
+};
+
 const derivedAssetKinds = new Set(["frame_sequence", "frame", "poster", "fallback_video", "thumbnail"]);
 
 function toTimeValue(value?: Date | string) {
@@ -102,6 +119,24 @@ export function getRenderableAssetPreview(
   }
 
   return "";
+}
+
+export function getProjectCoverUrl(project: CoverProjectLike) {
+  const thumbnail = sortProjectAssets(project.assets).find((asset) => asset.kind === "thumbnail");
+  if (thumbnail?.publicUrl) {
+    return resolveStorageReadUrl(thumbnail.publicUrl, thumbnail.storageKey);
+  }
+
+  const poster = sortProjectAssets(project.assets).find((asset) => asset.kind === "poster");
+  if (poster?.publicUrl) {
+    return resolveStorageReadUrl(poster.publicUrl, poster.storageKey);
+  }
+
+  if (project.template?.thumbnailUrl) {
+    return project.template.thumbnailUrl;
+  }
+
+  return presetThumbnailMap[project.selectedPreset ?? ""] ?? "/thumbnails/product-reveal.png";
 }
 
 export function getSourceAssetValidationError(input: {

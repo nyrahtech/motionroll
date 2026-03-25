@@ -53,6 +53,7 @@ type MomentRow = {
 type TransitionRow = {
   id: string;
   scope: "sequence" | "moment";
+  phase?: "enter" | "exit";
   fromKey: string;
   toKey: string;
   preset: "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
@@ -362,6 +363,7 @@ export function buildSectionManifest(input: {
     transitions: (input.transitions ?? []).map((transition) => ({
       id: transition.id,
       scope: transition.scope,
+      phase: transition.phase ?? "enter",
       fromId: transition.fromKey,
       toId: transition.toKey,
       preset: transition.preset,

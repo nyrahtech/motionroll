@@ -15,7 +15,7 @@ import { TimelinePanel } from "./timeline-panel";
 import { deriveTimelineTracks } from "./timeline-model";
 import type { EditorContainerProps } from "./editor-types";
 import { buildProjectDraftDocument, parseProjectDraftDocument } from "@/lib/project-draft";
-import { getPrimarySourceAsset } from "@/lib/project-assets";
+import { getPrimarySourceAsset, getProjectCoverUrl } from "@/lib/project-assets";
 import {
   EditorErrorBoundary,
   PreviewErrorBoundary,
@@ -27,6 +27,7 @@ import { useOverlayCallbacks } from "./hooks/useOverlayCallbacks";
 import { useEditorPersistence } from "./hooks/useEditorPersistence";
 import { useEditorPlayback } from "./hooks/useEditorPlayback";
 import { useEditorSelection } from "./hooks/useEditorSelection";
+import { hasActiveProcessingJobs } from "./processing-jobs";
 import type { HydratedOverlayDefinition, EditorDraft } from "./editor-draft-types";
 import {
   hydrateOverlay,
@@ -47,21 +48,46 @@ function buildDraftManifest(
 ): EditorContainerProps["manifest"] {
   const section = manifest.sections[0];
   if (!section) return manifest;
-  const existingSequenceTransition = section.transitions.find((transition) => transition.scope === "sequence");
-  const nextTransitions =
-    draft.sceneTransitionPreset === "none"
-      ? []
-      : [
-          {
-            id: existingSequenceTransition?.id ?? "scene-transition",
-            scope: "sequence" as const,
-            fromId: existingSequenceTransition?.fromId ?? section.id,
-            toId: existingSequenceTransition?.toId ?? section.id,
-            preset: draft.sceneTransitionPreset,
-            easing: existingSequenceTransition?.easing ?? "ease-in-out",
-            duration: existingSequenceTransition?.duration ?? 0.4,
-          },
-        ];
+  const sceneEnterTransition = draft.sceneEnterTransition ?? {
+    preset: "none" as const,
+    duration: 0.4,
+  };
+  const sceneExitTransition = draft.sceneExitTransition ?? {
+    preset: "none" as const,
+    duration: 0.4,
+  };
+  const existingEnterTransition = section.transitions.find(
+    (transition) => transition.scope === "sequence" && transition.phase === "enter",
+  );
+  const existingExitTransition = section.transitions.find(
+    (transition) => transition.scope === "sequence" && transition.phase === "exit",
+  );
+  const nextTransitions = [
+    sceneEnterTransition.preset !== "none"
+      ? {
+          id: existingEnterTransition?.id ?? "scene-enter-transition",
+          scope: "sequence" as const,
+          phase: "enter" as const,
+          fromId: existingEnterTransition?.fromId ?? section.id,
+          toId: existingEnterTransition?.toId ?? section.id,
+          preset: sceneEnterTransition.preset,
+          easing: existingEnterTransition?.easing ?? "ease-in-out",
+          duration: sceneEnterTransition.duration,
+        }
+      : null,
+    sceneExitTransition.preset !== "none"
+      ? {
+          id: existingExitTransition?.id ?? "scene-exit-transition",
+          scope: "sequence" as const,
+          phase: "exit" as const,
+          fromId: existingExitTransition?.fromId ?? section.id,
+          toId: existingExitTransition?.toId ?? section.id,
+          preset: sceneExitTransition.preset,
+          easing: existingExitTransition?.easing ?? "ease-in-out",
+          duration: sceneExitTransition.duration,
+        }
+      : null,
+  ].filter((transition): transition is NonNullable<typeof transition> => Boolean(transition));
   return {
     ...manifest,
     project: { ...manifest.project, title: draft.title },
@@ -293,9 +319,7 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
       void (async () => {
         try {
           const nextProject = await refreshProjectRuntimeState();
-          const hasActiveProcessingJob = nextProject.jobs?.some(
-            (job) => job.status === "queued" || job.status === "processing",
-          );
+          const hasActiveProcessingJob = hasActiveProcessingJobs(nextProject.jobs);
           if (hasActiveProcessingJob) {
             scheduleProcessingRefresh();
           }
@@ -429,28 +453,106 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
     if (overlayId) selectOverlay(overlayId, draftRef.current.overlays);
   }
 
-  const handleOpenSceneAnimation = useCallback(() => {
-    setProjectSwitcherOpen(true);
-  }, []);
-
-  const handleSetSceneTransitionPreset = useCallback(
-    (
-      preset: EditorDraft["sceneTransitionPreset"],
-    ) => {
+  const handleSetSceneEnterTransitionPreset = useCallback(
+    (preset: EditorDraft["sceneEnterTransition"]["preset"]) => {
       updateDraft((current) => ({
         ...current,
-        sceneTransitionPreset: preset,
+        sceneEnterTransition: {
+          ...current.sceneEnterTransition,
+          preset,
+        },
       }));
     },
     [updateDraft],
   );
 
+  const handleSetSceneExitTransitionPreset = useCallback(
+    (preset: EditorDraft["sceneExitTransition"]["preset"]) => {
+      updateDraft((current) => ({
+        ...current,
+        sceneExitTransition: {
+          ...current.sceneExitTransition,
+          preset,
+        },
+      }));
+    },
+    [updateDraft],
+  );
+
+  const handleSaveProjectSettings = useCallback(
+    async (values: {
+      projectTitle: string;
+      sectionTitle: string;
+      frameRangeStart: number;
+      frameRangeEnd: number;
+      scrubStrength: number;
+      sectionHeightVh: number;
+      sceneEnterTransition: EditorDraft["sceneEnterTransition"];
+      sceneExitTransition: EditorDraft["sceneExitTransition"];
+    }) => {
+      updateDraft((current) => ({
+        ...current,
+        title: values.projectTitle,
+        sectionTitle: values.sectionTitle,
+        frameRangeStart: Math.max(0, values.frameRangeStart),
+        frameRangeEnd: Math.max(values.frameRangeEnd, Math.max(0, values.frameRangeStart) + 1),
+        scrubStrength: values.scrubStrength,
+        sectionHeightVh: values.sectionHeightVh,
+        sceneEnterTransition: values.sceneEnterTransition,
+        sceneExitTransition: values.sceneExitTransition,
+        overlays: scaleSceneRangeOverlays(
+          current.overlays,
+          current.frameRangeStart,
+          current.frameRangeEnd,
+          Math.max(0, values.frameRangeStart),
+          Math.max(values.frameRangeEnd, Math.max(0, values.frameRangeStart) + 1),
+          frameCount,
+        ),
+      }));
+    },
+    [frameCount, updateDraft],
+  );
+
+  const handleProjectThumbnailUpload = useCallback(
+    async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch(`/api/projects/${projectState.id}/thumbnail`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({ error: "Thumbnail upload failed." }))) as {
+          error?: string;
+        };
+        toast.error(data.error ?? "Thumbnail upload failed.");
+        return;
+      }
+      await refreshProjectRuntimeState();
+      toast.success("Project thumbnail updated.");
+    },
+    [projectState.id, refreshProjectRuntimeState],
+  );
+
+  const handleProjectThumbnailReset = useCallback(async () => {
+    const response = await fetch(`/api/projects/${projectState.id}/thumbnail`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({ error: "Thumbnail reset failed." }))) as {
+        error?: string;
+      };
+      toast.error(data.error ?? "Thumbnail reset failed.");
+      return;
+    }
+    await refreshProjectRuntimeState();
+    toast.success("Project thumbnail reset.");
+  }, [projectState.id, refreshProjectRuntimeState]);
+
   const handleUploadQueued = useCallback(() => {
     void refreshProjectRuntimeState()
       .then((nextProject) => {
-        const hasActiveProcessingJob = nextProject.jobs?.some(
-          (job) => job.status === "queued" || job.status === "processing",
-        );
+        const hasActiveProcessingJob = hasActiveProcessingJobs(nextProject.jobs);
         if (hasActiveProcessingJob) {
           scheduleProcessingRefresh();
         }
@@ -489,35 +591,14 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
         frameRangeEnd={draft.frameRangeEnd}
         scrubStrength={draft.scrubStrength}
         sectionHeightVh={draft.sectionHeightVh}
+        sceneEnterTransition={draft.sceneEnterTransition}
+        sceneExitTransition={draft.sceneExitTransition}
+        currentProjectCoverUrl={getProjectCoverUrl(projectState)}
+        hasThumbnailOverride={projectState.assets.some((asset) => asset.kind === "thumbnail")}
         saveStatus={saveStatus}
-        onProjectTitleChange={(value) => updateDraft((cur) => ({ ...cur, title: value }))}
-        onSectionTitleChange={(value) => updateDraft((cur) => ({ ...cur, sectionTitle: value }))}
-        onFrameRangeChange={(field, value) =>
-          updateDraft((cur) => {
-            const nextStart = field === "start" ? Math.max(0, value) : cur.frameRangeStart;
-            const reqEnd = field === "end" ? Math.max(value, nextStart + 1) : cur.frameRangeEnd;
-            const nextEnd = Math.max(reqEnd, nextStart + 1);
-            return {
-              ...cur,
-              frameRangeStart: nextStart,
-              frameRangeEnd: nextEnd,
-              overlays: scaleSceneRangeOverlays(
-                cur.overlays,
-                cur.frameRangeStart,
-                cur.frameRangeEnd,
-                nextStart,
-                nextEnd,
-                frameCount,
-              ),
-            };
-          })
-        }
-        onSectionFieldChange={(field, value) =>
-          updateDraft((cur) => ({
-            ...cur,
-            ...(field === "scrubStrength" ? { scrubStrength: value } : { sectionHeightVh: value }),
-          }))
-        }
+        onSaveProjectSettings={handleSaveProjectSettings}
+        onProjectThumbnailUpload={handleProjectThumbnailUpload}
+        onProjectThumbnailReset={handleProjectThumbnailReset}
         previewMode={previewMode}
         isPlaying={isPlaying}
         onPreviewModeChange={setPreviewMode}
@@ -654,8 +735,8 @@ export function ProjectEditor({ project, projects, manifest }: EditorContainerPr
                 onSetClipExitAnimationType={(clipId, type) =>
                   editorDraft.handleSetClipExitAnimationType(clipId, type, timelineTracks)
                 }
-                onOpenSceneAnimation={handleOpenSceneAnimation}
-                onSetSceneTransitionPreset={handleSetSceneTransitionPreset}
+                onSetSceneEnterTransitionPreset={handleSetSceneEnterTransitionPreset}
+                onSetSceneExitTransitionPreset={handleSetSceneExitTransitionPreset}
                 onReorderTracks={editorDraft.handleReorderOverlays}
               />
             </TimelineErrorBoundary>

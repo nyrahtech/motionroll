@@ -22,11 +22,39 @@ type DraftSourceProject = {
       timing: { start: number; end: number };
       content: Partial<ProjectDraftDocument["overlays"][number]["content"]>;
     }>;
+    transitions?: Array<{
+      id?: string;
+      scope: "sequence" | "moment";
+      phase?: "enter" | "exit";
+      fromKey?: string;
+      toKey?: string;
+      preset: "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+      easing?: "linear" | "ease-out" | "ease-in-out" | "back-out" | "expo-out";
+      durationMs?: number;
+    }>;
   }>;
 };
 
 export function parseProjectDraftDocument(input: unknown) {
-  return ProjectDraftDocumentSchema.parse(input);
+  const legacyInput = input as {
+    sceneTransitionPreset?: ProjectDraftDocument["sceneEnterTransition"]["preset"];
+    sceneEnterTransition?: ProjectDraftDocument["sceneEnterTransition"];
+    sceneExitTransition?: ProjectDraftDocument["sceneExitTransition"];
+  } | null;
+
+  return ProjectDraftDocumentSchema.parse({
+    ...legacyInput,
+    sceneEnterTransition:
+      legacyInput?.sceneEnterTransition ??
+      (legacyInput?.sceneTransitionPreset
+        ? { preset: legacyInput.sceneTransitionPreset, duration: 0.4 }
+        : undefined),
+    sceneExitTransition:
+      legacyInput?.sceneExitTransition ?? {
+        preset: "none",
+        duration: 0.4,
+      },
+  });
 }
 
 export function buildProjectDraftDocument(
@@ -59,8 +87,26 @@ export function buildProjectDraftDocument(
     presetId: project.selectedPreset,
     sectionTitle:
       projectSection?.title ?? manifestSection?.title ?? "Primary cinematic section",
-    sceneTransitionPreset:
-      manifestSection?.transitions.find((transition) => transition.scope === "sequence")?.preset ?? "none",
+    sceneEnterTransition: {
+      preset:
+        manifestSection?.transitions.find(
+          (transition) => transition.scope === "sequence" && transition.phase === "enter",
+        )?.preset ?? "none",
+      duration:
+        manifestSection?.transitions.find(
+          (transition) => transition.scope === "sequence" && transition.phase === "enter",
+        )?.duration ?? 0.4,
+    },
+    sceneExitTransition: {
+      preset:
+        manifestSection?.transitions.find(
+          (transition) => transition.scope === "sequence" && transition.phase === "exit",
+        )?.preset ?? "none",
+      duration:
+        manifestSection?.transitions.find(
+          (transition) => transition.scope === "sequence" && transition.phase === "exit",
+        )?.duration ?? 0.4,
+    },
     sectionHeightVh:
       projectSection?.commonConfig.sectionHeightVh ??
       manifestSection?.motion.sectionHeightVh ??
@@ -101,6 +147,16 @@ export function buildSectionValuesFromDraft<
       sortOrder?: number;
       timing: { start: number; end: number };
       content: unknown;
+    }>;
+    transitions?: Array<{
+      id?: string;
+      scope: "sequence" | "moment";
+      phase?: "enter" | "exit";
+      fromKey?: string;
+      toKey?: string;
+      preset: "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+      easing?: "linear" | "ease-out" | "ease-in-out" | "back-out" | "expo-out";
+      durationMs?: number;
     }>;
   },
 >(section: TSection | undefined, draft: ProjectDraftDocument) {
@@ -173,5 +229,43 @@ export function buildSectionValuesFromDraft<
       timing: overlay.timing,
       content: overlay.content,
     })),
+    transitions: [
+      draft.sceneEnterTransition.preset !== "none"
+        ? {
+            id:
+              section?.transitions?.find(
+                (transition) => transition.scope === "sequence" && (transition.phase ?? "enter") === "enter",
+              )?.id ?? "scene-enter-transition",
+            scope: "sequence" as const,
+            phase: "enter" as const,
+            fromKey: section?.id ?? "draft-section",
+            toKey: section?.id ?? "draft-section",
+            preset: draft.sceneEnterTransition.preset,
+            easing:
+              section?.transitions?.find(
+                (transition) => transition.scope === "sequence" && (transition.phase ?? "enter") === "enter",
+              )?.easing ?? "ease-in-out",
+            durationMs: Math.round(draft.sceneEnterTransition.duration * 1000),
+          }
+        : null,
+      draft.sceneExitTransition.preset !== "none"
+        ? {
+            id:
+              section?.transitions?.find(
+                (transition) => transition.scope === "sequence" && (transition.phase ?? "enter") === "exit",
+              )?.id ?? "scene-exit-transition",
+            scope: "sequence" as const,
+            phase: "exit" as const,
+            fromKey: section?.id ?? "draft-section",
+            toKey: section?.id ?? "draft-section",
+            preset: draft.sceneExitTransition.preset,
+            easing:
+              section?.transitions?.find(
+                (transition) => transition.scope === "sequence" && (transition.phase ?? "enter") === "exit",
+              )?.easing ?? "ease-in-out",
+            durationMs: Math.round(draft.sceneExitTransition.duration * 1000),
+          }
+        : null,
+    ].filter((transition): transition is NonNullable<typeof transition> => Boolean(transition)),
   };
 }

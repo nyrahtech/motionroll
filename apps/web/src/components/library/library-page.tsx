@@ -12,6 +12,7 @@ import { UserMenu } from "@/components/auth/user-menu";
 import { NewProjectModal } from "./new-project-modal";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { WorkspaceDegradedBanner } from "@/components/app/workspace-degraded-banner";
+import { getProjectCoverUrl } from "@/lib/project-assets";
 import {
   Select,
   SelectContent,
@@ -43,12 +44,7 @@ const PRESET_THUMBNAIL: Record<string, string> = {
 const PAGE_SIZE = 20;
 
 function getProjectCover(project: ProjectListItem) {
-  return (
-    project.assets.find((a) => a.kind === "poster")?.publicUrl ??
-    project.template?.thumbnailUrl ??
-    PRESET_THUMBNAIL[project.selectedPreset] ??
-    "/thumbnails/product-reveal.png"
-  );
+  return getProjectCoverUrl(project);
 }
 
 function getProjectStatus(project: ProjectListItem) {

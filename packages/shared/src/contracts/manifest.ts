@@ -73,6 +73,7 @@ export type ProjectMoment = z.infer<typeof ProjectMomentSchema>;
 export const SectionTransitionSchema = z.object({
   id: z.string().min(1),
   scope: z.enum(["sequence", "moment"]),
+  phase: z.enum(["enter", "exit"]).default("enter"),
   fromId: z.string().min(1),
   toId: z.string().min(1),
   preset: z.enum(["fade", "crossfade", "wipe", "zoom-dissolve", "blur-dissolve"]),

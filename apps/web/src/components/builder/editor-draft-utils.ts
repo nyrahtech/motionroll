@@ -15,6 +15,11 @@ import {
   getRequiredLayerCount,
 } from "./editor-overlay-utils";
 
+const DEFAULT_SCENE_TRANSITION = {
+  preset: "none" as const,
+  duration: 0.4,
+};
+
 /**
  * Converts a ProjectDraftDocument (wire/DB format) into an EditorDraft
  * (in-memory editor format). Hydrates overlays with defaults.
@@ -26,7 +31,8 @@ export function documentToEditorDraft(
     title: document.title,
     presetId: document.presetId,
     sectionTitle: document.sectionTitle,
-    sceneTransitionPreset: document.sceneTransitionPreset,
+    sceneEnterTransition: document.sceneEnterTransition ?? DEFAULT_SCENE_TRANSITION,
+    sceneExitTransition: document.sceneExitTransition ?? DEFAULT_SCENE_TRANSITION,
     sectionHeightVh: document.sectionHeightVh,
     scrubStrength: document.scrubStrength,
     frameRangeStart: document.frameRangeStart,
@@ -55,7 +61,8 @@ export function editorDraftToDocument(draft: EditorDraft): ProjectDraftDocument 
     title: draft.title,
     presetId: draft.presetId,
     sectionTitle: draft.sectionTitle,
-    sceneTransitionPreset: draft.sceneTransitionPreset,
+    sceneEnterTransition: draft.sceneEnterTransition ?? DEFAULT_SCENE_TRANSITION,
+    sceneExitTransition: draft.sceneExitTransition ?? DEFAULT_SCENE_TRANSITION,
     sectionHeightVh: draft.sectionHeightVh,
     scrubStrength: draft.scrubStrength,
     frameRangeStart: draft.frameRangeStart,

@@ -59,6 +59,7 @@ import {
   ensureStageRoot,
   renderFallback,
 } from "./modules/stage";
+import { syncSceneTransition } from "./modules/scene-transition";
 import {
   type CreateScrollSectionOptions,
   type ScrollSectionController,
@@ -137,6 +138,9 @@ export function createScrollSection(
   let tickActive = false;
   let overlayTransitionsEnabled = options.enableOverlayTransitions ?? false;
   let overlayPresentationDirty = false;
+  cleanups.push(() => {
+    stageRoot.querySelector<HTMLElement>('[data-scene-transition-layer="true"]')?.remove();
+  });
 
   container.style.position = "relative";
   container.style.height =
@@ -256,6 +260,15 @@ export function createScrollSection(
 
     if (section.frameAssets.length === 0) {
       renderOverlayState(overlayRoot, section, progress);
+      syncSceneTransition(
+        {
+          stageRoot,
+          posterPlaceholder,
+        },
+        section,
+        mode,
+        clampProgress(progress),
+      );
       return;
     }
 
@@ -267,6 +280,16 @@ export function createScrollSection(
       posterPlaceholder?.remove();
       lastRenderedFrameIndex = null;
       latestRequestedFrameIndex = null;
+      syncSceneTransition(
+        {
+          stageRoot,
+          canvas,
+          posterPlaceholder,
+        },
+        section,
+        mode,
+        normalized,
+      );
       return;
     }
 
@@ -281,6 +304,16 @@ export function createScrollSection(
     if (!frame || !frameUrl) {
       lastRenderedFrameIndex = null;
       renderOverlayState(overlayRoot, section, normalized);
+      syncSceneTransition(
+        {
+          stageRoot,
+          canvas,
+          posterPlaceholder,
+        },
+        section,
+        mode,
+        normalized,
+      );
       return;
     }
 
@@ -332,6 +365,16 @@ export function createScrollSection(
       posterPlaceholder?.remove();
       lastRenderedFrameIndex = frame.index;
     }
+    syncSceneTransition(
+      {
+        stageRoot,
+        canvas,
+        posterPlaceholder,
+      },
+      section,
+      mode,
+      normalized,
+    );
 
     const preloadTargets = new Set<number>();
     const effectivePreloadWindow = getEffectivePreloadWindow();
@@ -400,6 +443,7 @@ export function createScrollSection(
   if (fallback !== "sequence") {
     const fallbackResult = renderFallback(stageRoot, section, mode, fallback, interactionMode);
     const fallbackVideo = fallbackResult.video;
+    const fallbackElement = fallbackResult.element;
     const fallbackDurationSeconds = getSectionDurationSeconds(section);
     cleanups.push(fallbackResult.cleanup);
 
@@ -432,6 +476,15 @@ export function createScrollSection(
 
     renderOverlayState(overlayRoot, section, 0);
     syncFallbackVideo(sequenceState.currentProgress);
+    syncSceneTransition(
+      {
+        stageRoot,
+        mediaElement: fallbackElement,
+      },
+      section,
+      mode,
+      sequenceState.currentProgress,
+    );
 
     return {
       destroy() {
@@ -447,6 +500,15 @@ export function createScrollSection(
       refresh() {
         renderOverlayState(overlayRoot, section, sequenceState.currentProgress);
         syncFallbackVideo(sequenceState.currentProgress);
+        syncSceneTransition(
+          {
+            stageRoot,
+            mediaElement: fallbackElement,
+          },
+          section,
+          mode,
+          sequenceState.currentProgress,
+        );
       },
       setProgress(progress: number) {
         setImmediateProgress(progress);
@@ -454,6 +516,15 @@ export function createScrollSection(
         if (!overlayTransitionsEnabled || interactionMode !== "controlled") {
           syncFallbackVideo(sequenceState.currentProgress);
         }
+        syncSceneTransition(
+          {
+            stageRoot,
+            mediaElement: fallbackElement,
+          },
+          section,
+          mode,
+          sequenceState.currentProgress,
+        );
       },
       setTargetProgress(progress: number) {
         setImmediateProgress(progress);
@@ -461,6 +532,15 @@ export function createScrollSection(
         if (!overlayTransitionsEnabled || interactionMode !== "controlled") {
           syncFallbackVideo(sequenceState.currentProgress);
         }
+        syncSceneTransition(
+          {
+            stageRoot,
+            mediaElement: fallbackElement,
+          },
+          section,
+          mode,
+          sequenceState.currentProgress,
+        );
       },
       setOverlayTransitionsEnabled(enabled: boolean) {
         updateOverlayTransitionsEnabled(enabled);
@@ -482,6 +562,15 @@ export function createScrollSection(
         rebuildOverlayRoot(chooseSection(nextManifest));
         renderOverlayState(overlayRoot, section, sequenceState.currentProgress);
         syncFallbackVideo(sequenceState.currentProgress);
+        syncSceneTransition(
+          {
+            stageRoot,
+            mediaElement: fallbackElement,
+          },
+          section,
+          mode,
+          sequenceState.currentProgress,
+        );
       },
       getProgress() {
         return sequenceState.currentProgress;

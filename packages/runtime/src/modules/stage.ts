@@ -65,6 +65,7 @@ export function renderFallback(
       "width:100%;height:100%;object-fit:cover;background:#000;position:absolute;inset:0";
     stageRoot.appendChild(video);
     return {
+      element: video,
       video,
       cleanup: () => video.remove(),
     };
@@ -85,6 +86,7 @@ export function renderFallback(
     "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000";
   stageRoot.appendChild(poster);
   return {
+    element: poster,
     cleanup: () => poster.remove(),
   };
 }

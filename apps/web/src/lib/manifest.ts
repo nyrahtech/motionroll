@@ -108,12 +108,19 @@ export async function buildProjectManifest(
               content: overlay.content,
             }))
           : overlays;
+      const resolvedTransitions =
+        draftSection && section.id === draftSection.id && draftSection.transitions
+          ? draftSection.transitions
+          : transitions.map((transition) => ({
+              ...transition,
+              phase: "enter" as const,
+            }));
 
       return buildSectionManifest({
         section: resolvedSection,
         overlays: resolvedOverlays,
         moments,
-        transitions: transitions.map((transition) => ({
+        transitions: resolvedTransitions.map((transition) => ({
           ...transition,
           preset: transition.preset as "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve",
           easing: transition.easing as "linear" | "ease-out" | "ease-in-out" | "back-out" | "expo-out",

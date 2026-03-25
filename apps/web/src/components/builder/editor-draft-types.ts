@@ -25,7 +25,14 @@ export type EditorDraft = {
   presetId: PresetId;
   /** Maps directly to ProjectDraftDocument.sectionTitle */
   sectionTitle: string;
-  sceneTransitionPreset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+  sceneEnterTransition: {
+    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+    duration: number;
+  };
+  sceneExitTransition: {
+    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+    duration: number;
+  };
   /** Maps directly to ProjectDraftDocument.sectionHeightVh */
   sectionHeightVh: number;
   scrubStrength: number;

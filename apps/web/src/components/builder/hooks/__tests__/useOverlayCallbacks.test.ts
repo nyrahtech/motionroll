@@ -38,7 +38,11 @@ function makeOverlay(id: string): HydratedOverlayDefinition {
 function makeDraft(overlayId: string): EditorDraft {
   return {
     title: "Test", presetId: "product-reveal" as const,
-    sectionTitle: "Scene", sceneTransitionPreset: "none", sectionHeightVh: 240, scrubStrength: 1,
+    sectionTitle: "Scene",
+    sceneEnterTransition: { preset: "none", duration: 0.4 },
+    sceneExitTransition: { preset: "none", duration: 0.4 },
+    sectionHeightVh: 240,
+    scrubStrength: 1,
     frameRangeStart: 0, frameRangeEnd: 180, layerCount: 1,
     overlays: [makeOverlay(overlayId)],
   };

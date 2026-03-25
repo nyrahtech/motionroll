@@ -66,8 +66,8 @@ describe("timeline panel", () => {
         onMoveClipToNewLayer={() => undefined}
         onSetClipEnterAnimationType={() => undefined}
         onSetClipExitAnimationType={() => undefined}
-        onOpenSceneAnimation={() => undefined}
-        onSetSceneTransitionPreset={() => undefined}
+        onSetSceneEnterTransitionPreset={() => undefined}
+        onSetSceneExitTransitionPreset={() => undefined}
         onReorderTracks={() => undefined}
       />,
     );
@@ -99,9 +99,11 @@ describe("timeline panel", () => {
       "utf8",
     );
 
-    expect(source).toContain(">Animation<");
+    expect(source).toContain(">Enter animation<");
+    expect(source).toContain(">Exit animation<");
     expect(source).toContain(">Delete<");
     expect(source).toContain('label: "Crossfade"');
+    expect(source).not.toContain("Scene settings");
     expect(source).not.toContain("Replace scene");
     expect(source).not.toContain("Jump to start");
     expect(source).not.toContain("Jump to end");
@@ -128,7 +130,7 @@ describe("timeline panel", () => {
     expect(panelSource).toContain('className="pointer-events-none absolute inset-0 z-[48] overflow-hidden"');
     expect(rulerSource).toContain('className="sticky left-0 z-[60] flex h-8 shrink-0 items-center border-r px-3"');
     expect(rulerSource).toContain('boxShadow: "10px 0 0 var(--editor-panel-elevated)"');
-    expect(labelSource).toContain('className="flex h-14 w-full select-none items-center gap-2 border-r px-3"');
+    expect(labelSource).toContain('className="flex h-14 w-full select-none items-center gap-2 px-3"');
   });
 
   it("keeps the playhead lane visible at the timeline start edge", () => {
@@ -154,7 +156,7 @@ describe("timeline panel", () => {
 
     expect(panelSource).toContain('className="pointer-events-auto absolute bottom-0 left-0 z-[70]"');
     expect(panelSource).toContain("width: LABEL_W");
-    expect(panelSource).toContain('boxShadow: "10px 0 0 var(--editor-panel)"');
+    expect(panelSource).toContain('background: "var(--editor-panel)"');
     expect(panelSource).not.toContain("handleHorizontalScrollbarPointerDown");
   });
 

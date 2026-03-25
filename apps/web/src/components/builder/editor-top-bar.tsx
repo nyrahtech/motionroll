@@ -12,6 +12,16 @@ interface TopBarProps {
   frameRangeEnd: number;
   scrubStrength: number;
   sectionHeightVh: number;
+  sceneEnterTransition: {
+    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+    duration: number;
+  };
+  sceneExitTransition: {
+    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
+    duration: number;
+  };
+  currentProjectCoverUrl: string;
+  hasThumbnailOverride: boolean;
   previewMode: "desktop" | "mobile";
   isPlaying: boolean;
   projects: Array<{
@@ -35,10 +45,18 @@ interface TopBarProps {
     hasUnsyncedChanges: boolean;
     hasUnpublishedChanges: boolean;
   };
-  onProjectTitleChange: (value: string) => void;
-  onSectionTitleChange: (value: string) => void;
-  onFrameRangeChange: (field: "start" | "end", value: number) => void;
-  onSectionFieldChange: (field: "scrubStrength" | "sectionHeightVh", value: number) => void;
+  onSaveProjectSettings: (values: {
+    projectTitle: string;
+    sectionTitle: string;
+    frameRangeStart: number;
+    frameRangeEnd: number;
+    scrubStrength: number;
+    sectionHeightVh: number;
+    sceneEnterTransition: TopBarProps["sceneEnterTransition"];
+    sceneExitTransition: TopBarProps["sceneExitTransition"];
+  }) => Promise<void> | void;
+  onProjectThumbnailUpload: (file: File) => Promise<void>;
+  onProjectThumbnailReset: () => Promise<void>;
   onPreviewModeChange: (mode: "desktop" | "mobile") => void;
   projectSwitcherOpen?: boolean;
   onProjectSwitcherOpenChange?: (open: boolean) => void;
@@ -115,14 +133,17 @@ export function TopBar({
   frameRangeEnd,
   scrubStrength,
   sectionHeightVh,
+  sceneEnterTransition,
+  sceneExitTransition,
+  currentProjectCoverUrl,
+  hasThumbnailOverride,
   previewMode,
   isPlaying,
   projects,
   saveStatus,
-  onProjectTitleChange,
-  onSectionTitleChange,
-  onFrameRangeChange,
-  onSectionFieldChange,
+  onSaveProjectSettings,
+  onProjectThumbnailUpload,
+  onProjectThumbnailReset,
   onPreviewModeChange,
   projectSwitcherOpen,
   onProjectSwitcherOpenChange,
@@ -151,13 +172,16 @@ export function TopBar({
           frameRangeEnd={frameRangeEnd}
           scrubStrength={scrubStrength}
           sectionHeightVh={sectionHeightVh}
+          sceneEnterTransition={sceneEnterTransition}
+          sceneExitTransition={sceneExitTransition}
+          currentProjectCoverUrl={currentProjectCoverUrl}
+          hasThumbnailOverride={hasThumbnailOverride}
           projects={projects}
           open={projectSwitcherOpen}
           onOpenChange={onProjectSwitcherOpenChange}
-          onProjectTitleChange={onProjectTitleChange}
-          onSectionTitleChange={onSectionTitleChange}
-          onFrameRangeChange={onFrameRangeChange}
-          onSectionFieldChange={onSectionFieldChange}
+          onSaveSettings={onSaveProjectSettings}
+          onThumbnailUpload={onProjectThumbnailUpload}
+          onThumbnailReset={onProjectThumbnailReset}
         />
         <SaveIndicator saveStatus={saveStatus} onRetrySync={onRetrySync} />
       </div>

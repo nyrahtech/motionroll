@@ -19,6 +19,7 @@ export interface CreateScrollSectionOptions {
 export interface RenderFallbackResult {
   cleanup: () => void;
   video?: HTMLVideoElement;
+  element?: HTMLElement;
 }
 
 export interface ScrollSectionController {

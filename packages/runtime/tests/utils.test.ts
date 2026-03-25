@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { getActiveOverlayId, getFrameByIndex, getOverlaysInStackOrder, progressToFrameIndex } from "../src/utils";
 
+const defaultEnterAnimation = {
+  type: "none" as const,
+  easing: "ease-out" as const,
+  duration: 0.4,
+  delay: 0,
+};
+
+const defaultExitAnimation = {
+  type: "none" as const,
+  easing: "ease-in-out" as const,
+  duration: 0.3,
+};
+
 describe("progressToFrameIndex", () => {
   it("maps progress to the configured frame range", () => {
     expect(progressToFrameIndex(0, { start: 10, end: 19 })).toBe(10);
@@ -23,6 +36,8 @@ describe("getActiveOverlayId", () => {
               align: "start",
               theme: "light",
               treatment: "default",
+              enterAnimation: defaultEnterAnimation,
+              exitAnimation: defaultExitAnimation,
             },
           },
           {
@@ -34,6 +49,8 @@ describe("getActiveOverlayId", () => {
               align: "end",
               theme: "dark",
               treatment: "default",
+              enterAnimation: defaultEnterAnimation,
+              exitAnimation: defaultExitAnimation,
             },
           },
         ],
@@ -56,6 +73,8 @@ describe("getActiveOverlayId", () => {
               theme: "light",
               treatment: "default",
               layer: 0,
+              enterAnimation: defaultEnterAnimation,
+              exitAnimation: defaultExitAnimation,
             },
           },
           {
@@ -68,6 +87,8 @@ describe("getActiveOverlayId", () => {
               theme: "dark",
               treatment: "default",
               layer: 1,
+              enterAnimation: defaultEnterAnimation,
+              exitAnimation: defaultExitAnimation,
             },
           },
         ],
@@ -90,6 +111,8 @@ describe("getActiveOverlayId", () => {
               theme: "light",
               treatment: "default",
               layer: 0,
+              enterAnimation: defaultEnterAnimation,
+              exitAnimation: defaultExitAnimation,
             },
           },
           {
@@ -102,6 +125,8 @@ describe("getActiveOverlayId", () => {
               theme: "dark",
               treatment: "default",
               layer: 1,
+              enterAnimation: defaultEnterAnimation,
+              exitAnimation: defaultExitAnimation,
             },
           },
         ],
@@ -124,6 +149,8 @@ describe("getOverlaysInStackOrder", () => {
           theme: "light",
           treatment: "default",
           layer: 3,
+          enterAnimation: defaultEnterAnimation,
+          exitAnimation: defaultExitAnimation,
         },
       },
       {
@@ -136,6 +163,8 @@ describe("getOverlaysInStackOrder", () => {
           theme: "dark",
           treatment: "default",
           layer: 0,
+          enterAnimation: defaultEnterAnimation,
+          exitAnimation: defaultExitAnimation,
         },
       },
     ]).map((overlay) => overlay.id)).toEqual(["bottom", "top"]);

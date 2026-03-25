@@ -2,6 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectManifest } from "../../shared/src";
 import { frameIndexToSequenceProgress } from "../../shared/src";
 
+const defaultEnterAnimation = {
+  type: "none" as const,
+  easing: "ease-out" as const,
+  duration: 0.4,
+  delay: 0,
+};
+
+const defaultExitAnimation = {
+  type: "none" as const,
+  easing: "ease-in-out" as const,
+  duration: 0.3,
+};
+
 class FakeElement {
   tagName: string;
   children: FakeElement[] = [];
@@ -205,6 +218,8 @@ function createManifest(frameBasePath = "/frames"): ProjectManifest {
               theme: "light" as const,
               treatment: "default" as const,
               layer: 0,
+              enterAnimation: defaultEnterAnimation,
+              exitAnimation: defaultExitAnimation,
             },
           },
           {
@@ -217,6 +232,8 @@ function createManifest(frameBasePath = "/frames"): ProjectManifest {
               theme: "dark" as const,
               treatment: "default" as const,
               layer: 1,
+              enterAnimation: defaultEnterAnimation,
+              exitAnimation: defaultExitAnimation,
             },
           },
         ],
@@ -353,6 +370,59 @@ describe("runtime controlled progress", () => {
     expect((container as unknown as FakeElement).children.some((child) => child.tagName === "video")).toBe(false);
   });
 
+  it("renders and clears the scene crossfade layer in the runtime stage", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const canvas = new FakeCanvasElement() as unknown as HTMLCanvasElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          transitions: [
+            {
+              id: "scene-transition",
+              scope: "sequence" as const,
+              phase: "enter" as const,
+              fromId: section.id,
+              toId: section.id,
+              preset: "crossfade" as const,
+              easing: "ease-in-out" as const,
+              duration: 0.4,
+            },
+          ],
+          motion: {
+            ...section.motion,
+            durationSeconds: 8,
+          },
+        },
+      ],
+    }, {
+      mode: "mobile",
+      interactionMode: "controlled",
+      reducedMotion: false,
+      overlayRoot,
+      canvas,
+    });
+
+    controller.setProgress(0.02);
+    await flushPromises();
+
+    const transitionLayer = (container as unknown as FakeElement).querySelector(
+      '[data-scene-transition-layer="true"]',
+    ) as FakeElement | null;
+    expect(transitionLayer).not.toBeNull();
+    expect(transitionLayer?.style.opacity).toBe("0.6");
+
+    controller.setProgress(0.1);
+    await flushPromises();
+    expect((container as unknown as FakeElement).querySelector('[data-scene-transition-layer="true"]')).toBeNull();
+  });
+
   it("prefers fallback video in controlled mode when the frame sequence is too sparse for smooth playback", async () => {
     const { createScrollSection } = await import("../src");
     const container = new FakeElement("div") as unknown as HTMLElement;
@@ -406,7 +476,7 @@ describe("runtime controlled progress", () => {
     const drawCalls = ((canvas as unknown as FakeCanvasElement).context.drawImage as ReturnType<typeof vi.fn>).mock.calls;
 
     expect(video?.src).toBe("/fallback.mp4");
-    expect(video?.poster).toBe("/poster.png");
+    expect(video?.poster).toBe("/frames/poster.png");
     expect(video?.preload).toBe("auto");
     expect(video?.play).toHaveBeenCalled();
     expect(drawCalls).toHaveLength(0);
