@@ -8,6 +8,7 @@ export type SourceOrigin = z.infer<typeof SourceOriginSchema>;
 
 export const AssetKindSchema = z.enum([
   "source_video",
+  "media_video",
   "frame_sequence",
   "frame",
   "poster",

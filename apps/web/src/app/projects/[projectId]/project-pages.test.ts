@@ -31,8 +31,8 @@ vi.mock("@/lib/manifest", () => ({
   buildProjectManifest,
 }));
 
-vi.mock("@/components/runtime/standalone-runtime", () => ({
-  StandaloneRuntime: () => null,
+vi.mock("./preview/local-preview-runtime", () => ({
+  LocalPreviewRuntime: () => null,
 }));
 
 vi.mock("./project-editor-client", () => ({
@@ -110,6 +110,8 @@ describe("project pages", () => {
     );
 
     expect(previewSource).toContain("PreviewExitButton");
+    expect(previewSource).toContain("LocalPreviewRuntime");
+    expect(previewSource).toContain("resolveLocalPreviewSessionId");
     expect(previewSource).not.toContain("onClick={() => window.close()}");
   });
 });

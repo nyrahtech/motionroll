@@ -3,7 +3,11 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { projects, publishTargets, publishVersions } from "@/db/schema";
 import { buildProjectManifest } from "@/lib/manifest";
-import { getDerivedAssetsSnapshot } from "@/lib/project-assets";
+import {
+  collectReferencedMediaAssetIds,
+  getDerivedAssetsSnapshot,
+  rewriteManifestMediaUrls,
+} from "@/lib/project-assets";
 import { copyStorageObject, getStoragePublicUrl } from "@/lib/storage/s3-adapter";
 
 type VariantRow = {
@@ -123,6 +127,33 @@ async function cloneDerivedAssetsForPublish(
   };
 }
 
+async function cloneReferencedMediaAssetsForPublish(
+  publishBasePath: string,
+  assets: AssetRow[],
+  assetIds: string[],
+) {
+  const urlByAssetId = new Map<string, string>();
+
+  await Promise.all(
+    assetIds.map(async (assetId) => {
+      const asset = assets.find((candidate) => candidate.id === assetId);
+      if (!asset || usesStaticPublicAsset(asset)) {
+        return;
+      }
+
+      const destinationKey = `${publishBasePath}/media/${asset.id}${resolveExtension({
+        key: asset.storageKey,
+        metadata: asset.metadata,
+        fallback: ".mp4",
+      })}`;
+      const copied = await copyStorageObject(asset.storageKey, destinationKey);
+      urlByAssetId.set(asset.id, copied.publicUrl);
+    }),
+  );
+
+  return urlByAssetId;
+}
+
 export async function createPublishedSnapshot(projectId: string, userId: string) {
   const project = await db.query.projects.findFirst({
     where: and(eq(projects.id, projectId), eq(projects.ownerId, userId)),
@@ -155,6 +186,14 @@ export async function createPublishedSnapshot(projectId: string, userId: string)
     publishTargetReady: true,
     assetsOverride: publishedAssets,
   });
+  const rewrittenManifest = rewriteManifestMediaUrls(
+    manifest,
+    await cloneReferencedMediaAssetsForPublish(
+      publishBasePath,
+      project.assets as AssetRow[],
+      collectReferencedMediaAssetIds(manifest),
+    ),
+  );
 
   const [snapshot] = await db
     .insert(publishVersions)
@@ -162,7 +201,7 @@ export async function createPublishedSnapshot(projectId: string, userId: string)
       projectId,
       version: nextVersion,
       assetBasePath: publishBasePath,
-      manifest,
+      manifest: rewrittenManifest,
       publishedAt,
     })
     .returning();
@@ -191,9 +230,9 @@ export async function createPublishedSnapshot(projectId: string, userId: string)
 
   return {
     manifest: {
-      ...manifest,
+      ...rewrittenManifest,
       publishTarget: {
-        ...manifest.publishTarget,
+        ...rewrittenManifest.publishTarget,
         publishedVersionId: snapshot?.id,
       },
     },

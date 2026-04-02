@@ -5,8 +5,6 @@ const mocks = vi.hoisted(() => {
   const mockInsert = vi.fn(() => ({
     values: mockInsertValues,
   }));
-  const mockProjectFindFirst = vi.fn();
-  const mockProjectFindMany = vi.fn();
   const logger = {
     warn: vi.fn(),
     error: vi.fn(),
@@ -17,58 +15,22 @@ const mocks = vi.hoisted(() => {
   return {
     mockInsertValues,
     mockInsert,
-    mockProjectFindFirst,
-    mockProjectFindMany,
     logger,
   };
 });
-
-vi.mock("@/lib/demo-projects", () => ({
-  demoProjectSeeds: [],
-}));
 
 vi.mock("@/lib/logger", () => ({
   logger: mocks.logger,
 }));
 
-vi.mock("@/lib/manifest", () => ({
-  buildProjectManifest: vi.fn(),
-}));
-
-vi.mock("@/lib/utils", () => ({
-  slugify: (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-}));
-
 vi.mock("@/db/client", () => ({
   db: {
     insert: mocks.mockInsert,
-    update: vi.fn(),
-    delete: vi.fn(),
-    query: {
-      projects: {
-        findFirst: mocks.mockProjectFindFirst,
-        findMany: mocks.mockProjectFindMany,
-      },
-    },
   },
 }));
 
 vi.mock("@/db/schema", () => ({
-  assetVariants: {},
-  processingJobs: {},
-  projectAssets: {},
-  projectOverlays: {},
-  projects: { id: "id", ownerId: "ownerId", slug: "slug" },
-  projectSections: {},
-  publishTargets: {},
-  templates: {},
-  users: {},
-}));
-
-vi.mock("drizzle-orm", () => ({
-  and: (...clauses: unknown[]) => ({ type: "and", clauses }),
-  eq: (field: unknown, value: unknown) => ({ type: "eq", field, value }),
-  like: (field: unknown, value: unknown) => ({ type: "like", field, value }),
+  users: { id: "id" },
 }));
 
 function createInsertChain(resultFactory: () => Promise<unknown> | unknown) {
@@ -85,23 +47,10 @@ describe("ensureUserWorkspace", () => {
 
     mocks.mockInsert.mockClear();
     mocks.mockInsertValues.mockReset();
-    mocks.mockProjectFindFirst.mockReset();
-    mocks.mockProjectFindMany.mockReset();
     mocks.logger.warn.mockReset();
     mocks.logger.error.mockReset();
     mocks.logger.info.mockReset();
     mocks.logger.debug.mockReset();
-
-    mocks.mockProjectFindMany.mockResolvedValue([]);
-    mocks.mockProjectFindFirst.mockImplementation(async (query?: { where?: { clauses?: Array<{ field?: string; value?: string }> } }) => {
-      const clauses = query?.where?.clauses ?? [];
-      const slugClause = clauses.find((clause) => clause?.field === "slug");
-      if (slugClause?.value === "demo-motionroll-editor-user-123") {
-        return null;
-      }
-
-      return { id: "project_123" };
-    });
   });
 
   afterEach(() => {
@@ -125,8 +74,6 @@ describe("ensureUserWorkspace", () => {
 
     resolveInsert();
     await Promise.all([first, second]);
-
-    expect(mocks.mockProjectFindFirst).toHaveBeenCalledTimes(1);
   });
 
   it("caches successful bootstrap completion for later requests", async () => {
@@ -137,11 +84,9 @@ describe("ensureUserWorkspace", () => {
 
     await ensureUserWorkspace(user);
     const insertCountAfterFirstBootstrap = mocks.mockInsert.mock.calls.length;
-    const projectLookupCountAfterFirstBootstrap = mocks.mockProjectFindFirst.mock.calls.length;
     await ensureUserWorkspace(user);
 
     expect(mocks.mockInsert.mock.calls.length).toBe(insertCountAfterFirstBootstrap);
-    expect(mocks.mockProjectFindFirst.mock.calls.length).toBe(projectLookupCountAfterFirstBootstrap);
     expect(mocks.logger.warn).not.toHaveBeenCalled();
   });
 

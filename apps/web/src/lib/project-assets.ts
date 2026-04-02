@@ -1,4 +1,5 @@
 import { resolveStorageReadUrl } from "./storage/public-urls";
+import type { BackgroundMedia, OverlayMediaMetadata, ProjectManifest } from "@motionroll/shared";
 
 type VariantLike = {
   kind: string;
@@ -25,9 +26,6 @@ type AssetLike = {
 type CoverProjectLike = {
   assets: AssetLike[];
   selectedPreset?: string;
-  template?: {
-    thumbnailUrl?: string | null;
-  } | null;
 };
 
 const presetThumbnailMap: Record<string, string> = {
@@ -100,7 +98,7 @@ export function getRenderableAssetPreview(
   asset: AssetLike,
   assets: AssetLike[],
 ) {
-  if (asset.publicUrl && ["poster", "frame", "thumbnail"].includes(asset.kind)) {
+  if (asset.publicUrl && ["poster", "frame", "thumbnail", "media_video"].includes(asset.kind)) {
     return resolveStorageReadUrl(asset.publicUrl, asset.storageKey);
   }
 
@@ -121,6 +119,130 @@ export function getRenderableAssetPreview(
   return "";
 }
 
+export function getOverlayMediaMetadataFromAsset(asset: AssetLike): OverlayMediaMetadata {
+  const metadata = (asset.metadata ?? {}) as { mimeType?: string; contentType?: string; kind?: string };
+  return {
+    kind: metadata.kind === "image" || metadata.kind === "video"
+      ? metadata.kind
+      : metadata.mimeType?.startsWith("video/") || metadata.contentType?.startsWith("video/")
+        ? "video"
+        : metadata.mimeType?.startsWith("image/") || metadata.contentType?.startsWith("image/")
+          ? "image"
+          : undefined,
+    mimeType: metadata.mimeType,
+    contentType: metadata.contentType,
+  };
+}
+
+export function buildBackgroundMediaFromAsset(asset: AssetLike): BackgroundMedia {
+  const metadata = (asset.metadata ?? {}) as {
+    width?: number;
+    height?: number;
+    durationMs?: number;
+    mimeType?: string;
+    contentType?: string;
+    kind?: string;
+  };
+  return {
+    assetId: asset.id,
+    url: resolveStorageReadUrl(asset.publicUrl, asset.storageKey),
+    previewUrl: resolveStorageReadUrl(asset.publicUrl, asset.storageKey),
+    metadata: {
+      ...getOverlayMediaMetadataFromAsset(asset),
+      kind: "video",
+      width: metadata.width,
+      height: metadata.height,
+      durationMs: metadata.durationMs,
+    },
+  };
+}
+
+export function collectReferencedMediaAssetIds(
+  manifest: Pick<ProjectManifest, "sections" | "canvas" | "layers">,
+) {
+  const assetIds = new Set<string>();
+
+  if (manifest.canvas.backgroundTrack?.media.assetId) {
+    assetIds.add(manifest.canvas.backgroundTrack.media.assetId);
+  }
+
+  for (const layer of manifest.layers) {
+    if (layer.content.mediaAssetId) {
+      assetIds.add(layer.content.mediaAssetId);
+    }
+  }
+
+  for (const section of manifest.sections) {
+    if (section.backgroundMedia?.assetId) {
+      assetIds.add(section.backgroundMedia.assetId);
+    }
+    for (const overlay of section.overlays) {
+      if (overlay.content.mediaAssetId) {
+        assetIds.add(overlay.content.mediaAssetId);
+      }
+    }
+  }
+
+  return Array.from(assetIds);
+}
+
+export function rewriteManifestMediaUrls(
+  manifest: ProjectManifest,
+  urlByAssetId: Map<string, string>,
+) {
+  return {
+    ...manifest,
+    canvas:
+      manifest.canvas.backgroundTrack?.media.assetId &&
+      urlByAssetId.has(manifest.canvas.backgroundTrack.media.assetId)
+        ? {
+            ...manifest.canvas,
+            backgroundTrack: {
+              ...manifest.canvas.backgroundTrack,
+              media: {
+                ...manifest.canvas.backgroundTrack.media,
+                url: urlByAssetId.get(manifest.canvas.backgroundTrack.media.assetId)!,
+                previewUrl: urlByAssetId.get(manifest.canvas.backgroundTrack.media.assetId)!,
+              },
+            },
+          }
+        : manifest.canvas,
+    layers: manifest.layers.map((layer) => ({
+      ...layer,
+      content:
+        layer.content.mediaAssetId && urlByAssetId.has(layer.content.mediaAssetId)
+          ? {
+              ...layer.content,
+              mediaUrl: urlByAssetId.get(layer.content.mediaAssetId)!,
+              mediaPreviewUrl: urlByAssetId.get(layer.content.mediaAssetId)!,
+            }
+          : layer.content,
+    })),
+    sections: manifest.sections.map((section) => ({
+      ...section,
+      backgroundMedia:
+        section.backgroundMedia?.assetId && urlByAssetId.has(section.backgroundMedia.assetId)
+          ? {
+              ...section.backgroundMedia,
+              url: urlByAssetId.get(section.backgroundMedia.assetId)!,
+              previewUrl: urlByAssetId.get(section.backgroundMedia.assetId)!,
+            }
+          : section.backgroundMedia,
+      overlays: section.overlays.map((overlay) => ({
+        ...overlay,
+        content:
+          overlay.content.mediaAssetId && urlByAssetId.has(overlay.content.mediaAssetId)
+            ? {
+                ...overlay.content,
+                mediaUrl: urlByAssetId.get(overlay.content.mediaAssetId)!,
+                mediaPreviewUrl: urlByAssetId.get(overlay.content.mediaAssetId)!,
+              }
+            : overlay.content,
+      })),
+    })),
+  };
+}
+
 export function getProjectCoverUrl(project: CoverProjectLike) {
   const thumbnail = sortProjectAssets(project.assets).find((asset) => asset.kind === "thumbnail");
   if (thumbnail?.publicUrl) {
@@ -130,10 +252,6 @@ export function getProjectCoverUrl(project: CoverProjectLike) {
   const poster = sortProjectAssets(project.assets).find((asset) => asset.kind === "poster");
   if (poster?.publicUrl) {
     return resolveStorageReadUrl(poster.publicUrl, poster.storageKey);
-  }
-
-  if (project.template?.thumbnailUrl) {
-    return project.template.thumbnailUrl;
   }
 
   return presetThumbnailMap[project.selectedPreset ?? ""] ?? "/thumbnails/product-reveal.png";

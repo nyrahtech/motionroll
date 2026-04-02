@@ -1,19 +1,20 @@
 import { and, eq } from "drizzle-orm";
 import {
-  ProjectDraftDocumentSchema,
   type ProjectDraftDocument,
-  type ProjectManifest,
+  type ProjectDraftDocumentInput,
 } from "@motionroll/shared";
 import { db } from "@/db/client";
 import { projects } from "@/db/schema";
 import { buildProjectManifest } from "@/lib/manifest";
-import { buildProjectDraftDocument, parseProjectDraftDocument } from "@/lib/project-draft";
+import {
+  buildProjectDraftDocument,
+  parseProjectDraftDocument,
+  serializeProjectDraftDocument,
+} from "@/lib/project-draft";
 import { getProjectById } from "./projects";
 
 export type RemoteProjectDraftSnapshot = {
   draft: ProjectDraftDocument;
-  manifest: ProjectManifest;
-  project: Awaited<ReturnType<typeof getProjectById>>;
   revision: number;
   updatedAt: string;
 };
@@ -29,7 +30,9 @@ function getNextProjectStatus(project: {
 }) {
   return project.publishTargets.some((t) => t.publishedAt)
     ? "ready"
-    : project.assets.some((a) => a.kind === "frame_sequence" || a.kind === "frame")
+    : project.assets.some((a) =>
+        a.kind === "frame_sequence" || a.kind === "frame" || a.kind === "media_video",
+      )
       ? "ready"
       : "draft";
 }
@@ -41,15 +44,15 @@ export async function getRemoteProjectDraftSnapshot(
   const project = await getProjectById(projectId, userId);
   if (!project) return null;
 
-  const manifest = await buildProjectManifest(projectId, { userId });
   const draft = project.draftJson
     ? parseProjectDraftDocument(project.draftJson)
-    : buildProjectDraftDocument(project, manifest);
+    : buildProjectDraftDocument(
+        project,
+        project.lastManifest ?? (await buildProjectManifest(projectId, { userId })),
+      );
 
   return {
     draft,
-    manifest,
-    project,
     revision: project.draftRevision ?? 0,
     updatedAt: (project.lastSavedAt ?? project.updatedAt ?? new Date()).toISOString(),
   };
@@ -58,14 +61,14 @@ export async function getRemoteProjectDraftSnapshot(
 export async function saveRemoteProjectDraft(
   projectId: string,
   userId: string,
-  draftInput: ProjectDraftDocument,
+  draftInput: ProjectDraftDocumentInput,
   options: { baseRevision?: number } = {},
 ): Promise<SaveProjectDraftResult> {
-  const draft = ProjectDraftDocumentSchema.parse(draftInput);
+  const draft = parseProjectDraftDocument(draftInput);
 
   const project = await db.query.projects.findFirst({
     where: and(eq(projects.id, projectId), eq(projects.ownerId, userId)),
-    with: { sections: true, assets: true, publishTargets: true },
+    with: { assets: true, publishTargets: true },
   });
 
   if (!project) {
@@ -93,7 +96,7 @@ export async function saveRemoteProjectDraft(
       selectedPreset: draft.presetId,
       status: getNextProjectStatus(project),
       failureReason: null,
-      draftJson: draft,
+      draftJson: serializeProjectDraftDocument(draft),
       draftRevision: nextRevision,
       lastSavedAt: now,
       updatedAt: now,

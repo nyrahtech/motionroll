@@ -1,429 +1,77 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Layers3,
-  RotateCcw,
-  RotateCw,
-  GripVertical,
-  Pause,
-  Play,
-  Plus,
-  SkipBack,
-  SkipForward,
-  Ungroup,
-} from "lucide-react";
-import { clampProgress, progressToFrameBoundaryIndex, type OverlayAnimationType } from "@motionroll/shared";
-import { collectSnapPoints, getTimelineFrameStripForProgressRange, getTimelineTimeLabel, type TimelineClipModel, type TimelineSelection, type TimelineTrackModel, type TimelineTrackType } from "./timeline-model";
-import type {
-  ClipDragMode,
-  ClipDragState,
-  ClipGhostState,
-  ClipMovePreviewState,
-  ClipTimingPreviewState,
-  DragGhostState,
-  TrackReorderState,
-} from "./timeline-types";
-import { getClipInsertionIndex, getLayerDragGhostPosition, resolveLayerTrackIndexFromPointer, type LayerRowGeometry } from "./timeline-drag-preview";
-import { useTimelineDrag } from "./hooks/useTimelineDrag";
-import { TimelineRuler } from "./timeline/TimelineRuler";
+import React from "react";
+import { GripVertical } from "lucide-react";
+import { TimelineLayerLabel } from "./timeline/TimelineLayerLabel";
 import { TimelinePlayhead } from "./timeline/TimelinePlayhead";
+import { TimelineRuler } from "./timeline/TimelineRuler";
 import { TimelineScrollArea } from "./timeline/TimelineScrollArea";
 import { TimelineTrackRow } from "./timeline/TimelineTrackRow";
-import { TimelineLayerLabel } from "./timeline/TimelineLayerLabel";
-import type { EditorPlaybackController } from "./hooks/useEditorPlayback";
-import { usePlaybackProgress } from "./hooks/useEditorPlayback";
+import { useTimelinePanelState } from "./hooks/useTimelinePanelState";
 import { TIMELINE_START_OFFSET } from "./timeline-layout";
+import { TimelinePlaybackStrip } from "./timeline-playback-strip";
+import type { TimelinePanelProps } from "./timeline-panel.types";
+import { LABEL_W } from "./timeline-panel-utils";
 
-type TimelinePanelProps = {
-  tracks: TimelineTrackModel[];
-  selection: TimelineSelection;
-  selectedClipIds: string[];
-  playback: EditorPlaybackController;
-  durationSeconds: number;
-  isPlaying: boolean;
-  canUndo: boolean;
-  canRedo: boolean;
-  canGroupSelection: boolean;
-  canUngroupSelection: boolean;
-  onPlayToggle: () => void;
-  onUndo: () => void;
-  onRedo: () => void;
-  onGroupSelection: () => void;
-  onUngroupSelection: () => void;
-  onPlayheadChange: (value: number) => void;
-  onSelectionChange: (selection: TimelineSelection, options?: { additive?: boolean }) => void;
-  onClipTimingChange: (clipId: string, timing: { start: number; end: number }) => void;
-  onCommitClipMove: (move: { clipId: string; start: number; end: number; targetLayer?: number }) => void;
-  onAddLayer: () => void;
-  onDeleteLayer: (layerRowIndex: number) => void;
-  onAddAtPlayhead: () => void;
-  onDuplicateClip: (clipId: string) => void;
-  onDeleteClip: (clipId: string) => void;
-  onMoveClipToLayer: (clipId: string, layerIndex: number) => void;
-  onMoveClipToNewLayer: (clipId: string) => void;
-  onSetClipEnterAnimationType: (clipId: string, type: OverlayAnimationType) => void;
-  onSetClipExitAnimationType: (clipId: string, type: OverlayAnimationType) => void;
-  onSetSceneEnterTransitionPreset: (
-    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve",
-  ) => void;
-  onSetSceneExitTransitionPreset: (
-    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve",
-  ) => void;
-  onReorderTracks: (fromIndex: number, toIndex: number) => void;
-};
-
-// Drag and state types live in timeline-types.ts to avoid circular deps
-
-const LABEL_W = 168;
-const PX_PER_SEC = 118;
-const MIN_CLIP_PROGRESS = 0.04;
-const DRAG_START_THRESHOLD = 5;
-const EDGE_SCROLL_THRESHOLD = 88;
-const EDGE_SCROLL_MAX_STEP = 18;
-const FRAME_STRIP_TARGET_TILE_WIDTH = 72;
-const FRAME_STRIP_MIN_SAMPLES = 4;
-const FRAME_STRIP_MAX_SAMPLES = 18;
-const PLAYHEAD_SCROLL_PADDING = 96;
-
-function isResizeMode(mode: ClipDragMode) {
-  return mode === "resize-start" || mode === "resize-end";
-}
-
-function getFrameStripSampleCount(
-  width: number,
-  frameCount?: number,
-  clipStart?: number,
-  clipEnd?: number,
-) {
-  if (width < 180) {
-    return 0;
-  }
-  const derivedSampleCount = Math.ceil(width / FRAME_STRIP_TARGET_TILE_WIDTH);
-  const visibleFrameCount =
-    typeof frameCount === "number" &&
-    typeof clipStart === "number" &&
-    typeof clipEnd === "number"
-      ? Math.abs(
-          progressToFrameBoundaryIndex(clipEnd, frameCount) -
-            progressToFrameBoundaryIndex(clipStart, frameCount),
-        ) + 1
-      : 0;
-  return Math.max(
-    FRAME_STRIP_MIN_SAMPLES,
-    Math.min(FRAME_STRIP_MAX_SAMPLES, Math.max(derivedSampleCount, visibleFrameCount)),
-  );
-}
-
-function formatTime(seconds: number): string {
-  const total = Math.max(0, Math.round(seconds));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-function formatFrame(progress: number, durationSeconds: number) {
-  const approxFrames = Math.max(1, Math.round(durationSeconds * 24));
-  const frame = Math.min(approxFrames, Math.max(1, Math.round(progress * approxFrames) + 1));
-  return `${frame} / ${approxFrames}`;
-}
-
-function TimelineControlButton({
-  label,
-  className,
-  children,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      className={className}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-}
-
-function PlaybackStrip({
-  playback, duration, isPlaying, canUndo, canRedo, canGroupSelection, canUngroupSelection,
-  onFrameChange, onTogglePlay, onUndo, onRedo, onGroupSelection, onUngroupSelection, onAddLayer,
-}: {
-  playback: EditorPlaybackController; duration: number; isPlaying: boolean;
-  canUndo: boolean;
-  canRedo: boolean;
-  canGroupSelection: boolean;
-  canUngroupSelection: boolean;
-  onFrameChange: (p: number) => void;
-  onTogglePlay: () => void;
-  onUndo: () => void;
-  onRedo: () => void;
-  onGroupSelection: () => void;
-  onUngroupSelection: () => void;
-  onAddLayer: () => void;
-}) {
-  const playhead = usePlaybackProgress(playback);
-  const currentSec = playhead * duration;
-  const ib = "flex h-8 w-8 items-center justify-center rounded-md text-[var(--editor-text-dim)] transition-colors hover:bg-[var(--editor-hover)] hover:text-white focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)] disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-[var(--editor-text-dim)]";
-  return (
-    <div className="grid h-12 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b px-4" style={{ background: "var(--editor-panel)", borderColor: "var(--editor-border)" }}>
-      <div className="flex min-w-0 items-center gap-1.5 justify-self-start">
-        <TimelineControlButton label="Undo" onClick={onUndo} disabled={!canUndo} className={ib}>
-          <RotateCcw className="h-4 w-4" />
-        </TimelineControlButton>
-        <TimelineControlButton label="Redo" onClick={onRedo} disabled={!canRedo} className={ib}>
-          <RotateCw className="h-4 w-4" />
-        </TimelineControlButton>
-        <TimelineControlButton label="Add layer" onClick={onAddLayer} className={ib}>
-          <span
-            className="flex h-4 w-4 items-center justify-center rounded-full"
-            style={{ background: "rgba(255,255,255,0.08)" }}
-          >
-            <Plus className="h-3 w-3" />
-          </span>
-        </TimelineControlButton>
-        <TimelineControlButton
-          label="Group selected items"
-          onClick={onGroupSelection}
-          disabled={!canGroupSelection}
-          className={ib}
-        >
-          <Layers3 className="h-4 w-4" />
-        </TimelineControlButton>
-        <TimelineControlButton
-          label="Ungroup selected item"
-          onClick={onUngroupSelection}
-          disabled={!canUngroupSelection}
-          className={ib}
-        >
-          <Ungroup className="h-4 w-4" />
-        </TimelineControlButton>
-      </div>
-      <div className="flex items-center gap-1 justify-self-center">
-        <button type="button" aria-label="Jump to start" title="Jump to start" onClick={() => onFrameChange(0)} className={ib}><SkipBack className="h-4 w-4" /></button>
-        <button type="button" aria-label="Previous frame" title="Previous frame" onClick={() => onFrameChange(Math.max(0, playhead - 1 / Math.max(duration * 24, 1)))} className={ib}><ChevronLeft className="h-4 w-4" /></button>
-        <button type="button" aria-label={isPlaying ? "Pause playback" : "Start playback"} title={isPlaying ? "Pause playback" : "Start playback"} onClick={onTogglePlay} className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--editor-selected)] text-[var(--editor-accent)] transition-colors hover:bg-[rgba(103,232,249,0.18)] focus:outline-none focus:ring-1 focus:ring-[var(--editor-accent)]">
-          {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
-        </button>
-        <button type="button" aria-label="Next frame" title="Next frame" onClick={() => onFrameChange(Math.min(1, playhead + 1 / Math.max(duration * 24, 1)))} className={ib}><ChevronRight className="h-4 w-4" /></button>
-        <button type="button" aria-label="Jump to end" title="Jump to end" onClick={() => onFrameChange(1)} className={ib}><SkipForward className="h-4 w-4" /></button>
-      </div>
-      <div className="flex min-w-0 items-center justify-self-end gap-2 text-xs tabular-nums" style={{ color: "var(--editor-text-dim)" }}>
-        <span className="font-medium" style={{ color: "var(--editor-text)" }}>{formatTime(currentSec)}</span>
-        <span>/ {formatTime(duration)}</span>
-        <span className="ml-1 rounded px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(103,232,249,0.08)", color: "var(--editor-accent)" }}>
-          frame {formatFrame(playhead, duration)}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-export function TimelinePanel({
-  tracks, selection, selectedClipIds, playback, durationSeconds, isPlaying, canUndo, canRedo,
-  canGroupSelection, canUngroupSelection, onPlayToggle, onUndo, onRedo, onGroupSelection, onUngroupSelection, onPlayheadChange, onSelectionChange,
-  onClipTimingChange, onCommitClipMove, onAddLayer, onDeleteLayer, onAddAtPlayhead, onDuplicateClip, onDeleteClip,
-  onMoveClipToLayer,
-  onMoveClipToNewLayer,
-  onSetClipEnterAnimationType,
-  onSetClipExitAnimationType,
-  onSetSceneEnterTransitionPreset,
-  onSetSceneExitTransitionPreset,
-  onReorderTracks,
-}: TimelinePanelProps) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const trackAreaRef = useRef<HTMLDivElement | null>(null);
-  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const clipDragStateRef = useRef<ClipDragState>(null);
-  const trackReorderStateRef = useRef<TrackReorderState>(null);
-  const dropTrackIndexRef = useRef<number | null>(null);
-  const pointerClientRef = useRef<{ x: number; y: number } | null>(null);
-  const autoScrollRafRef = useRef<number | null>(null);
-  const autoScrollDriverRef = useRef<(() => void) | null>(null);
-  const suppressClickUntilRef = useRef(0);
-  const moveDragActivatedRef = useRef(false);
-  const clipMovePreviewRef = useRef<ClipMovePreviewState>(null);
-  const clipTimingPreviewRef = useRef<ClipTimingPreviewState>(null);
-  const [dropTrackIndex, setDropTrackIndex] = useState<number | null>(null);
-  const [draggingClipId, setDraggingClipId] = useState<string | null>(null);
-  const [draggingClipMode, setDraggingClipMode] = useState<ClipDragMode>(null);
-  const [draggingTrackIndex, setDraggingTrackIndex] = useState<number | null>(null);
-  const [dragGhost, setDragGhost] = useState<DragGhostState>(null);
-  const [clipGhost, setClipGhost] = useState<ClipGhostState>(null);
-  const [clipMovePreview, setClipMovePreview] = useState<ClipMovePreviewState>(null);
-  const [clipTimingPreview, setClipTimingPreview] = useState<ClipTimingPreviewState>(null);
-  const [recentlyAddedTrackId, setRecentlyAddedTrackId] = useState<string | null>(null);
-  const [deletingTrackId, setDeletingTrackId] = useState<string | null>(null);
-  const previousLayerTrackIdsRef = useRef<string[]>([]);
-  const totalW = Math.max(960, Math.round(durationSeconds * PX_PER_SEC));
-  const totalTrackW = totalW + TIMELINE_START_OFFSET;
-  const sceneTrack = tracks.find((t) => t.type === "section");
-  const layerTracks = tracks.filter((t) => t.type === "layer");
-  const draggedClip = draggingClipId
-    ? layerTracks.flatMap((track) => track.clips).find((clip) => clip.id === draggingClipId)
-    : undefined;
-  const snapPoints = React.useMemo(
-    () => collectSnapPoints(layerTracks, draggingClipId ?? undefined),
-    [layerTracks, draggingClipId],
-  );
-  const frameStripCache = React.useMemo(() => {
-    const cache = new Map<string, string[]>();
-    for (const track of tracks) {
-      for (const clip of track.clips) {
-        const previewTiming = clipTimingPreview?.clipId === clip.id ? clipTimingPreview : null;
-        const clipStart = previewTiming?.start ?? clip.start;
-        const clipEnd = previewTiming?.end ?? clip.end;
-        const width = Math.max(14, (clipEnd - clipStart) * totalW);
-        const sampleCount = getFrameStripSampleCount(
-          width,
-          clip.metadata?.frameStripSource?.frameCount,
-          clipStart,
-          clipEnd,
-        );
-        const frameStrip = clip.metadata?.frameStripSource
-          ? getTimelineFrameStripForProgressRange(
-              clip.metadata.frameStripSource,
-              clipStart,
-              clipEnd,
-              sampleCount,
-            )
-          : clip.metadata?.frameStrip;
-        if (frameStrip?.length) {
-          cache.set(clip.id, frameStrip);
-        }
-      }
-    }
-    return cache;
-  }, [clipTimingPreview, totalW, tracks]);
-
-  useEffect(() => {
-    const syncScrollToPlayhead = () => {
-      const scroll = scrollRef.current;
-      if (!scroll) return;
-
-      const trackViewportWidth = Math.max(scroll.clientWidth - LABEL_W, 1);
-      const maxScrollLeft = Math.max(0, scroll.scrollWidth - scroll.clientWidth);
-      const playheadX = TIMELINE_START_OFFSET + playback.getPlayhead() * totalW;
-      const visibleStart = scroll.scrollLeft;
-      const visibleEnd = visibleStart + trackViewportWidth;
-
-      if (playheadX <= visibleStart + PLAYHEAD_SCROLL_PADDING) {
-        scroll.scrollLeft = Math.max(0, playheadX - PLAYHEAD_SCROLL_PADDING);
-        return;
-      }
-
-      if (playheadX >= visibleEnd - PLAYHEAD_SCROLL_PADDING) {
-        scroll.scrollLeft = Math.min(
-          maxScrollLeft,
-          playheadX - trackViewportWidth + PLAYHEAD_SCROLL_PADDING,
-        );
-      }
-    };
-
-    syncScrollToPlayhead();
-    return playback.subscribe(syncScrollToPlayhead);
-  }, [playback, totalW]);
-
-  useEffect(() => {
-    const previousIds = previousLayerTrackIdsRef.current;
-    const nextIds = layerTracks.map((track) => track.id);
-    if (previousIds.length === 0) {
-      previousLayerTrackIdsRef.current = nextIds;
-      return;
-    }
-    const addedTrackId = nextIds.find((id) => !previousIds.includes(id));
-    if (addedTrackId) {
-      setRecentlyAddedTrackId(addedTrackId);
-      const timeoutId = window.setTimeout(() => setRecentlyAddedTrackId((current) => current === addedTrackId ? null : current), 480);
-      previousLayerTrackIdsRef.current = nextIds;
-      return () => window.clearTimeout(timeoutId);
-    }
-    previousLayerTrackIdsRef.current = nextIds;
-  }, [layerTracks]);
+export function TimelinePanel(props: TimelinePanelProps) {
+  const {
+    tracks,
+    selection,
+    selectedClipIds,
+    playback,
+    durationSeconds,
+    isPlaying,
+    canUndo,
+    canRedo,
+    canGroupSelection,
+    canUngroupSelection,
+    onPlayToggle,
+    onUndo,
+    onRedo,
+    onGroupSelection,
+    onUngroupSelection,
+    onPlayheadChange,
+    onDuplicateClip,
+    onDeleteClip,
+    onMoveClipToLayer,
+    onMoveClipToNewLayer,
+    onSelectBookmark,
+    onRenameBookmark,
+    onDuplicateBookmark,
+    onDeleteBookmark,
+    onAddBookmark,
+    onAddBookmarkAfter,
+    onReorderBookmarks,
+    onSetClipEnterAnimationType,
+    onSetClipExitAnimationType,
+    onSetBookmarkEnterTransitionPreset,
+    onSetBookmarkExitTransitionPreset,
+    onAddLayer,
+  } = props;
 
   const {
+    scrollRef,
+    trackAreaRef,
+    rowRefs,
+    bookmarkTrack,
+    layerTracks,
+    totalW,
+    totalTrackW,
+    frameStripCache,
+    draggedClip,
+    draggingClipId,
+    draggingClipMode,
+    draggingTrackIndex,
+    dragGhost,
+    clipGhost,
+    clipTimingPreview,
+    layerRowDescriptors,
     shouldSuppressClick,
     beginClipDrag,
     beginTrackReorder,
     handlePlayheadPointerDown,
-  } = useTimelineDrag({
-    scrollRef, trackAreaRef, rowRefs,
-    clipDragStateRef, trackReorderStateRef, dropTrackIndexRef,
-    pointerClientRef, autoScrollRafRef, autoScrollDriverRef,
-    suppressClickUntilRef, moveDragActivatedRef, clipMovePreviewRef, clipTimingPreviewRef,
-    setDropTrackIndex, setClipMovePreview, setClipTimingPreview,
-    setDraggingClipId, setDraggingClipMode, setClipGhost, setDragGhost, setDraggingTrackIndex,
-    layerTracks, totalW, durationSeconds, snapPoints,
-    onSelectionChange, onReorderTracks, onClipTimingChange, onCommitClipMove, onPlayheadChange,
-  });
-
-  const handleDeleteLayerWithAnimation = useCallback((trackId: string, originalIndex: number) => {
-    setDeletingTrackId(trackId);
-    window.setTimeout(() => {
-      onDeleteLayer(originalIndex);
-      setDeletingTrackId((current) => current === trackId ? null : current);
-    }, 140);
-  }, [onDeleteLayer]);
-
-
-  const layerRowDescriptors = React.useMemo(
-    () => layerTracks.map((track, originalIndex) => {
-      const isDropTarget = dropTrackIndex === originalIndex;
-      const isDraggingRow = draggingTrackIndex === originalIndex;
-      const isLayerReorderDrag = dragGhost !== null;
-      const isBlockMoveDrag = draggingClipMode === "move" && draggingClipId !== null && !isLayerReorderDrag;
-      const isRecentlyAdded = recentlyAddedTrackId === track.id;
-      const isDeleting = deletingTrackId === track.id;
-      const movePreviewForTrack =
-        isBlockMoveDrag && clipMovePreview?.targetTrackIndex === originalIndex
-          ? clipMovePreview
-          : null;
-      const previewLeft = movePreviewForTrack
-        ? TIMELINE_START_OFFSET + movePreviewForTrack.targetStart * totalW
-        : 0;
-      const previewWidth = movePreviewForTrack
-        ? Math.max(18, (movePreviewForTrack.targetEnd - movePreviewForTrack.targetStart) * totalW)
-        : 0;
-      const previewTimeLabel = movePreviewForTrack
-        ? getTimelineTimeLabel(movePreviewForTrack.targetStart, durationSeconds)
-        : null;
-      const showInsertionCue =
-        isLayerReorderDrag &&
-        draggingTrackIndex != null &&
-        dropTrackIndex != null &&
-        draggingTrackIndex !== dropTrackIndex &&
-        isDropTarget;
-      const showDropZone =
-        isDropTarget &&
-        isLayerReorderDrag &&
-        draggingTrackIndex !== originalIndex;
-      return {
-        track,
-        originalIndex,
-        isDropTarget,
-        isDraggingRow,
-        isLayerReorderDrag,
-        isBlockMoveDrag,
-        isRecentlyAdded,
-        isDeleting,
-        movePreviewForTrack,
-        previewLeft,
-        previewWidth,
-        previewTimeLabel,
-        showInsertionCue,
-        showDropZone,
-      };
-    }),
-    [layerTracks, dropTrackIndex, draggingTrackIndex, dragGhost,
-     draggingClipMode, draggingClipId, clipMovePreview, recentlyAddedTrackId,
-     deletingTrackId, durationSeconds, totalW],
-  );
+    handleDeleteLayerWithAnimation,
+  } = useTimelinePanelState(props);
 
   const layerLabelRows = React.useMemo(
     () => layerRowDescriptors.map((descriptor) => (
@@ -470,10 +118,9 @@ export function TimelinePanel({
         />
       </div>
     )),
-    [beginTrackReorder, draggedClip?.label, handleDeleteLayerWithAnimation, layerRowDescriptors],
+    [beginTrackReorder, draggedClip?.label, draggingTrackIndex, handleDeleteLayerWithAnimation, layerRowDescriptors],
   );
 
-  // Layer rows memoized — playhead scrubbing must not re-render clip DOM
   const layerRows = React.useMemo(
     () => layerRowDescriptors.map((descriptor) => {
       const {
@@ -482,8 +129,6 @@ export function TimelinePanel({
         isDropTarget,
         isDraggingRow,
         isLayerReorderDrag,
-        isBlockMoveDrag,
-        isRecentlyAdded,
         isDeleting,
         movePreviewForTrack,
         previewLeft,
@@ -517,7 +162,7 @@ export function TimelinePanel({
                 : undefined,
             animation: isDeleting
               ? "timeline-layer-removing 140ms ease forwards"
-              : isRecentlyAdded
+              : descriptor.isRecentlyAdded
                 ? "timeline-layer-added 220ms ease"
                 : undefined,
             pointerEvents: isDeleting ? "none" : undefined,
@@ -587,42 +232,80 @@ export function TimelinePanel({
             </div>
           ) : null}
           <TimelineTrackRow
-                track={track}
-                totalW={totalW}
-                tint="rgba(255,255,255,0.06)"
-                layerTrackIndex={originalIndex}
-                selection={selection}
-                selectedClipIds={selectedClipIds}
-                draggingClipId={draggingClipId}
-                draggingClipMode={draggingClipMode}
-                clipTimingPreview={clipTimingPreview}
-                frameStripCache={frameStripCache}
-                canGroupSelection={canGroupSelection}
-                layerTracks={layerTracks}
-                onPlayheadChange={onPlayheadChange}
-                onGroupSelection={onGroupSelection}
-                onUngroupSelection={onUngroupSelection}
-                onMoveClipToNewLayer={onMoveClipToNewLayer}
-                onMoveClipToLayer={onMoveClipToLayer}
-                onDuplicateClip={onDuplicateClip}
-                onDeleteClip={onDeleteClip}
-                onSetClipEnterAnimationType={onSetClipEnterAnimationType}
-                onSetClipExitAnimationType={onSetClipExitAnimationType}
-                onSetSceneEnterTransitionPreset={onSetSceneEnterTransitionPreset}
-                onSetSceneExitTransitionPreset={onSetSceneExitTransitionPreset}
-                shouldSuppressClick={shouldSuppressClick}
-                beginClipDrag={beginClipDrag}
-              />
+            track={track}
+            totalW={totalW}
+            tint="rgba(255,255,255,0.06)"
+            layerTrackIndex={originalIndex}
+            isPlaying={isPlaying}
+            selection={selection}
+            selectedClipIds={selectedClipIds}
+            draggingClipId={draggingClipId}
+            draggingClipMode={draggingClipMode}
+            clipTimingPreview={clipTimingPreview}
+            frameStripCache={frameStripCache}
+            canGroupSelection={canGroupSelection}
+            layerTracks={layerTracks}
+            onPlayheadChange={onPlayheadChange}
+            onGroupSelection={onGroupSelection}
+            onUngroupSelection={onUngroupSelection}
+            onMoveClipToNewLayer={onMoveClipToNewLayer}
+            onMoveClipToLayer={onMoveClipToLayer}
+            onDuplicateClip={onDuplicateClip}
+            onDeleteClip={onDeleteClip}
+            onSelectBookmark={onSelectBookmark}
+            onRenameBookmark={onRenameBookmark}
+            onDuplicateBookmark={onDuplicateBookmark}
+            onDeleteBookmark={onDeleteBookmark}
+            onAddBookmark={onAddBookmark}
+            onAddBookmarkAfter={onAddBookmarkAfter}
+            onReorderBookmarks={onReorderBookmarks}
+            onSetClipEnterAnimationType={onSetClipEnterAnimationType}
+            onSetClipExitAnimationType={onSetClipExitAnimationType}
+            onSetBookmarkEnterTransitionPreset={onSetBookmarkEnterTransitionPreset}
+            onSetBookmarkExitTransitionPreset={onSetBookmarkExitTransitionPreset}
+            shouldSuppressClick={shouldSuppressClick}
+            beginClipDrag={beginClipDrag}
+          />
         </div>
       );
     }),
-    // playhead intentionally excluded: clip bars don't render the scrub position
-    [layerRowDescriptors, selection, selectedClipIds, canGroupSelection,
-     clipTimingPreview, totalW, durationSeconds, draggedClip, frameStripCache,
-     onPlayheadChange, onGroupSelection, onUngroupSelection, onMoveClipToNewLayer,
-     onMoveClipToLayer, onDuplicateClip, onDeleteClip,
-     onSetClipEnterAnimationType, onSetClipExitAnimationType,
-     shouldSuppressClick, beginClipDrag],
+    [
+      beginClipDrag,
+      canGroupSelection,
+      clipTimingPreview,
+      draggedClip?.label,
+      draggingClipId,
+      draggingClipMode,
+      draggingTrackIndex,
+      frameStripCache,
+      handleDeleteLayerWithAnimation,
+      isPlaying,
+      layerRowDescriptors,
+      layerTracks,
+      onAddBookmark,
+      onAddBookmarkAfter,
+      onDeleteBookmark,
+      onDeleteClip,
+      onDuplicateBookmark,
+      onDuplicateClip,
+      onGroupSelection,
+      onMoveClipToLayer,
+      onMoveClipToNewLayer,
+      onPlayheadChange,
+      onRenameBookmark,
+      onReorderBookmarks,
+      onSelectBookmark,
+      onSetBookmarkEnterTransitionPreset,
+      onSetBookmarkExitTransitionPreset,
+      onSetClipEnterAnimationType,
+      onSetClipExitAnimationType,
+      onUngroupSelection,
+      rowRefs,
+      selection,
+      selectedClipIds,
+      shouldSuppressClick,
+      totalW,
+    ],
   );
 
   return (
@@ -637,7 +320,7 @@ export function TimelinePanel({
         @keyframes timeline-layer-removing{0%{opacity:1;max-height:56px}100%{opacity:0;max-height:0}}
       `}</style>
 
-      <PlaybackStrip
+      <TimelinePlaybackStrip
         playback={playback}
         duration={durationSeconds}
         isPlaying={isPlaying}
@@ -649,9 +332,9 @@ export function TimelinePanel({
         onTogglePlay={onPlayToggle}
         onUndo={onUndo}
         onRedo={onRedo}
-        onAddLayer={onAddLayer}
         onGroupSelection={onGroupSelection}
         onUngroupSelection={onUngroupSelection}
+        onAddLayer={onAddLayer}
       />
 
       <TimelineScrollArea ref={scrollRef} minWidth={totalTrackW + LABEL_W}>
@@ -669,7 +352,7 @@ export function TimelinePanel({
                 style={{
                   background: "var(--editor-panel-elevated)",
                   borderColor: "var(--editor-border)",
-                  marginBottom: 1
+                  marginBottom: 1,
                 }}
               >
                 <span
@@ -687,7 +370,7 @@ export function TimelinePanel({
                   className="truncate text-xs font-medium tracking-[0.03em]"
                   style={{ color: "var(--editor-text)" }}
                 >
-                  Scene clip
+                  {bookmarkTrack?.label ?? "Bookmarks"}
                 </span>
               </div>
               {layerLabelRows}
@@ -707,39 +390,45 @@ export function TimelinePanel({
 
               <div className="border-b" style={{ borderColor: "var(--editor-border)" }}>
                 <TimelineTrackRow
-              track={sceneTrack}
-              totalW={totalW}
-              showFrameStrip
-              draggable={false}
-              selection={selection}
-              selectedClipIds={selectedClipIds}
-              draggingClipId={draggingClipId}
-              draggingClipMode={draggingClipMode}
-              clipTimingPreview={clipTimingPreview}
-              frameStripCache={frameStripCache}
-              canGroupSelection={canGroupSelection}
-              layerTracks={layerTracks}
-              onPlayheadChange={onPlayheadChange}
-              onGroupSelection={onGroupSelection}
-              onUngroupSelection={onUngroupSelection}
-              onMoveClipToNewLayer={onMoveClipToNewLayer}
-              onMoveClipToLayer={onMoveClipToLayer}
-              onDuplicateClip={onDuplicateClip}
-              onDeleteClip={onDeleteClip}
-              onSetClipEnterAnimationType={onSetClipEnterAnimationType}
-              onSetClipExitAnimationType={onSetClipExitAnimationType}
-              onSetSceneEnterTransitionPreset={onSetSceneEnterTransitionPreset}
-              onSetSceneExitTransitionPreset={onSetSceneExitTransitionPreset}
-              shouldSuppressClick={shouldSuppressClick}
-              beginClipDrag={beginClipDrag}
+                  track={bookmarkTrack}
+                  totalW={totalW}
+                  showFrameStrip
+                  draggable={false}
+                  isPlaying={isPlaying}
+                  selection={selection}
+                  selectedClipIds={selectedClipIds}
+                  draggingClipId={draggingClipId}
+                  draggingClipMode={draggingClipMode}
+                  clipTimingPreview={clipTimingPreview}
+                  frameStripCache={frameStripCache}
+                  canGroupSelection={canGroupSelection}
+                  layerTracks={layerTracks}
+                  onPlayheadChange={onPlayheadChange}
+                  onGroupSelection={onGroupSelection}
+                  onUngroupSelection={onUngroupSelection}
+                  onMoveClipToNewLayer={onMoveClipToNewLayer}
+                  onMoveClipToLayer={onMoveClipToLayer}
+                  onDuplicateClip={onDuplicateClip}
+                  onDeleteClip={onDeleteClip}
+                  onSelectBookmark={onSelectBookmark}
+                  onRenameBookmark={onRenameBookmark}
+                  onDuplicateBookmark={onDuplicateBookmark}
+                  onDeleteBookmark={onDeleteBookmark}
+                  onAddBookmark={onAddBookmark}
+                  onAddBookmarkAfter={onAddBookmarkAfter}
+                  onReorderBookmarks={onReorderBookmarks}
+                  onSetClipEnterAnimationType={onSetClipEnterAnimationType}
+                  onSetClipExitAnimationType={onSetClipExitAnimationType}
+                  onSetBookmarkEnterTransitionPreset={onSetBookmarkEnterTransitionPreset}
+                  onSetBookmarkExitTransitionPreset={onSetBookmarkExitTransitionPreset}
+                  shouldSuppressClick={shouldSuppressClick}
+                  beginClipDrag={beginClipDrag}
                 />
               </div>
 
               {layerRows}
 
-              <div
-                className="pointer-events-none absolute inset-0 z-[48] overflow-hidden"
-              >
+              <div className="pointer-events-none absolute inset-0 z-[48] overflow-hidden">
                 <TimelinePlayhead playback={playback} totalW={totalW} />
               </div>
             </div>
@@ -809,7 +498,7 @@ export function TimelinePanel({
           className="pointer-events-auto absolute bottom-0 left-0 z-[70]"
           style={{
             width: LABEL_W,
-            background: "var(--editor-panel)"
+            background: "var(--editor-panel)",
           }}
         />
       </TimelineScrollArea>

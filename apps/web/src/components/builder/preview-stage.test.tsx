@@ -41,6 +41,7 @@ describe("PreviewStage", () => {
         onSelectOverlay={() => undefined}
         onOverlayLayoutChange={() => undefined}
         onInlineTextChange={() => undefined}
+        onOverlayStyleLiveChange={() => undefined}
         onOverlayStyleChange={() => undefined}
         onDuplicateOverlay={() => undefined}
         onDeleteOverlay={() => undefined}

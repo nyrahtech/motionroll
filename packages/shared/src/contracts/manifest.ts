@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { FrameAssetSchema } from "./assets";
-import { OverlayDefinitionSchema } from "./overlays";
+import { OverlayDefinitionSchema, OverlayMediaMetadataSchema } from "./overlays";
 import { PresetIdSchema, PresetSpecificConfigSchema } from "./presets";
 import { PresetRuntimeProfileSchema } from "./preset-runtime";
 
-export const PublishManifestVersionSchema = z.literal("1.0.0");
+export const PublishManifestVersionSchema = z.literal("2.0.0");
 export type PublishManifestVersion = z.infer<typeof PublishManifestVersionSchema>;
 
 export const ProgressMappingConfigSchema = z.object({
@@ -82,8 +82,63 @@ export const SectionTransitionSchema = z.object({
 });
 export type SectionTransition = z.infer<typeof SectionTransitionSchema>;
 
+export const BackgroundMediaSchema = z.object({
+  assetId: z.string().min(1).optional(),
+  url: z.string().min(1),
+  previewUrl: z.string().min(1).optional(),
+  posterUrl: z.string().min(1).optional(),
+  metadata: OverlayMediaMetadataSchema.extend({
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+    durationMs: z.number().int().nonnegative().optional(),
+  }).optional(),
+});
+export type BackgroundMedia = z.infer<typeof BackgroundMediaSchema>;
+
+export const BackgroundVideoEndBehaviorSchema = z.enum(["loop", "hold", "stop"]);
+export type BackgroundVideoEndBehavior = z.infer<typeof BackgroundVideoEndBehaviorSchema>;
+
+export const BackgroundVideoRangeSchema = z.object({
+  startMs: z.number().int().nonnegative(),
+  endMs: z.number().int().positive().optional(),
+});
+export type BackgroundVideoRange = z.infer<typeof BackgroundVideoRangeSchema>;
+
+export const ProjectBackgroundTrackManifestSchema = z.object({
+  id: z.string().min(1),
+  start: z.number().min(0).max(1),
+  end: z.number().min(0).max(1),
+  media: BackgroundMediaSchema,
+  endBehavior: BackgroundVideoEndBehaviorSchema.default("loop"),
+  mediaRange: BackgroundVideoRangeSchema.optional(),
+});
+export type ProjectBackgroundTrackManifest = z.infer<typeof ProjectBackgroundTrackManifestSchema>;
+
+export const ProjectBookmarkSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  position: z.number().min(0).max(1),
+});
+export type ProjectBookmark = z.infer<typeof ProjectBookmarkSchema>;
+
+export const ProjectCanvasManifestSchema = z.object({
+  id: z.string().min(1),
+  presetId: PresetIdSchema,
+  title: z.string().min(1),
+  frameAssets: z.array(FrameAssetSchema),
+  frameCount: z.number().int().nonnegative(),
+  progressMapping: ProgressMappingConfigSchema,
+  backgroundColor: z.string().min(1).optional(),
+  backgroundTrack: ProjectBackgroundTrackManifestSchema.optional(),
+  fallback: FallbackConfigSchema,
+  motion: MotionSettingsSchema,
+  presetConfig: PresetSpecificConfigSchema,
+  runtimeProfile: PresetRuntimeProfileSchema,
+});
+export type ProjectCanvasManifest = z.infer<typeof ProjectCanvasManifestSchema>;
+
 export const ProjectSectionManifestSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().min(1),
   presetId: PresetIdSchema,
   title: z.string().min(1),
   frameAssets: z.array(FrameAssetSchema),
@@ -92,6 +147,10 @@ export const ProjectSectionManifestSchema = z.object({
   overlays: z.array(OverlayDefinitionSchema),
   moments: z.array(ProjectMomentSchema).default([]),
   transitions: z.array(SectionTransitionSchema).default([]),
+  backgroundColor: z.string().min(1).optional(),
+  backgroundMedia: BackgroundMediaSchema.optional(),
+  backgroundVideoEndBehavior: BackgroundVideoEndBehaviorSchema.optional(),
+  backgroundVideoRange: BackgroundVideoRangeSchema.optional(),
   fallback: FallbackConfigSchema,
   motion: MotionSettingsSchema,
   presetConfig: PresetSpecificConfigSchema,
@@ -113,7 +172,18 @@ export const ProjectManifestSchema = z.object({
   }),
   publishTarget: PublishTargetSummarySchema,
   selectedPreset: PresetIdSchema,
-  sections: z.array(ProjectSectionManifestSchema).min(1),
+  canvas: ProjectCanvasManifestSchema,
+  bookmarks: z.array(ProjectBookmarkSchema).default([]),
+  layers: z.array(OverlayDefinitionSchema).default([]),
   generatedAt: z.string().datetime(),
 });
-export type ProjectManifest = z.infer<typeof ProjectManifestSchema>;
+
+type ProjectManifestBase = z.infer<typeof ProjectManifestSchema>;
+
+export type ProjectManifest = ProjectManifestBase & {
+  /**
+   * Compatibility alias for code paths that still type against the old single-section runtime.
+   * Active editor/runtime code should prefer `canvas`, `bookmarks`, and `layers`.
+   */
+  sections: ProjectSectionManifest[];
+};

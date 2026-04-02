@@ -1,4 +1,7 @@
 import type {
+  BackgroundMedia,
+  BackgroundVideoEndBehavior,
+  BackgroundVideoRange,
   OverlayDefinition,
   PresetDefinition,
   PresetId,
@@ -58,6 +61,9 @@ export type EditorProject = {
       sectionHeightVh: number;
       scrubStrength: number;
       frameRange?: { start: number; end: number };
+      backgroundMedia?: BackgroundMedia;
+      backgroundVideoEndBehavior?: BackgroundVideoEndBehavior;
+      backgroundVideoRange?: BackgroundVideoRange;
       fallbackBehavior?: {
         mobile: "poster" | "video" | "sequence";
         reducedMotion: "poster" | "video" | "sequence";

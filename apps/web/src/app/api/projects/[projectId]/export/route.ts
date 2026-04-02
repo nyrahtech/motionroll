@@ -14,6 +14,10 @@ import { buildProjectManifest } from "@/lib/manifest";
 import { requireAuth } from "@/lib/auth";
 import { logger } from "@/lib/logger";
 import { getProjectById } from "@/lib/data/projects";
+import {
+  collectReferencedMediaAssetIds,
+  rewriteManifestMediaUrls,
+} from "../../../../../lib/project-assets";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +27,12 @@ function resolveLocalPublicAssetPath(url: string) {
   }
 
   return path.join(process.cwd(), "public", url.replace(/^\/+/, ""));
+}
+
+function resolveMediaExtension(url: string, fallback = "mp4") {
+  const cleanUrl = url.split("?")[0]?.split("#")[0] ?? url;
+  const extension = cleanUrl.split(".").pop()?.trim();
+  return extension && extension.length > 0 ? extension : fallback;
 }
 
 const README = `MotionRoll Export Bundle
@@ -109,22 +119,38 @@ export async function GET(
     });
   }
 
-  // Rewrite manifest to use relative frame paths
-  const exportManifest = {
-    ...manifest,
-    sections: manifest.sections.map((sec, sIdx) => ({
-      ...sec,
-      frameAssets: sec.frameAssets.map((frame, fIdx) => ({
-        ...frame,
-        variants: frame.variants.map((v) => {
-          const entry = frameUrls.find((f) =>
-            f.url === v.url || f.filename === `frames/frame-${String(fIdx).padStart(5, "0")}.jpg`,
-          );
-          return entry ? { ...v, url: entry.filename } : v;
-        }),
+  const referencedMediaAssetIds = collectReferencedMediaAssetIds(manifest);
+  const mediaEntries = referencedMediaAssetIds.flatMap((assetId) => {
+    const asset = project.assets.find((candidate) => candidate.id === assetId);
+    if (!asset?.publicUrl) {
+      return [];
+    }
+
+    return [{
+      assetId,
+      url: asset.publicUrl,
+      filename: `media/${assetId}.${resolveMediaExtension(asset.publicUrl)}`,
+    }];
+  });
+
+  const exportManifest = rewriteManifestMediaUrls(
+    {
+      ...manifest,
+      sections: manifest.sections.map((sec) => ({
+        ...sec,
+        frameAssets: sec.frameAssets.map((frame, fIdx) => ({
+          ...frame,
+          variants: frame.variants.map((v) => {
+            const entry = frameUrls.find((f) =>
+              f.url === v.url || f.filename === `frames/frame-${String(fIdx).padStart(5, "0")}.jpg`,
+            );
+            return entry ? { ...v, url: entry.filename } : v;
+          }),
+        })),
       })),
-    })),
-  };
+    },
+    new Map(mediaEntries.map((entry) => [entry.assetId, entry.filename])),
+  );
 
   // Build index.html
   const indexHtml = `<!DOCTYPE html>
@@ -206,7 +232,25 @@ export async function GET(
       }
     });
 
-    await Promise.all(frameDownloads);
+    const mediaDownloads = mediaEntries.map(async ({ url, filename }) => {
+      try {
+        const localPublicPath = resolveLocalPublicAssetPath(url);
+        if (localPublicPath) {
+          const buffer = await readFile(localPublicPath);
+          archive.append(buffer, { name: filename });
+          return;
+        }
+
+        const response = await fetch(url);
+        if (!response.ok) return;
+        const buffer = Buffer.from(await response.arrayBuffer());
+        archive.append(buffer, { name: filename });
+      } catch {
+        // Skip media that fails to download
+      }
+    });
+
+    await Promise.all([...frameDownloads, ...mediaDownloads]);
     await archive.finalize();
 
     await new Promise<void>((resolve) => writable.on("finish", resolve));

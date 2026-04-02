@@ -22,6 +22,7 @@ const registerUploadSchema = z.object({
   bytes: z.number().int().positive(),
   sourceType: z.literal("video"),
   sourceOrigin: z.literal("upload").default("upload"),
+  usage: z.enum(["source_video", "scene_background", "video_layer"]).default("source_video"),
   retentionPolicy: z.enum(["delete_after_success", "keep_source"]).optional(),
 });
 
@@ -75,33 +76,36 @@ export async function POST(request: Request) {
   await mkdir(path.resolve(env.PROCESSING_TEMP_DIR, body.projectId), { recursive: true });
 
   await db.transaction(async (tx) => {
-    await tx
-      .update(projectAssets)
-      .set({ isPrimary: false, updatedAt: new Date() })
-      .where(
-        and(
-          eq(projectAssets.projectId, body.projectId),
-          eq(projectAssets.ownerId, userId),
-          eq(projectAssets.kind, "source_video"),
-        ),
-      );
+    if (body.usage === "source_video") {
+      await tx
+        .update(projectAssets)
+        .set({ isPrimary: false, updatedAt: new Date() })
+        .where(
+          and(
+            eq(projectAssets.projectId, body.projectId),
+            eq(projectAssets.ownerId, userId),
+            eq(projectAssets.kind, "source_video"),
+          ),
+        );
+    }
 
     await tx.insert(projectAssets).values({
       id: assetId,
       projectId: body.projectId,
       ownerId: userId,
-      kind: "source_video",
+      kind: body.usage === "source_video" ? "source_video" : "media_video",
       sourceType: "video",
       sourceOrigin: "upload",
       storageKey: key,
       publicUrl: getStoragePublicUrl(key),
       metadata: {
+        kind: "video",
         mimeType: validatedUpload.contentType,
         bytes: validatedUpload.bytes,
         originalFilename: validatedUpload.filename,
         uploadValidatedAt: new Date().toISOString(),
       },
-      isPrimary: true,
+      isPrimary: body.usage === "source_video",
     });
   });
 
@@ -110,17 +114,34 @@ export async function POST(request: Request) {
   return NextResponse.json({
     assetId,
     storageKey: key,
-    uploadUrl,
-    next: {
-      method: "POST",
-      url: `/api/projects/${body.projectId}`,
-      body: {
-        action: "enqueue_processing",
-        assetId,
-        retentionPolicy: body.retentionPolicy ?? env.SOURCE_RETENTION_DEFAULT,
-        sourceType: "video",
-        sourceOrigin: "upload",
+    usage: body.usage,
+    asset: {
+      id: assetId,
+      kind: body.usage === "source_video" ? "source_video" : "media_video",
+      storageKey: key,
+      publicUrl: getStoragePublicUrl(key),
+      metadata: {
+        kind: "video",
+        mimeType: validatedUpload.contentType,
+        bytes: validatedUpload.bytes,
+        originalFilename: validatedUpload.filename,
       },
+      isPrimary: body.usage === "source_video",
     },
+    uploadUrl,
+    next:
+      body.usage === "source_video"
+        ? {
+            method: "POST",
+            url: `/api/projects/${body.projectId}`,
+            body: {
+              action: "enqueue_processing",
+              assetId,
+              retentionPolicy: body.retentionPolicy ?? env.SOURCE_RETENTION_DEFAULT,
+              sourceType: "video",
+              sourceOrigin: "upload",
+            },
+          }
+        : null,
   });
 }

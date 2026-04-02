@@ -8,24 +8,42 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { EditorPanel } from "./editor-shell";
 
-const defaultStatus =
-  "Select a source video. MotionRoll will validate the file, register the upload, and queue sequence processing separately from scene editing.";
+function getDefaultStatus(usage: "source_video" | "scene_background" | "video_layer") {
+  if (usage === "source_video") {
+    return "Select a source video. MotionRoll will validate the file, register the upload, and queue sequence processing separately from scene editing.";
+  }
+
+  return "Select a video to add directly into the scene.";
+}
 
 export function UploadPanel({
   projectId,
   embedded = false,
+  usage = "source_video",
   onUploadQueued,
+  onVideoInserted,
   processingJobs,
 }: {
   projectId: string;
   embedded?: boolean;
+  usage?: "source_video" | "scene_background" | "video_layer";
   onUploadQueued?: () => void | Promise<void>;
+  onVideoInserted?: (payload: {
+    usage: "scene_background" | "video_layer";
+    asset: {
+      id: string;
+      publicUrl: string;
+      storageKey?: string;
+      metadata?: unknown;
+    };
+  }) => void;
   processingJobs?: Array<{
     id: string;
     status: string;
     failureReason: string | null;
   }>;
 }) {
+  const defaultStatus = getDefaultStatus(usage);
   const [status, setStatus] = useState(defaultStatus);
   const [trackedJobId, setTrackedJobId] = useState<string | null>(null);
   const inputId = useId();
@@ -43,6 +61,10 @@ export function UploadPanel({
       }),
     [],
   );
+
+  useEffect(() => {
+    setStatus(getDefaultStatus(usage));
+  }, [usage]);
 
   useEffect(() => {
     const onFileAdded = (file: { data?: unknown }) => {
@@ -104,6 +126,7 @@ export function UploadPanel({
         bytes: file.size,
         sourceType: "video",
         sourceOrigin: "upload",
+        usage,
       }),
     });
 
@@ -118,7 +141,7 @@ export function UploadPanel({
     }
 
     const registration = await registrationResponse.json();
-    setStatus("Uploading source video...");
+    setStatus(usage === "source_video" ? "Uploading source video..." : "Uploading video...");
     const uploadResponse = await fetch(registration.uploadUrl, {
       method: "PUT",
       headers: {
@@ -132,26 +155,41 @@ export function UploadPanel({
       return;
     }
 
-    setStatus("Enqueuing processing...");
-    const enqueueResponse = await fetch(registration.next.url, {
-      method: registration.next.method,
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(registration.next.body),
-    });
+    if (registration.next) {
+      setStatus("Enqueuing processing...");
+      const enqueueResponse = await fetch(registration.next.url, {
+        method: registration.next.method,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(registration.next.body),
+      });
 
-    if (!enqueueResponse.ok) {
-      setStatus("Upload succeeded, but processing enqueue failed.");
+      if (!enqueueResponse.ok) {
+        setStatus("Upload succeeded, but processing enqueue failed.");
+        return;
+      }
+
+      const enqueueResult = await enqueueResponse.json();
+      if (typeof enqueueResult.jobId === "string") {
+        setTrackedJobId(enqueueResult.jobId);
+      }
+      void onUploadQueued?.();
+      setStatus("Processing queued...");
       return;
     }
 
-    const enqueueResult = await enqueueResponse.json();
-    if (typeof enqueueResult.jobId === "string") {
-      setTrackedJobId(enqueueResult.jobId);
+    if (registration.usage === "scene_background" || registration.usage === "video_layer") {
+      onVideoInserted?.({
+        usage: registration.usage,
+        asset: registration.asset,
+      });
+      setStatus(
+        registration.usage === "scene_background"
+          ? "Background video added."
+          : "Video layer added.",
+      );
     }
-    void onUploadQueued?.();
-    setStatus("Processing queued...");
   }
 
   function handleFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
@@ -213,7 +251,7 @@ export function UploadPanel({
         <div>
           <p className="text-sm font-medium text-white">Video format supported</p>
           <p className="mt-0.5 text-xs" style={{ color: "var(--foreground-muted)" }}>
-            MP4, MOV, WEBM, M4V - 500 MB max
+            MP4, MOV, WEBM, M4V - 50 MB max
           </p>
         </div>
       </div>
@@ -237,7 +275,7 @@ export function UploadPanel({
           <div>
             <p className="text-sm font-medium text-white">Video format supported</p>
             <p className="mt-0.5 text-xs" style={{ color: "var(--foreground-muted)" }}>
-              MP4, MOV, WEBM, M4V - 500 MB max
+              MP4, MOV, WEBM, M4V - 50 MB max
             </p>
           </div>
         </div>
@@ -261,7 +299,7 @@ export function UploadPanel({
   return (
     <EditorPanel
       title="Video format supported"
-      badge={<Badge variant="accent">MP4 / MOV / WEBM / Max 500 MB</Badge>}
+      badge={<Badge variant="accent">MP4 / MOV / WEBM / Max 50 MB</Badge>}
     >
       {panelContent}
     </EditorPanel>

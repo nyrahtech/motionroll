@@ -74,9 +74,7 @@ describe("useRuntimeController", () => {
     const { rerender } = renderHook(
       ({ isPlaying }) =>
         useRuntimeController({
-          manifest: makeManifest() as never,
           renderManifest: makeManifest() as never,
-          restartKey: "stable-runtime",
           mode: "desktop",
           isPlaying,
           isControlledRuntime: true,
@@ -120,9 +118,7 @@ describe("useRuntimeController", () => {
 
     renderHook(() =>
       useRuntimeController({
-        manifest: makeManifest() as never,
         renderManifest: makeManifest() as never,
-        restartKey: "stable-runtime",
         mode: "desktop",
         isPlaying: false,
         isControlledRuntime: true,
@@ -156,9 +152,7 @@ describe("useRuntimeController", () => {
 
     renderHook(() =>
       useRuntimeController({
-        manifest: makeManifest() as never,
         renderManifest: makeManifest() as never,
-        restartKey: "stable-runtime",
         mode: "desktop",
         isPlaying: true,
         isControlledRuntime: true,
@@ -206,9 +200,7 @@ describe("useRuntimeController", () => {
     const { rerender } = renderHook(
       ({ renderManifest }) =>
         useRuntimeController({
-          manifest: renderManifest,
           renderManifest,
-          restartKey: "stable-runtime",
           mode: "desktop",
           isPlaying: false,
           isControlledRuntime: true,
@@ -232,5 +224,109 @@ describe("useRuntimeController", () => {
 
     expect(createScrollSection).not.toHaveBeenCalled();
     expect(controller.updateManifest).toHaveBeenCalledWith(manifestB);
+  });
+
+  it("wires controlled runtime interactivity immediately on mount and manifest update", () => {
+    const controller = {
+      destroy: vi.fn(),
+      refresh: vi.fn(),
+      setProgress: vi.fn(),
+      setTargetProgress: vi.fn(),
+      setOverlayTransitionsEnabled: vi.fn(),
+      updateManifest: vi.fn(),
+      getProgress: vi.fn(() => 0.2),
+      getTargetProgress: vi.fn(() => 0.2),
+    };
+    createScrollSection.mockReturnValue(controller);
+    const mountNodeRef = { current: document.createElement("div") };
+    const playback = createPlayback(0.2);
+    const wireInteractivity = vi.fn();
+    const manifestA = makeManifest() as never;
+    const manifestB = {
+      sections: [
+        {
+          overlays: [
+            {
+              id: "overlay-1",
+              timing: { start: 0.25, end: 0.55 },
+            },
+          ],
+        },
+      ],
+    } as const as never;
+
+    const { rerender } = renderHook(
+      ({ renderManifest }) =>
+        useRuntimeController({
+          renderManifest,
+          mode: "desktop",
+          isPlaying: false,
+          isControlledRuntime: true,
+          hasRenderableMedia: true,
+          playback,
+          selectedOverlayId: undefined,
+          mountNodeRef,
+          onPlayheadChange: undefined,
+          onSelectOverlay: undefined,
+          scheduleWireInteractivity: wireInteractivity,
+        }),
+      {
+        initialProps: { renderManifest: manifestA },
+      },
+    );
+
+    expect(wireInteractivity).toHaveBeenCalled();
+    const mountWireCalls = wireInteractivity.mock.calls.length;
+
+    rerender({ renderManifest: manifestB });
+
+    expect(wireInteractivity.mock.calls.length).toBeGreaterThan(mountWireCalls);
+  });
+
+  it("destroys and clears the controlled runtime when the active scene has no renderable media", () => {
+    const controller = {
+      destroy: vi.fn(),
+      refresh: vi.fn(),
+      setProgress: vi.fn(),
+      setTargetProgress: vi.fn(),
+      setOverlayTransitionsEnabled: vi.fn(),
+      updateManifest: vi.fn(),
+      getProgress: vi.fn(() => 0.2),
+      getTargetProgress: vi.fn(() => 0.2),
+    };
+    createScrollSection.mockReturnValue(controller);
+    const mountNode = document.createElement("div");
+    const mountNodeRef = { current: mountNode };
+    const playback = createPlayback(0.2);
+
+    const { rerender } = renderHook(
+      ({ hasRenderableMedia }) =>
+        useRuntimeController({
+          renderManifest: makeManifest() as never,
+          mode: "desktop",
+          isPlaying: false,
+          isControlledRuntime: true,
+          hasRenderableMedia,
+          playback,
+          selectedOverlayId: undefined,
+          mountNodeRef,
+          onPlayheadChange: undefined,
+          onSelectOverlay: undefined,
+          scheduleWireInteractivity: vi.fn(),
+        }),
+      {
+        initialProps: { hasRenderableMedia: true },
+      },
+    );
+
+    mountNode.appendChild(document.createElement("div"));
+    controller.destroy.mockClear();
+    createScrollSection.mockClear();
+
+    rerender({ hasRenderableMedia: false });
+
+    expect(controller.destroy).toHaveBeenCalled();
+    expect(createScrollSection).not.toHaveBeenCalled();
+    expect(mountNode.childElementCount).toBe(0);
   });
 });

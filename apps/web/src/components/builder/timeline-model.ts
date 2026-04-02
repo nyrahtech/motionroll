@@ -1,9 +1,7 @@
 import {
   clampProgress,
-  frameIndexToSequenceProgress,
-  progressToFrameIndex,
   progressToFrameBoundaryIndex,
-  type OverlayDefinition,
+  progressToFrameIndex,
   type ProjectManifest,
 } from "@motionroll/shared";
 
@@ -25,20 +23,28 @@ export type TimelineClipModel = {
   start: number;
   end: number;
   tint?: "accent" | "muted";
-    metadata?: {
-      overlayId?: string;
-      theme?: string;
-      frameStrip?: string[];
-      frameStripSource?: TimelineFrameStripSource;
-      text?: string;
-      contentType?: string;
-      enterAnimationType?: string;
-      exitAnimationType?: string;
-      sceneEnterTransitionPreset?: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
-      sceneExitTransitionPreset?: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
-      layerIndex?: number;
-      isGroup?: boolean;
-      childCount?: number;
+  metadata?: {
+    overlayId?: string;
+    theme?: string;
+    frameStrip?: string[];
+    frameStripSource?: TimelineFrameStripSource;
+    text?: string;
+    contentType?: string;
+    enterAnimationType?: string;
+    exitAnimationType?: string;
+    layerIndex?: number;
+    isGroup?: boolean;
+    childCount?: number;
+    bookmarkId?: string;
+    bookmarkIndex?: number;
+    isSelectedBookmark?: boolean;
+    sectionHeightVh?: number;
+    bookmarkStartProgress?: number;
+    bookmarkEndProgress?: number;
+    bookmarkDurationSeconds?: number;
+    backgroundMediaUrl?: string;
+    backgroundMediaDurationMs?: number;
+    backgroundMediaPosterUrl?: string;
   };
 };
 
@@ -60,6 +66,8 @@ export type TimelineTrackModel = {
   metadata?: {
     overlayId?: string;
     layerIndex?: number;
+    bookmarkAddStart?: number;
+    bookmarkAddEnd?: number;
   };
 };
 
@@ -68,6 +76,9 @@ export const TIMELINE_MIN_WIDTH = 0.04;
 export const TIMELINE_ZOOM_MIN = 0.65;
 export const TIMELINE_ZOOM_MAX = 2.25;
 export const TIMELINE_ZOOM_DEFAULT = 1.15;
+const TIMELINE_TRACK_MIN_WIDTH = 960;
+const TIMELINE_TRACK_PX_PER_SECOND = 118;
+export const TIMELINE_ADD_BLOCK_PX = 148;
 
 export function clampTimelineValue(value: number) {
   return clampProgress(value);
@@ -183,6 +194,10 @@ export function getTimelineStepProgress(durationSeconds: number, frames = 12) {
   return clampTimelineValue(1 / Math.max(durationSeconds * frames, 1));
 }
 
+export function getTimelineTrackWidth(durationSeconds: number) {
+  return Math.max(TIMELINE_TRACK_MIN_WIDTH, Math.round(durationSeconds * TIMELINE_TRACK_PX_PER_SECOND));
+}
+
 const timelineVariantPreferenceMap: Record<"desktop" | "mobile", string[]> = {
   desktop: ["desktop", "tablet", "mobile", "original"],
   mobile: ["mobile", "tablet", "desktop", "original"],
@@ -202,7 +217,7 @@ function getTimelineFrameAssetUrl(
   return frameAsset.variants[0]?.url ?? null;
 }
 
-function getTimelineFrameStripSource(
+export function getTimelineFrameStripSource(
   section: ProjectManifest["sections"][number],
   mode: "desktop" | "mobile",
 ): TimelineFrameStripSource {
@@ -263,59 +278,10 @@ export function getTimelineFrameStripForProgressRange(
 ) {
   const frameRange = getFrameRangeForProgressRange(startProgress, endProgress, frameSource.frameCount);
   return Array.from({ length: sampleCount }, (_, index) => {
-    const progress =
-      sampleCount <= 1
-        ? 0
-        : index / (sampleCount - 1);
+    const progress = sampleCount <= 1 ? 0 : index / (sampleCount - 1);
     const frameIndex = progressToFrameIndex(progress, frameRange);
     return getTimelineFrameUrl(frameSource, frameIndex);
   }).filter((url): url is string => Boolean(url));
-}
-
-function getFrameStrip(
-  section: ProjectManifest["sections"][number],
-  mode: "desktop" | "mobile",
-  sampleCount = 8,
-) {
-  const frameSource = getTimelineFrameStripSource(section, mode);
-  const rangeStart = frameIndexToSequenceProgress(section.progressMapping.frameRange.start, frameSource.frameCount);
-  const rangeEnd = frameIndexToSequenceProgress(section.progressMapping.frameRange.end, frameSource.frameCount);
-  return getTimelineFrameStripForProgressRange(frameSource, rangeStart, rangeEnd, sampleCount);
-}
-
-function createOverlayClip(
-  overlay: OverlayDefinition,
-  index: number,
-  layerIndex: number,
-  childCount = 0,
-): TimelineClipModel {
-  const label =
-    overlay.content.type === "group"
-      ? childCount > 0
-        ? `Group (${childCount})`
-        : "Group"
-      : overlay.content.text?.split(/\r?\n/).find((line: string) => line.trim().length > 0) ??
-        `Layer ${String(index + 1).padStart(2, "0")}`;
-
-  return {
-    id: `layer-${overlay.id}`,
-    trackType: "layer",
-    label,
-    start: overlay.timing.start,
-    end: overlay.timing.end,
-    tint: "accent",
-      metadata: {
-        overlayId: overlay.id,
-        theme: overlay.content.theme,
-        text: overlay.content.text,
-        contentType: overlay.content.type ?? "text",
-        enterAnimationType: overlay.content.enterAnimation?.type ?? "fade",
-        exitAnimationType: overlay.content.exitAnimation?.type ?? "none",
-        layerIndex,
-        isGroup: overlay.content.type === "group",
-        childCount,
-    },
-  };
 }
 
 export function getFrameRangeFromClip(
@@ -326,84 +292,4 @@ export function getFrameRangeFromClip(
     start: progressToFrameBoundaryIndex(clip.start, frameCount),
     end: progressToFrameBoundaryIndex(clip.end, frameCount),
   };
-}
-
-export function deriveTimelineTracks(
-  manifest: ProjectManifest,
-  _durationSeconds: number,
-  mode: "desktop" | "mobile" = "desktop",
-  layerCount?: number,
-): TimelineTrackModel[] {
-  const section = manifest.sections[0];
-  if (!section) {
-    return [] as TimelineTrackModel[];
-  }
-
-  const frameCount = Math.max(section.frameCount, 1);
-  const sequenceClip: TimelineClipModel = {
-    id: "section-range",
-    trackType: "section",
-    label: section.title,
-    start: frameIndexToSequenceProgress(section.progressMapping.frameRange.start, frameCount),
-    end: frameIndexToSequenceProgress(section.progressMapping.frameRange.end, frameCount),
-    tint: "muted",
-    metadata: {
-      frameStrip: getFrameStrip(section, mode),
-      frameStripSource: getTimelineFrameStripSource(section, mode),
-      sceneEnterTransitionPreset:
-        section.transitions.find(
-          (transition) => transition.scope === "sequence" && transition.phase === "enter",
-        )?.preset ?? "none",
-      sceneExitTransitionPreset:
-        section.transitions.find(
-          (transition) => transition.scope === "sequence" && transition.phase === "exit",
-        )?.preset ?? "none",
-    },
-  };
-
-  const overlaysByLayer = new Map<number, OverlayDefinition[]>();
-  const rootOverlays = section.overlays.filter((overlay) => !overlay.content.parentGroupId);
-  for (const overlay of rootOverlays) {
-    const layerIndex = overlay.content.layer ?? 0;
-    const existing = overlaysByLayer.get(layerIndex);
-    if (existing) {
-      existing.push(overlay);
-    } else {
-      overlaysByLayer.set(layerIndex, [overlay]);
-    }
-  }
-
-  const totalLayers = Math.max(
-    layerCount ?? 0,
-    [...overlaysByLayer.keys()].reduce((maxLayer, currentLayer) => Math.max(maxLayer, currentLayer + 1), 0),
-    1,
-  );
-
-  const layerTracks: TimelineTrackModel[] = Array.from({ length: totalLayers }, (_, offset) => totalLayers - offset - 1)
-    .map((layerIndex) => ({
-      id: `track-layer-${layerIndex}`,
-      label: `Layer ${String(layerIndex + 1).padStart(2, "0")}`,
-      type: "layer" as const,
-      clips: (overlaysByLayer.get(layerIndex) ?? []).map((overlay, index) =>
-        createOverlayClip(
-          overlay,
-          index,
-          layerIndex,
-          section.overlays.filter((child) => child.content.parentGroupId === overlay.id).length,
-        ),
-      ),
-      metadata: {
-        layerIndex,
-      },
-    }));
-
-  return [
-    {
-      id: "track-sequence",
-      label: "Scene",
-      type: "section",
-      clips: [sequenceClip],
-    },
-    ...layerTracks,
-  ];
 }

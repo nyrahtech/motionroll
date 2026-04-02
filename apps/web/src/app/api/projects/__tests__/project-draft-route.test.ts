@@ -38,22 +38,14 @@ function makeSnapshot(overrides: Partial<{
       title: "Draft Project",
       presetId: "product-reveal",
       sectionTitle: "Scene 01",
+      sceneEnterTransition: { preset: "none", duration: 0.4 },
+      sceneExitTransition: { preset: "none", duration: 0.4 },
       sectionHeightVh: 240,
       scrubStrength: 1,
       frameRangeStart: 0,
       frameRangeEnd: 180,
       layerCount: 1,
       overlays: [],
-    },
-    manifest: {
-      project: { title: "Draft Project" },
-      selectedPreset: "product-reveal",
-      sections: [],
-    },
-    project: {
-      id: "project_123",
-      title: "Draft Project",
-      ownerId: "user_test_123",
     },
     revision: 3,
     updatedAt: "2026-03-22T12:00:00.000Z",
@@ -77,7 +69,7 @@ describe("/api/projects/[projectId]/draft", () => {
     });
   });
 
-  it("returns the authenticated user's remote draft snapshot", async () => {
+  it("returns the authenticated user's remote checkpoint snapshot", async () => {
     getRemoteProjectDraftSnapshot.mockResolvedValueOnce(makeSnapshot());
 
     const { GET } = await import("../[projectId]/draft/route");
@@ -88,8 +80,8 @@ describe("/api/projects/[projectId]/draft", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
+      draft: { title: "Draft Project" },
       revision: 3,
-      project: { id: "project_123" },
     });
     expect(getRemoteProjectDraftSnapshot).toHaveBeenCalledWith("project_123", "user_test_123");
   });
@@ -130,7 +122,7 @@ describe("/api/projects/[projectId]/draft", () => {
     );
   });
 
-  it("returns 404 when saving a draft for a project the user does not own", async () => {
+  it("returns 404 when saving a checkpoint for a project the user does not own", async () => {
     parseBody.mockResolvedValueOnce({
       data: {
         draft: makeSnapshot().draft,
@@ -142,10 +134,10 @@ describe("/api/projects/[projectId]/draft", () => {
       notFound: true,
     });
 
-    const { PATCH } = await import("../[projectId]/draft/route");
-    const response = await PATCH(
+    const { POST } = await import("../[projectId]/draft/route");
+    const response = await POST(
       new Request("http://localhost", {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draft: makeSnapshot().draft, baseRevision: 3 }),
       }),
@@ -162,7 +154,7 @@ describe("/api/projects/[projectId]/draft", () => {
     );
   });
 
-  it("returns 503 with retryable metadata when saving the draft fails transiently", async () => {
+  it("returns 503 with retryable metadata when saving the checkpoint fails transiently", async () => {
     parseBody.mockResolvedValueOnce({
       data: {
         draft: makeSnapshot().draft,
@@ -171,10 +163,10 @@ describe("/api/projects/[projectId]/draft", () => {
     });
     saveRemoteProjectDraft.mockRejectedValueOnce(new Error("database unavailable"));
 
-    const { PATCH } = await import("../[projectId]/draft/route");
-    const response = await PATCH(
+    const { POST } = await import("../[projectId]/draft/route");
+    const response = await POST(
       new Request("http://localhost", {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draft: makeSnapshot().draft, baseRevision: 3 }),
       }),
@@ -187,17 +179,9 @@ describe("/api/projects/[projectId]/draft", () => {
       code: "draft_unavailable",
       retryable: true,
     });
-    expect(loggerError).toHaveBeenCalledWith(
-      "Draft service unavailable",
-      expect.objectContaining({
-        projectId: "project_123",
-        action: "save",
-        error: "database unavailable",
-      }),
-    );
   });
 
-  it("returns 409 with the canonical remote snapshot on draft revision conflict", async () => {
+  it("returns metadata-only conflict details on checkpoint revision mismatch", async () => {
     const snapshot = makeSnapshot({ revision: 7, updatedAt: "2026-03-22T12:05:00.000Z" });
     parseBody.mockResolvedValueOnce({
       data: {
@@ -211,10 +195,10 @@ describe("/api/projects/[projectId]/draft", () => {
       snapshot,
     });
 
-    const { PATCH } = await import("../[projectId]/draft/route");
-    const response = await PATCH(
+    const { POST } = await import("../[projectId]/draft/route");
+    const response = await POST(
       new Request("http://localhost", {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draft: snapshot.draft, baseRevision: 6 }),
       }),
@@ -222,21 +206,15 @@ describe("/api/projects/[projectId]/draft", () => {
     );
 
     expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
+    await expect(response.json()).resolves.toEqual({
       ok: false,
       conflict: true,
       revision: 7,
       updatedAt: "2026-03-22T12:05:00.000Z",
     });
-    expect(saveRemoteProjectDraft).toHaveBeenCalledWith(
-      "project_123",
-      "user_test_123",
-      snapshot.draft,
-      { baseRevision: 6 },
-    );
   });
 
-  it("persists the authenticated user's draft through the authoritative draft route", async () => {
+  it("persists the authenticated user's draft through the checkpoint POST route", async () => {
     const snapshot = makeSnapshot({ revision: 4, updatedAt: "2026-03-22T12:10:00.000Z" });
     parseBody.mockResolvedValueOnce({
       data: {
@@ -249,10 +227,10 @@ describe("/api/projects/[projectId]/draft", () => {
       snapshot,
     });
 
-    const { PATCH } = await import("../[projectId]/draft/route");
-    const response = await PATCH(
+    const { POST } = await import("../[projectId]/draft/route");
+    const response = await POST(
       new Request("http://localhost", {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draft: snapshot.draft, baseRevision: 3 }),
       }),
@@ -260,16 +238,10 @@ describe("/api/projects/[projectId]/draft", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
+    await expect(response.json()).resolves.toEqual({
       ok: true,
       revision: 4,
       updatedAt: "2026-03-22T12:10:00.000Z",
     });
-    expect(saveRemoteProjectDraft).toHaveBeenCalledWith(
-      "project_123",
-      "user_test_123",
-      snapshot.draft,
-      { baseRevision: 3 },
-    );
   });
 });

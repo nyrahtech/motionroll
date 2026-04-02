@@ -4,37 +4,16 @@ import { useEffect, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-
-type SceneTransitionPreset =
-  "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
 
 type SettingsValues = {
   projectTitle: string;
-  sectionTitle: string;
+  bookmarkTitle: string;
   frameRangeStart: number;
   frameRangeEnd: number;
   scrubStrength: number;
   sectionHeightVh: number;
-  sceneEnterTransition: {
-    preset: SceneTransitionPreset;
-    duration: number;
-  };
-  sceneExitTransition: {
-    preset: SceneTransitionPreset;
-    duration: number;
-  };
 };
-
-const transitionItems: Array<{ value: SceneTransitionPreset; label: string }> = [
-  { value: "none", label: "None" },
-  { value: "fade", label: "Fade" },
-  { value: "crossfade", label: "Crossfade" },
-  { value: "wipe", label: "Wipe" },
-  { value: "zoom-dissolve", label: "Zoom dissolve" },
-  { value: "blur-dissolve", label: "Blur dissolve" },
-];
 
 export function ProjectSettingsModal({
   open,
@@ -146,8 +125,8 @@ export function ProjectSettingsModal({
         color: "var(--editor-text)",
       }}
     >
-      <div className="flex h-14 items-center justify-between border-b px-6" style={{ borderColor: "var(--editor-border)" }}>
-        <span className="text-sm font-semibold">Project settings</span>
+      <div className="flex h-16 items-center justify-between border-b px-6 py-3" style={{ borderColor: "var(--editor-border)" }}>
+        <span className="text-lg font-semibold">Project settings</span>
         <button
           type="button"
           onClick={onClose}
@@ -217,16 +196,16 @@ export function ProjectSettingsModal({
 
           <section className="space-y-4">
             <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
-              Scene
+              Canvas
             </p>
             <div className="space-y-2">
-              <label className="block text-xs text-[var(--foreground-muted)]">Section title</label>
+              <label className="block text-xs text-[var(--foreground-muted)]">Bookmark label</label>
               <Input
-                aria-label="Section title"
-                value={draft.sectionTitle}
+                aria-label="Bookmark label"
+                value={draft.bookmarkTitle}
                 onChange={(event) => {
                   const value = event.currentTarget.value;
-                  setDraft((current) => ({ ...current, sectionTitle: value }));
+                  setDraft((current) => ({ ...current, bookmarkTitle: value }));
                 }}
               />
             </div>
@@ -283,7 +262,7 @@ export function ProjectSettingsModal({
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs text-[var(--foreground-muted)]">
-                  <span>Scene scroll height</span>
+                  <span>Canvas scroll height</span>
                   <span>{Math.round(draft.sectionHeightVh)}vh</span>
                 </div>
                 <Slider
@@ -298,116 +277,6 @@ export function ProjectSettingsModal({
                     }))
                   }
                 />
-              </div>
-            </div>
-          </section>
-
-          <div className="h-px w-full bg-[var(--editor-border)]" />
-
-          <section className="space-y-4">
-            <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
-              Scene animation
-            </p>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-3">
-                <p className="text-xs text-[var(--foreground-muted)]">Scene enter</p>
-                <div className="space-y-2">
-                  <label className="text-xs text-[var(--foreground-muted)]">Preset</label>
-                  <Select
-                    value={draft.sceneEnterTransition.preset}
-                    onValueChange={(value: SceneTransitionPreset) =>
-                      setDraft((current) => ({
-                        ...current,
-                        sceneEnterTransition: {
-                          ...current.sceneEnterTransition,
-                          preset: value,
-                        },
-                      }))
-                    }
-                  >
-                    <SelectTrigger aria-label="Scene enter preset">
-                      <SelectValue placeholder="Select enter animation" />
-                    </SelectTrigger>
-                    <SelectContent portalContainer={dialogRef.current}>
-                      {transitionItems.map((item) => (
-                        <SelectItem key={`enter-${item.value}`} value={item.value}>
-                          {item.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs text-[var(--foreground-muted)]">Duration (sec)</label>
-                  <Input
-                    aria-label="Scene enter duration"
-                    type="number"
-                    min="0.08"
-                    max="2.5"
-                    step="0.01"
-                    value={draft.sceneEnterTransition.duration}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value;
-                      setDraft((current) => ({
-                        ...current,
-                        sceneEnterTransition: {
-                          ...current.sceneEnterTransition,
-                          duration: Number(value),
-                        },
-                      }));
-                    }}
-                  />
-                </div>
-              </div>
-              <div className="space-y-3">
-                <p className="text-xs text-[var(--foreground-muted)]">Scene exit</p>
-                <div className="space-y-2">
-                  <label className="text-xs text-[var(--foreground-muted)]">Preset</label>
-                  <Select
-                    value={draft.sceneExitTransition.preset}
-                    onValueChange={(value: SceneTransitionPreset) =>
-                      setDraft((current) => ({
-                        ...current,
-                        sceneExitTransition: {
-                          ...current.sceneExitTransition,
-                          preset: value,
-                        },
-                      }))
-                    }
-                  >
-                    <SelectTrigger aria-label="Scene exit preset">
-                      <SelectValue placeholder="Select exit animation" />
-                    </SelectTrigger>
-                    <SelectContent portalContainer={dialogRef.current}>
-                      {transitionItems.map((item) => (
-                        <SelectItem key={`exit-${item.value}`} value={item.value}>
-                          {item.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs text-[var(--foreground-muted)]">Duration (sec)</label>
-                  <Input
-                    aria-label="Scene exit duration"
-                    type="number"
-                    min="0.08"
-                    max="2.5"
-                    step="0.01"
-                    value={draft.sceneExitTransition.duration}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value;
-                      setDraft((current) => ({
-                        ...current,
-                        sceneExitTransition: {
-                          ...current.sceneExitTransition,
-                          duration: Number(value),
-                        },
-                      }));
-                    }}
-                  />
-                </div>
               </div>
             </div>
           </section>

@@ -1,36 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { progressToFrameIndex } from "@motionroll/shared";
-import { demoProjectSeeds } from "./demo-projects";
+import { demoProjectMap, demoProjects, featuredDemoProject } from "./demo-projects";
 
-describe("demo project seeds", () => {
-  const motionrollDemo = demoProjectSeeds[0];
-
-  it("puts the MotionRoll demo first so it becomes the default editor target", () => {
-    expect(motionrollDemo?.slug).toBe("demo-motionroll-editor");
-    expect(motionrollDemo?.title).toBe("MotionRoll Demo");
-    expect(motionrollDemo?.presetId).toBe("scroll-sequence");
-    expect(motionrollDemo?.sourceVideoUrl).toBe("/motionroll_demo_sequence/demo.mp4");
-    expect(motionrollDemo?.fallbackBehavior).toEqual({
-      mobile: "sequence",
-      reducedMotion: "sequence",
-    });
+describe("demo project definitions", () => {
+  it("keeps Ocean Depth first for the library hero", () => {
+    expect(featuredDemoProject?.id).toBe("ocean-depth");
+    expect(featuredDemoProject?.title).toBe("Ocean Depth");
+    expect(featuredDemoProject?.starter.presetId).toBe("scroll-sequence");
   });
 
-  it("stores committed demo assets for the MotionRoll demo", () => {
-    expect(motionrollDemo?.posterUrl).toBe("/motionroll_demo_sequence/poster.webp");
-    expect(motionrollDemo?.fallbackVideoUrl).toBe("/motionroll_demo_sequence/demo.mp4");
-    expect(motionrollDemo?.frameUrls).toHaveLength(motionrollDemo?.frameCount ?? 0);
-    expect(motionrollDemo?.frameRangeEnd).toBe((motionrollDemo?.frameCount ?? 1) - 1);
-  });
-
-  it("maps MotionRoll demo progress values to the expected first, middle, and last derived frames", () => {
-    const frameRange = {
-      start: 0,
-      end: motionrollDemo?.frameRangeEnd ?? 0,
-    };
-
-    expect(progressToFrameIndex(0, frameRange)).toBe(0);
-    expect(progressToFrameIndex(0.5, frameRange)).toBe(23);
-    expect(progressToFrameIndex(1, frameRange)).toBe(46);
+  it("stores the four static demo definitions with local thumbnails and preset starters", () => {
+    expect(demoProjects).toHaveLength(4);
+    expect(demoProjects[0]?.thumbnailUrl).toBe("/library-demos/ocean-depth.jpg");
+    expect(demoProjectMap.get("product-reveal")?.starter.presetId).toBe("product-reveal");
+    expect(demoProjectMap.get("product-spin")?.starter.presetId).toBe("device-spin");
+    expect(demoProjectMap.get("editorial-story")?.starter.presetId).toBe("chaptered-scroll-story");
   });
 });

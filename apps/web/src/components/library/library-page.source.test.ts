@@ -5,49 +5,111 @@ import { describe, expect, it } from "vitest";
 
 const componentDir = fileURLToPath(new URL(".", import.meta.url));
 
-describe("library page polish", () => {
-  it("uses the themed select primitive for library filters", () => {
-    const source = fs.readFileSync(
+describe("library page structure", () => {
+  it("uses examples and owned-project language instead of templates", () => {
+    const pageSource = fs.readFileSync(
       path.resolve(componentDir, "library-page.tsx"),
       "utf8",
     );
-
-    expect(source).toContain("SelectTrigger");
-    expect(source).toContain("SelectContent");
-    expect(source).toContain("SelectItem");
-    expect(source).not.toContain("<select");
-  });
-
-  it("refreshes the signed-in shell instead of forcing full-page reloads for project actions", () => {
-    const source = fs.readFileSync(
-      path.resolve(componentDir, "library-page.tsx"),
+    const demosSource = fs.readFileSync(
+      path.resolve(componentDir, "demo-projects-section.tsx"),
+      "utf8",
+    );
+    const projectsSource = fs.readFileSync(
+      path.resolve(componentDir, "my-projects-section.tsx"),
       "utf8",
     );
 
-    expect(source).toContain("router.refresh()");
-    expect(source).not.toContain("window.location.reload()");
-    expect(source).toContain("readJsonError");
+    expect(pageSource).toContain("DemoProjectsSection");
+    expect(pageSource).toContain("MyProjectsSection");
+    expect(pageSource).not.toContain("Templates");
+    expect(pageSource).not.toContain("Default Projects");
+    expect(demosSource).toContain("Explore Examples");
+    expect(projectsSource).toContain("Your Projects");
   });
 
-  it("wires keyboard navigation to real project card focus targets", () => {
-    const source = fs.readFileSync(
-      path.resolve(componentDir, "library-page.tsx"),
-      "utf8",
-    );
-
-    expect(source).toContain("[data-project-card]");
-    expect(source).toContain("data-project-card");
-    expect(source).toContain("ref={gridRef}");
-  });
-
-  it("creates library projects through the API and routes into the editor", () => {
+  it("creates library projects through the API with a source-based contract", () => {
     const source = fs.readFileSync(
       path.resolve(componentDir, "library-page.tsx"),
       "utf8",
     );
 
     expect(source).toContain('fetch("/api/projects"');
+    expect(source).toContain('kind: "blank"');
+    expect(source).toContain('kind: "demo"');
     expect(source).toContain("window.location.assign(`/projects/${project.id}`)");
-    expect(source).not.toContain('<form action={createProjectAction}>');
+  });
+
+  it("keeps the library chrome on MotionRoll design tokens", () => {
+    const pageSource = fs.readFileSync(
+      path.resolve(componentDir, "library-page.tsx"),
+      "utf8",
+    );
+    const header = fs.readFileSync(
+      path.resolve(componentDir, "library-header.tsx"),
+      "utf8",
+    );
+    const hero = fs.readFileSync(
+      path.resolve(componentDir, "featured-demo-project-card.tsx"),
+      "utf8",
+    );
+    const demoCard = fs.readFileSync(
+      path.resolve(componentDir, "demo-project-card.tsx"),
+      "utf8",
+    );
+    const accentButton = fs.readFileSync(
+      path.resolve(componentDir, "library-accent-button.tsx"),
+      "utf8",
+    );
+    const projectCard = fs.readFileSync(
+      path.resolve(componentDir, "project-card.tsx"),
+      "utf8",
+    );
+    const actionsMenu = fs.readFileSync(
+      path.resolve(componentDir, "project-actions-menu.tsx"),
+      "utf8",
+    );
+    const myProjects = fs.readFileSync(
+      path.resolve(componentDir, "my-projects-section.tsx"),
+      "utf8",
+    );
+    const search = fs.readFileSync(
+      path.resolve(componentDir, "project-search.tsx"),
+      "utf8",
+    );
+
+    expect(header).toContain('className="flex h-14 items-center justify-between border-b px-4"');
+    expect(header).toContain("LibraryAccentButton");
+    expect(accentButton).toContain("var(--editor-accent)");
+    expect(accentButton).toContain("#0a0a0b");
+    expect(hero).toContain("Featured example");
+    expect(hero).not.toContain("rounded-[32px]");
+    expect(hero).toContain("color-mix(");
+    expect(demoCard).toContain("Example");
+    expect(demoCard).toContain("Open Demo");
+    expect(demoCard).not.toContain("project.subtitle");
+    expect(demoCard).not.toContain("project.detail");
+    expect(hero).not.toContain("Opens a demo as a new editable project.");
+    expect(projectCard).toContain("color-mix(");
+    expect(projectCard).toContain("Delete warning");
+    expect(actionsMenu).toContain("Copy");
+    expect(actionsMenu).not.toContain("Archive");
+    expect(actionsMenu).not.toContain("Confirm delete");
+    expect(myProjects).toContain("NewProjectCard");
+    expect(search).toContain("Search projects");
+    expect(pageSource).not.toContain("Search filters Your Projects only.");
+  });
+
+  it("curates the examples section to a featured plus two layout", () => {
+    const demosSource = fs.readFileSync(
+      path.resolve(componentDir, "demo-projects-section.tsx"),
+      "utf8",
+    );
+
+    expect(demosSource).toContain('project.id === "product-reveal"');
+    expect(demosSource).toContain('project.id === "product-spin"');
+    expect(demosSource).not.toContain('project.id === "editorial-story"');
+    expect(demosSource).toContain("xl:grid-rows-2");
+    expect(demosSource).toContain("xl:items-stretch");
   });
 });

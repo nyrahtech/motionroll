@@ -1,17 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const requirePageAuth = vi.fn();
-const getRecentProjects = vi.fn();
-const getDemoProjects = vi.fn();
-const getArchivedProjects = vi.fn();
+const getMyProjects = vi.fn();
 vi.mock("@/lib/auth", () => ({
   requirePageAuth,
 }));
 
 vi.mock("@/lib/data/projects", () => ({
-  getRecentProjects,
-  getDemoProjects,
-  getArchivedProjects,
+  getMyProjects,
 }));
 
 vi.mock("@/components/library/library-page", () => ({
@@ -22,9 +18,7 @@ describe("LibraryRoute", () => {
   beforeEach(() => {
     vi.resetModules();
     requirePageAuth.mockReset();
-    getRecentProjects.mockReset();
-    getDemoProjects.mockReset();
-    getArchivedProjects.mockReset();
+    getMyProjects.mockReset();
     requirePageAuth.mockResolvedValue({
       userId: "user_test_123",
       email: "owner@test.local",
@@ -32,50 +26,35 @@ describe("LibraryRoute", () => {
     });
   });
 
-  it("passes healthy workspace data through when all project queries succeed", async () => {
-    const recentProjects = [{ id: "recent-1" }];
-    const demoProjects = [{ id: "demo-1" }];
-    const archivedProjects = [{ id: "archived-1" }];
+  it("passes healthy workspace data through when my projects load successfully", async () => {
+    const myProjects = [{ id: "project-1" }];
 
-    getRecentProjects.mockResolvedValueOnce(recentProjects);
-    getDemoProjects.mockResolvedValueOnce(demoProjects);
-    getArchivedProjects.mockResolvedValueOnce(archivedProjects);
+    getMyProjects.mockResolvedValueOnce(myProjects);
 
     const LibraryRoute = (await import("./page")).default;
     const element = await LibraryRoute();
 
     expect(element.props).toMatchObject({
-      recentProjects,
-      demoProjects,
-      archivedProjects,
+      myProjects,
       workspaceDegraded: false,
       workspaceNotice: undefined,
     });
   });
 
-  it("passes workspaceDegraded when any project query fails", async () => {
-    const recentProjects = [{ id: "recent-1" }];
-    const archivedProjects = [{ id: "archived-1" }];
-
-    getRecentProjects.mockResolvedValueOnce(recentProjects);
-    getDemoProjects.mockRejectedValueOnce(new Error("db down"));
-    getArchivedProjects.mockResolvedValueOnce(archivedProjects);
+  it("passes workspaceDegraded when my projects fail to load", async () => {
+    getMyProjects.mockRejectedValueOnce(new Error("db down"));
 
     const LibraryRoute = (await import("./page")).default;
     const element = await LibraryRoute();
 
     expect(element.props).toMatchObject({
-      recentProjects,
-      demoProjects: [],
-      archivedProjects,
+      myProjects: [],
       workspaceDegraded: true,
     });
   });
 
   it("passes a workspace notice through when redirected back from failed project creation", async () => {
-    getRecentProjects.mockResolvedValueOnce([]);
-    getDemoProjects.mockResolvedValueOnce([]);
-    getArchivedProjects.mockResolvedValueOnce([]);
+    getMyProjects.mockResolvedValueOnce([]);
 
     const LibraryRoute = (await import("./page")).default;
     const element = await LibraryRoute({

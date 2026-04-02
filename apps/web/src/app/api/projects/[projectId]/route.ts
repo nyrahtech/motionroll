@@ -23,7 +23,7 @@ const updateProjectSchema = z.object({
 const enqueueSchema = z.object({
   action: z.literal("enqueue_processing"),
   assetId: z.string().uuid(),
-  retentionPolicy: z.enum(["delete_after_success", "keep_source"]).default("delete_after_success"),
+  retentionPolicy: z.enum(["delete_after_success", "keep_source"]).default("keep_source"),
   sourceType: z.enum(["video", "ai_clip"]),
   sourceOrigin: z.enum(["upload", "ai_import"]).default("upload"),
 });

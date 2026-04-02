@@ -119,7 +119,7 @@ export function AssetList({
                   {primarySourceMetadata.originalFilename ?? "Primary source"}
                 </p>
                 <p className="text-xs text-[var(--foreground-faint)]">
-                  {primarySource.sourceOrigin === "ai_import" ? "AI import" : "Uploaded video"}
+                  {primarySource.sourceOrigin === "ai_import" ? "Imported video" : "Uploaded video"}
                 </p>
               </div>
               <button
@@ -150,7 +150,7 @@ export function AssetList({
               <BrowserCard
                 key={asset.id}
                 title={asset.kind.replace(/_/g, " ")}
-                subtitle="Processed scene media"
+                subtitle={asset.kind === "media_video" ? "Uploaded scene media" : "Processed scene media"}
                 meta={<Badge variant="quiet">Media</Badge>}
                 leading={
                   <AssetThumbnail

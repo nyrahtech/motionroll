@@ -2,7 +2,6 @@
 
 import { Clapperboard, Layers3, Type, Upload } from "lucide-react";
 import { UploadPanel } from "./upload-panel";
-import { ProviderPanel } from "./provider-panel";
 import { AssetList, OverlayList } from "./browser-lists";
 import type { EditorPaneTab, EditorProject } from "./editor-types";
 import { BrowserPanel, LeftIconRail, RailButton } from "./editor-shell";
@@ -90,10 +89,7 @@ export function BrowserPane({
         ) : null}
 
         {tab === "imports" ? (
-          <>
-            <UploadPanel projectId={project.id} />
-            <ProviderPanel projectId={project.id} />
-          </>
+          <UploadPanel projectId={project.id} />
         ) : null}
       </div>
     </BrowserPanel>

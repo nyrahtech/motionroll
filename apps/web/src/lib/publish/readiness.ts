@@ -40,6 +40,8 @@ export function buildPublishReadinessChecks(project: ProjectSnapshot): Readiness
   const hasFrames = hasFrameSequence || project.assets.some((asset) => asset.kind === "frame");
   const hasPoster = project.assets.some((asset) => asset.kind === "poster");
   const hasFallbackVideo = project.assets.some((asset) => asset.kind === "fallback_video");
+  const hasBackgroundVideo = Boolean((primarySection?.commonConfig as { backgroundMedia?: { url?: string } })?.backgroundMedia?.url);
+  const hasSceneMedia = hasFrames || hasPoster || hasFallbackVideo || hasBackgroundVideo;
   const mobileFallback = primarySection
     ? resolveFallbackStrategy({
         requestedBehavior: primarySection.commonConfig.fallbackBehavior.mobile,
@@ -81,12 +83,14 @@ export function buildPublishReadinessChecks(project: ProjectSnapshot): Readiness
           : "Add at least one text block so the overlay content is publication-ready.",
     },
     {
-      id: "frames",
-      label: "Frame sequence",
-      status: hasFrames ? "ready" : "blocked",
-      message: hasFrames
-        ? "Derived frames are available for sequence playback."
-        : "Processing must generate frames before publish.",
+      id: "scene-media",
+      label: "Scene media",
+      status: hasSceneMedia ? "ready" : "blocked",
+      message: hasBackgroundVideo
+        ? "Scene background video is attached."
+        : hasFrames
+          ? "Derived frames are available for sequence playback."
+          : "Attach scene media or process frames before publish.",
     },
     {
       id: "poster",

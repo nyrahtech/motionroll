@@ -3,9 +3,9 @@
 import React from "react";
 import { useEffect, useRef, useState } from "react";
 import type { RefObject, PointerEvent as ReactPointerEvent } from "react";
-import { clampProgress } from "@motionroll/shared";
 import type { OverlayDefinition } from "@motionroll/shared";
 import { Move } from "lucide-react";
+import { createPortal } from "react-dom";
 import { InlineTextToolbar } from "./inline-text-toolbar";
 import {
   CORNER_HANDLE_HALF,
@@ -17,7 +17,6 @@ import {
   unionBoxes,
   boxToLayout,
   toolbarPos,
-  clampScale,
   getResizeStyleChanges,
   getLiveResizeTargets,
   type Box,
@@ -39,6 +38,7 @@ export type OverlayManipulatorProps = {
     layout: Partial<{ x: number; y: number; width: number; height: number }>,
     options?: LayoutChangeOptions,
   ) => void;
+  onStyleLiveChange?: (changes: Record<string, unknown>) => void;
   onStyleChange?: (changes: Record<string, unknown>) => void;
   onEdit?: () => void;
   canGroupSelection?: boolean;
@@ -63,6 +63,7 @@ export function OverlayManipulator({
   isTextStyle,
   allowLayoutEditing = true,
   onLayoutChange,
+  onStyleLiveChange,
   onStyleChange,
   onEdit,
   canGroupSelection = false,
@@ -83,6 +84,7 @@ export function OverlayManipulator({
   const boxRef = useRef<Box | null>(null);
   const interactionActiveRef = useRef(false);
   const measureRafRef = useRef<number | null>(null);
+  const previousSelectionIdentityRef = useRef<string>("");
 
   // ── DOM refs for all chrome elements ──────────────────────────────────
   const outlineRef   = useRef<HTMLDivElement | null>(null);
@@ -98,50 +100,83 @@ export function OverlayManipulator({
     : selectionIds
   ).filter(Boolean);
   const isMultiSelection = selectionIds.length > 1;
+  const selectionKey = selectionCardIds.join("|");
+  const selectionIdentity = `${selectedOverlayId ?? ""}|${selectionKey}`;
+
+  function getFallbackSelectionBox(container: HTMLElement): Box | null {
+    const overlays = selectionOverlays?.length ? selectionOverlays : [overlay];
+    if (!overlays.length) {
+      return null;
+    }
+    return unionBoxes(
+      overlays.map((item) => overlayToBox(item, container, boxRef.current?.height ?? 100)),
+    );
+  }
+
+  function getContainerViewportRect() {
+    return containerRef.current?.getBoundingClientRect() ?? null;
+  }
+
+  function getChromeViewportMetrics(b: Box) {
+    const containerRect = getContainerViewportRect();
+    const cW = containerRef.current?.clientWidth ?? 0;
+    const cH = containerRef.current?.clientHeight ?? 0;
+    if (!containerRect || !cW || !cH) {
+      return null;
+    }
+    const tb = toolbarPos(b, cW, cH);
+    return {
+      left: containerRect.left + b.left,
+      top: containerRect.top + b.top,
+      width: b.width,
+      height: b.height,
+      toolbarLeft: containerRect.left + tb.left - 8,
+      toolbarTop: containerRect.top + tb.top - 8,
+      maxToolbarWidth: cW,
+    };
+  }
 
   // ── Apply box to all DOM elements synchronously ───────────────────────
   function applyBoxToDom(b: Box) {
-    const cW = containerRef.current?.clientWidth ?? 0;
-    const cH = containerRef.current?.clientHeight ?? 0;
+    const metrics = getChromeViewportMetrics(b);
+    if (!metrics) return;
 
     // Outline
     if (outlineRef.current) {
       const s = outlineRef.current.style;
-      s.left   = `${b.left}px`;
-      s.top    = `${b.top}px`;
-      s.width  = `${b.width}px`;
-      s.height = `${b.height}px`;
+      s.left   = `${metrics.left}px`;
+      s.top    = `${metrics.top}px`;
+      s.width  = `${metrics.width}px`;
+      s.height = `${metrics.height}px`;
     }
 
     // Handles
     if (handleNwRef.current) {
-      handleNwRef.current.style.left = `${b.left - CORNER_HANDLE_HALF}px`;
-      handleNwRef.current.style.top  = `${b.top  - CORNER_HANDLE_HALF}px`;
+      handleNwRef.current.style.left = `${metrics.left - CORNER_HANDLE_HALF}px`;
+      handleNwRef.current.style.top  = `${metrics.top  - CORNER_HANDLE_HALF}px`;
     }
     if (handleNeRef.current) {
-      handleNeRef.current.style.left = `${b.left + b.width - CORNER_HANDLE_HALF}px`;
-      handleNeRef.current.style.top  = `${b.top  - CORNER_HANDLE_HALF}px`;
+      handleNeRef.current.style.left = `${metrics.left + metrics.width - CORNER_HANDLE_HALF}px`;
+      handleNeRef.current.style.top  = `${metrics.top  - CORNER_HANDLE_HALF}px`;
     }
     if (handleSwRef.current) {
-      handleSwRef.current.style.left = `${b.left - CORNER_HANDLE_HALF}px`;
-      handleSwRef.current.style.top  = `${b.top  + b.height - CORNER_HANDLE_HALF}px`;
+      handleSwRef.current.style.left = `${metrics.left - CORNER_HANDLE_HALF}px`;
+      handleSwRef.current.style.top  = `${metrics.top  + metrics.height - CORNER_HANDLE_HALF}px`;
     }
     if (handleSeRef.current) {
-      handleSeRef.current.style.left = `${b.left + b.width - CORNER_HANDLE_HALF}px`;
-      handleSeRef.current.style.top  = `${b.top  + b.height - CORNER_HANDLE_HALF}px`;
+      handleSeRef.current.style.left = `${metrics.left + metrics.width - CORNER_HANDLE_HALF}px`;
+      handleSeRef.current.style.top  = `${metrics.top  + metrics.height - CORNER_HANDLE_HALF}px`;
     }
 
     if (dragHandleRef.current) {
-      dragHandleRef.current.style.left = `${b.left + b.width - DRAG_HANDLE_SIZE - DRAG_HANDLE_OFFSET}px`;
-      dragHandleRef.current.style.top = `${b.top + DRAG_HANDLE_OFFSET}px`;
+      dragHandleRef.current.style.left = `${metrics.left + metrics.width - DRAG_HANDLE_SIZE - DRAG_HANDLE_OFFSET}px`;
+      dragHandleRef.current.style.top = `${metrics.top + DRAG_HANDLE_OFFSET}px`;
     }
 
     // Toolbar wrapper
-    if (toolbarWrapRef.current && cW && cH) {
-      const tb = toolbarPos(b, cW, cH);
-      // InlineTextToolbar clamps position to min 8, so offset wrapper by -8 to compensate.
-      toolbarWrapRef.current.style.left = `${tb.left - 8}px`;
-      toolbarWrapRef.current.style.top  = `${tb.top  - 8}px`;
+    if (toolbarWrapRef.current) {
+      toolbarWrapRef.current.style.left = `${metrics.toolbarLeft}px`;
+      toolbarWrapRef.current.style.top  = `${metrics.toolbarTop}px`;
     }
   }
 
@@ -174,9 +209,10 @@ export function OverlayManipulator({
     );
   }
 
-  function getSelectionBox(container: HTMLElement): Box | null {
+  function getSelectionBox(container: HTMLElement, allowFallback = true): Box | null {
     const cRect = container.getBoundingClientRect();
-    const cardBoxes = getSelectionCards().map(({ card }) => {
+    const activeCards = getSelectionCards();
+    const cardBoxes = activeCards.map(({ card }) => {
       const rect = card.getBoundingClientRect();
       return {
         left: rect.left - cRect.left,
@@ -193,10 +229,7 @@ export function OverlayManipulator({
       return null;
     }
 
-    const overlays = selectionOverlays?.length ? selectionOverlays : [overlay];
-    return unionBoxes(
-      overlays.map((item) => overlayToBox(item, container, boxRef.current?.height ?? 100)),
-    );
+    return allowFallback ? getFallbackSelectionBox(container) : null;
   }
 
   function boxesMatch(a: Box | null, b: Box | null) {
@@ -212,10 +245,10 @@ export function OverlayManipulator({
     );
   }
 
-  function measureSelectionBox() {
+  function measureSelectionBox(allowFallback = true) {
     const container = containerRef.current;
     if (!container) return;
-    const next = getSelectionBox(container);
+    const next = getSelectionBox(container, allowFallback);
     if (boxesMatch(boxRef.current, next)) {
       if (!boxRef.current) {
         setBox(null);
@@ -224,6 +257,34 @@ export function OverlayManipulator({
     }
     boxRef.current = next;
     setBox(next);
+  }
+
+  function syncSelectionBox() {
+    const container = containerRef.current;
+    if (!container) return;
+    const selectionChanged = previousSelectionIdentityRef.current !== selectionIdentity;
+    previousSelectionIdentityRef.current = selectionIdentity;
+    const activeCards = getSelectionCards();
+    const hasDomCards = activeCards.length > 0 || hasSelectionDomCards();
+
+    if (selectionChanged || !boxRef.current) {
+      if (activeCards.length > 0) {
+        measureSelectionBox(false);
+        return;
+      }
+
+      const immediateBox = hasDomCards ? null : getFallbackSelectionBox(container);
+      if (!boxesMatch(boxRef.current, immediateBox)) {
+        boxRef.current = immediateBox;
+        setBox(immediateBox);
+      } else if (!immediateBox && boxRef.current) {
+        boxRef.current = null;
+        setBox(null);
+      }
+
+      scheduleSelectionMeasure();
+      return;
+    }
   }
 
   function scheduleSelectionMeasure() {
@@ -302,14 +363,14 @@ export function OverlayManipulator({
   // Use getBoundingClientRect so the selection box matches exactly what
   // the user sees, including padding, scaled font, and auto-height.
   useEffect(() => {
-    scheduleSelectionMeasure();
+    syncSelectionBox();
     return () => {
       if (measureRafRef.current !== null) {
         cancelAnimationFrame(measureRafRef.current);
         measureRafRef.current = null;
       }
     };
-  }, [overlay, selectedOverlayId, selectedOverlayIds, selectionOverlays, containerRef]);
+  }, [selectionIdentity, containerRef]);
 
   // ── Re-sync on container resize ───────────────────────────────────────
   useEffect(() => {
@@ -325,8 +386,14 @@ export function OverlayManipulator({
 
     const mutationObserver = new MutationObserver((mutations) => {
       const shouldRemeasure = mutations.some((mutation) => {
+        if (mutation.type === "childList") {
+          return true;
+        }
         const target = mutation.target;
-        return target instanceof HTMLElement && target.matches("[data-overlay-id]");
+        return (
+          target instanceof HTMLElement
+          && (target.matches("[data-overlay-id]") || Boolean(target.closest("[data-overlay-id]")))
+        );
       });
       if (shouldRemeasure) {
         scheduleSelectionMeasure();
@@ -335,7 +402,8 @@ export function OverlayManipulator({
     mutationObserver.observe(container, {
       subtree: true,
       attributes: true,
-      attributeFilter: ["style", "class"],
+      childList: true,
+      attributeFilter: ["style", "class", "data-state", "aria-hidden"],
     });
 
     window.addEventListener("resize", scheduleSelectionMeasure);
@@ -344,7 +412,7 @@ export function OverlayManipulator({
       mutationObserver.disconnect();
       window.removeEventListener("resize", scheduleSelectionMeasure);
     };
-  }, [overlay, selectedOverlayId, selectedOverlayIds, selectionOverlays, containerRef]);
+  }, [selectionIdentity, containerRef]);
 
   // ── After React renders the chrome, sync DOM to boxRef ────────────────
   // (Handles the rare case where state update and DOM apply get out of sync.)
@@ -370,6 +438,11 @@ export function OverlayManipulator({
 
     e.preventDefault();
     e.stopPropagation();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Window listeners keep the drag alive when pointer capture is unavailable.
+    }
     interactionActiveRef.current = true;
     setIsDragging(true);
     onInteractingChange?.(true);
@@ -431,7 +504,14 @@ export function OverlayManipulator({
           y: (nextBox.top - initialBox.top) / Math.max(cRect.height, 1),
         });
       } else {
-        onLayoutChange?.(boxToLayout(nextBox, overlay, container), { intent: "move", scaleX: 1, scaleY: 1 });
+        const nextLayout = boxToLayout(nextBox, overlay, container);
+        onLayoutChange?.(
+          {
+            x: nextLayout.x,
+            y: nextLayout.y,
+          },
+          { intent: "move", scaleX: 1, scaleY: 1 },
+        );
       }
       // Keep card at final pixel position — the manifest-driven overlay-sync
       // effect in runtime-preview will restore fractional styles once committed.
@@ -446,12 +526,14 @@ export function OverlayManipulator({
       setIsDragging(false);
       interactionActiveRef.current = false;
       document.body.style.userSelect = "";
+      document.body.style.cursor = "";
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", cleanup);
     }
 
     document.body.style.userSelect = "none";
+    document.body.style.cursor = "grabbing";
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", cleanup);
@@ -467,6 +549,11 @@ export function OverlayManipulator({
 
     e.preventDefault();
     e.stopPropagation();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Window listeners keep the resize alive when pointer capture is unavailable.
+    }
     interactionActiveRef.current = true;
     onInteractingChange?.(true);
 
@@ -554,6 +641,7 @@ export function OverlayManipulator({
     function cleanup() {
       interactionActiveRef.current = false;
       document.body.style.userSelect = "";
+      document.body.style.cursor = "";
       if (resizeRaf !== null) {
         cancelAnimationFrame(resizeRaf);
         resizeRaf = null;
@@ -564,6 +652,7 @@ export function OverlayManipulator({
     }
 
     document.body.style.userSelect = "none";
+    document.body.style.cursor = corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize";
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", cleanup);
@@ -573,9 +662,9 @@ export function OverlayManipulator({
 
   if (!box) return null;
 
-  const cW = containerRef.current?.clientWidth  ?? 0;
-  const cH = containerRef.current?.clientHeight ?? 0;
-  const tb = toolbarPos(box, cW, cH);
+  const metrics = getChromeViewportMetrics(box);
+  const portalTarget = typeof document !== "undefined" ? document.body : null;
+  if (!metrics || !portalTarget) return null;
 
   const handles: { id: Corner; ref: RefObject<HTMLButtonElement | null>; cursor: string }[] = [
     { id: "nw", ref: handleNwRef, cursor: "nwse-resize" },
@@ -584,14 +673,17 @@ export function OverlayManipulator({
     { id: "se", ref: handleSeRef, cursor: "nwse-resize" },
   ];
 
-  return (
-    <>
+  return createPortal(
+    <div className="pointer-events-none fixed inset-0 z-[2147483640]">
       {/* Selection outline — pointer-events:none so canvas clicks pass through */}
       <div
         ref={outlineRef}
-        className="pointer-events-none absolute z-[30]"
+        className="pointer-events-none fixed z-[2147483641]"
         style={{
-          left: box.left, top: box.top, width: box.width, height: box.height,
+          left: metrics.left,
+          top: metrics.top,
+          width: metrics.width,
+          height: metrics.height,
           outline: "2px solid rgba(103,232,249,0.72)",
           outlineOffset: 2,
         }}
@@ -620,12 +712,16 @@ export function OverlayManipulator({
                 type="button"
                 data-overlay-selection-chrome
                 onPointerDown={(e: ReactPointerEvent<HTMLButtonElement>) => handleResizePointerDown(e, id)}
-                className="absolute z-[34] h-3 w-3 rounded-sm border-2 border-[rgba(103,232,249,0.9)] bg-[#0a1520]"
+                className="pointer-events-auto fixed z-[2147483642] h-3 w-3 rounded-sm border-2 border-[rgba(103,232,249,0.9)] bg-[#0a1520]"
                 aria-label={label}
                 title={label}
                     style={{
-                      left: isWest  ? box.left - CORNER_HANDLE_HALF : box.left + box.width  - CORNER_HANDLE_HALF,
-                      top:  isNorth ? box.top  - CORNER_HANDLE_HALF : box.top  + box.height - CORNER_HANDLE_HALF,
+                      left: isWest
+                        ? metrics.left - CORNER_HANDLE_HALF
+                        : metrics.left + metrics.width - CORNER_HANDLE_HALF,
+                      top: isNorth
+                        ? metrics.top - CORNER_HANDLE_HALF
+                        : metrics.top + metrics.height - CORNER_HANDLE_HALF,
                       cursor,
                     }}
                   />
@@ -639,10 +735,10 @@ export function OverlayManipulator({
             type="button"
             data-overlay-selection-chrome
             onPointerDown={handleDragPointerDown}
-            className="focus-ring absolute z-[34] flex h-8 w-8 items-center justify-center rounded-md border transition-colors"
+            className="focus-ring pointer-events-auto fixed z-[2147483642] flex h-8 w-8 items-center justify-center rounded-md border transition-colors"
             style={{
-              left: box.left + box.width - DRAG_HANDLE_SIZE - DRAG_HANDLE_OFFSET,
-              top: box.top + DRAG_HANDLE_OFFSET,
+              left: metrics.left + metrics.width - DRAG_HANDLE_SIZE - DRAG_HANDLE_OFFSET,
+              top: metrics.top + DRAG_HANDLE_OFFSET,
               cursor: "grab",
               borderColor: isDragging ? "rgba(205,239,255,0.28)" : "rgba(255,255,255,0.06)",
               background: "rgba(10,12,18,0.96)",
@@ -660,20 +756,22 @@ export function OverlayManipulator({
       <div
         ref={toolbarWrapRef}
         data-overlay-selection-chrome
-        className="absolute z-[35]"
-        style={{ top: tb.top - 8, left: tb.left - 8 }}
+        className="pointer-events-none fixed z-[2147483643]"
+        style={{ top: metrics.toolbarTop, left: metrics.toolbarLeft }}
       >
         <InlineTextToolbar
           position={{ top: 0, left: 0 }}
-          maxWidth={cW || undefined}
+          maxWidth={metrics.maxToolbarWidth || undefined}
           fontFamily={selectedStyle?.fontFamily ?? "Inter"}
           fontWeight={selectedStyle?.fontWeight ?? 600}
           fontSize={selectedStyle?.fontSize ?? 34}
           color={selectedStyle?.color ?? "#f6f7fb"}
+          opacity={selectedStyle?.opacity ?? 1}
           italic={selectedStyle?.italic ?? false}
           underline={selectedStyle?.underline ?? false}
           textAlign={(selectedStyle?.textAlign as "start" | "center" | "end") ?? "start"}
           isTextStyle={isTextStyle && !isMultiSelection}
+          onLiveChange={isMultiSelection ? undefined : onStyleLiveChange}
           onChange={isMultiSelection ? undefined : onStyleChange}
           canGroup={isMultiSelection ? canGroupSelection : false}
           canUngroup={isMultiSelection ? canUngroupSelection : canUngroupSelection}
@@ -683,6 +781,7 @@ export function OverlayManipulator({
           onDelete={isMultiSelection ? onDeleteSelection : onDelete}
         />
       </div>
-    </>
+    </div>,
+    portalTarget,
   );
 }

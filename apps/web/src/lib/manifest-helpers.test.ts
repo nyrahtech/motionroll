@@ -127,6 +127,7 @@ describe("buildSectionManifest", () => {
             align: "start",
             theme: "accent",
             treatment: "default",
+            blendMode: "normal",
             enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
             exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
           },
@@ -195,6 +196,7 @@ describe("buildSectionManifest", () => {
             align: "start",
             theme: "light",
             treatment: "default",
+            blendMode: "normal",
             layer: 3,
             enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
             exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
@@ -208,6 +210,7 @@ describe("buildSectionManifest", () => {
             align: "start",
             theme: "dark",
             treatment: "default",
+            blendMode: "normal",
             layer: 0,
             enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
             exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
@@ -320,5 +323,75 @@ describe("buildSectionManifest", () => {
       "/motionroll_demo_sequence/frames/frame-0001.webp",
     );
     expect(manifest.progressMapping.frameRange.end).toBe(46);
+  });
+
+  it("preserves background media and uses its metadata for section duration when no source duration exists", () => {
+    const manifest = buildSectionManifest({
+      section: {
+        id: "3517be83-7f3c-4600-af7e-6385d4469117",
+        presetId: "product-reveal",
+        title: "Video background scene",
+        commonConfig: {
+          sectionHeightVh: 240,
+          scrubStrength: 1,
+          frameRange: { start: 0, end: 1 },
+          backgroundMedia: {
+            assetId: "asset-background",
+            url: "https://example.com/background.mp4",
+            metadata: { kind: "video", mimeType: "video/mp4", durationMs: 6400 },
+          },
+          fallbackBehavior: {
+            mobile: "poster",
+            reducedMotion: "poster",
+          },
+          motion: {
+            easing: "linear",
+            pin: true,
+            preloadWindow: 4,
+          },
+        },
+        presetConfig: {},
+      },
+      overlays: [],
+      assets: [],
+    });
+
+    expect(manifest.backgroundMedia?.assetId).toBe("asset-background");
+    expect(manifest.motion.durationSeconds).toBe(6.4);
+  });
+
+  it("omits background playback policy when the scene has no background media", () => {
+    const manifest = buildSectionManifest({
+      section: {
+        id: "3517be83-7f3c-4600-af7e-6385d4469118",
+        presetId: "product-reveal",
+        title: "Color only scene",
+        commonConfig: {
+          sectionHeightVh: 240,
+          scrubStrength: 1,
+          frameRange: { start: 0, end: 1 },
+          backgroundColor: "#0a0a0b",
+          backgroundVideoEndBehavior: "hold",
+          backgroundVideoRange: { startMs: 400, endMs: 2400 },
+          fallbackBehavior: {
+            mobile: "poster",
+            reducedMotion: "poster",
+          },
+          motion: {
+            easing: "linear",
+            pin: true,
+            preloadWindow: 4,
+          },
+        },
+        presetConfig: {},
+      },
+      overlays: [],
+      assets: [],
+    });
+
+    expect(manifest.backgroundColor).toBe("#0a0a0b");
+    expect(manifest.backgroundMedia).toBeUndefined();
+    expect(manifest.backgroundVideoEndBehavior).toBeUndefined();
+    expect(manifest.backgroundVideoRange).toBeUndefined();
   });
 });

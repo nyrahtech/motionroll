@@ -1,23 +1,11 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { requireAuth } from "@/lib/auth";
 import { parseBody } from "@/lib/api-utils";
+import { createProjectRequestSchema } from "../../../lib/project-creation";
 import { apiRateLimiter } from "@/lib/rate-limiter";
-import { createProjectFromPreset, getRecentProjects } from "@/lib/data/projects";
+import { createProjectFromSource, getMyProjects } from "@/lib/data/projects";
 
 export const dynamic = "force-dynamic";
-
-const createProjectRequestSchema = z.object({
-  presetId: z.enum([
-    "scroll-sequence",
-    "product-reveal",
-    "feature-walkthrough",
-    "before-after",
-    "device-spin",
-    "chaptered-scroll-story",
-  ]),
-  title: z.string().min(1).max(128).optional(),
-});
 
 function isRetryableBackendFailure(error: unknown) {
   if (!(error instanceof Error)) {
@@ -36,7 +24,7 @@ export async function GET() {
   const { userId } = await requireAuth();
   let projects;
   try {
-    projects = await getRecentProjects(userId);
+    projects = await getMyProjects(userId);
   } catch (error) {
     if (isRetryableBackendFailure(error)) {
       return NextResponse.json(
@@ -66,7 +54,7 @@ export async function POST(request: Request) {
   if (bodyResult.error) return bodyResult.error;
   let project;
   try {
-    project = await createProjectFromPreset(userId, bodyResult.data.presetId, bodyResult.data.title);
+    project = await createProjectFromSource(userId, bodyResult.data.source, bodyResult.data.title);
   } catch (error) {
     if (isRetryableBackendFailure(error)) {
       return NextResponse.json(

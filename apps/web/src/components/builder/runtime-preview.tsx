@@ -1,39 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { clampProgress } from "@motionroll/shared";
 import type { ProjectManifest } from "@motionroll/shared";
-import { choosePlaybackMode, withOpacity } from "@motionroll/runtime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { OverlayManipulator } from "./overlay-manipulator";
-import { useRuntimeController } from "./hooks/useRuntimeController";
 import type { EditorPlaybackController } from "./hooks/useEditorPlayback";
-
-const DESIGN_STAGE_WIDTH = 1440;
-const DESIGN_STAGE_HEIGHT = 810;
-
-function getOverlayPixelPlacement(
-  overlay: ProjectManifest["sections"][number]["overlays"][number],
-  container: HTMLElement,
-  scale: number,
-) {
-  const layout = overlay.content.layout;
-  const width = Math.round((layout?.width ?? 420) * scale);
-  const height = layout?.height ? Math.round(layout.height * scale) : undefined;
-  const centerAligned = overlay.content.align === "center";
-  const anchorLeft = (layout?.x ?? (centerAligned ? 0.5 : 0.08)) * Math.max(container.clientWidth, 1);
-  const anchorTop = (layout?.y ?? (centerAligned ? 0.5 : 0.12)) * Math.max(container.clientHeight, 1);
-  return {
-    width,
-    height,
-    anchorLeft,
-    anchorTop,
-    left: centerAligned ? anchorLeft - width / 2 : anchorLeft,
-    top: centerAligned ? anchorTop - (height ?? 0) / 2 : anchorTop,
-  };
-}
+import { useRuntimeController } from "./hooks/useRuntimeController";
+import {
+  applyManifestOverlayStyles,
+  getManifestSection,
+  getSectionMediaSignature,
+  hasRenderableCanvasContent,
+  hasRenderableSectionContent,
+} from "./runtime-preview-utils";
 
 type RuntimePreviewProps = {
   manifest: ProjectManifest;
@@ -62,6 +43,7 @@ type RuntimePreviewProps = {
     value: string,
     htmlValue?: string,
   ) => void;
+  onOverlayStyleLiveChange?: (overlayId: string, changes: Record<string, unknown>) => void;
   onOverlayStyleChange?: (overlayId: string, changes: Record<string, unknown>) => void;
   onDuplicateOverlay?: (overlayId: string) => void;
   onDeleteOverlay?: (overlayId: string) => void;
@@ -79,157 +61,6 @@ type RuntimePreviewProps = {
   onDeleteSelection?: () => void;
 };
 
-/**
- * Applies manifest overlay styles to live DOM nodes inside the preview container.
- * Must be called from within a requestAnimationFrame callback.
- */
-function applyManifestOverlayStyles(
-  manifest: ProjectManifest,
-  container: HTMLElement,
-  onWireInteractivity: () => void,
-): void {
-  const sec = manifest.sections[0];
-  if (!sec) return;
-
-  const cW = Math.max(container.clientWidth, 1);
-  const cH = Math.max(container.clientHeight, 1);
-  const scale = Math.max(0.35, Math.min(cW / DESIGN_STAGE_WIDTH, cH / DESIGN_STAGE_HEIGHT));
-  const overlayRoot = container.querySelector(".motionroll-overlay-root");
-
-  if (overlayRoot instanceof HTMLElement) {
-    const orderedOverlays = [...sec.overlays]
-      .filter((overlay) => !overlay.content.parentGroupId)
-      .sort(
-      (left, right) => (left.content.layer ?? 0) - (right.content.layer ?? 0),
-    );
-
-    for (const overlay of orderedOverlays) {
-      const card = overlayRoot.querySelector<HTMLElement>(`[data-overlay-id="${overlay.id}"]`);
-      if (!card) continue;
-      card.style.zIndex = String(100 + (overlay.content.layer ?? 0));
-      overlayRoot.appendChild(card);
-    }
-  }
-
-  // Per-sync placement cache — avoids recomputing parent placements
-  const placementCache = new Map<string, ReturnType<typeof getOverlayPixelPlacement>>();
-  const getPlacement = (ov: (typeof sec.overlays)[number]) => {
-    if (!placementCache.has(ov.id)) {
-      placementCache.set(ov.id, getOverlayPixelPlacement(ov, container, scale));
-    }
-    return placementCache.get(ov.id)!;
-  };
-
-  for (const overlay of sec.overlays) {
-    const card = container.querySelector<HTMLElement>(`[data-overlay-id="${overlay.id}"]`);
-    if (!card) continue;
-
-    const layout = overlay.content.layout;
-    const style  = overlay.content.style;
-    const bg     = overlay.content.background;
-    const placement = getPlacement(overlay);
-    const parentOverlay = overlay.content.parentGroupId
-      ? sec.overlays.find((item) => item.id === overlay.content.parentGroupId)
-      : undefined;
-    const parentPlacement = parentOverlay
-      ? getPlacement(parentOverlay)
-      : undefined;
-
-    // Geometry
-    card.style.position  = "absolute";
-    card.style.left      = overlay.content.align === "center"
-      ? `${Math.round((parentPlacement ? placement.anchorLeft - parentPlacement.left : placement.anchorLeft))}px`
-      : `${Math.round((parentPlacement ? placement.left - parentPlacement.left : placement.left))}px`;
-    card.style.top       = overlay.content.align === "center"
-      ? `${Math.round((parentPlacement ? placement.anchorTop - parentPlacement.top : placement.anchorTop))}px`
-      : `${Math.round((parentPlacement ? placement.top - parentPlacement.top : placement.top))}px`;
-    card.style.right     = "auto";
-    card.style.bottom    = "auto";
-    card.style.width     = `${placement.width}px`;
-    card.style.minHeight = placement.height ? `${placement.height}px` : "";
-    card.style.height    = placement.height ? `${placement.height}px` : "";
-    card.style.maxWidth  = overlay.content.type === "group"
-      ? `${placement.width}px`
-      : `${Math.round((style?.maxWidth ?? layout?.width ?? 420) * scale)}px`;
-    card.style.zIndex    = String(100 + (overlay.content.layer ?? 0));
-    card.style.transform = overlay.content.align === "center"
-      ? "translate3d(-50%,-50%,0)"
-      : "translate3d(0,0,0)";
-    card.style.overflow = overlay.content.type === "group" ? "visible" : "";
-
-    if (!layout) {
-      card.style.left   = overlay.content.align === "center" ? "50%" : `${Math.round(32 * scale)}px`;
-      card.style.top    = overlay.content.align === "end" ? "auto" : `${Math.round(32 * scale)}px`;
-      card.style.bottom = overlay.content.align === "end" ? `${Math.round(32 * scale)}px` : "auto";
-    }
-
-    // Card visuals
-    card.style.opacity        = String(style?.opacity ?? 1);
-    card.style.padding        = overlay.content.type === "group"
-      ? "0px"
-      : `${Math.round((bg?.paddingY ?? 14) * scale)}px ${Math.round((bg?.paddingX ?? 18) * scale)}px`;
-    card.style.borderRadius   = `${bg?.radius ?? 14}px`;
-    card.style.borderWidth    = bg?.enabled ? "1px" : "0";
-    card.style.borderStyle    = overlay.content.type === "group" ? "dashed" : "solid";
-    card.style.borderColor    = withOpacity(
-      bg?.borderColor ?? "#d6f6ff",
-      bg?.borderOpacity ?? (overlay.content.type === "group" ? 0.18 : 0),
-    );
-    card.style.background     = bg?.enabled
-      ? withOpacity(bg.color ?? "#0d1016", bg.opacity ?? 0.82)
-      : overlay.content.type === "group"
-        ? "rgba(205,239,255,0.035)"
-      : "transparent";
-    card.style.borderWidth    = bg?.enabled || overlay.content.type === "group" ? "1px" : "0";
-    card.style.backdropFilter = bg?.enabled ? "blur(18px)" : "none";
-
-    if (overlay.content.type === "group") {
-      continue;
-    }
-
-    // Text styles
-    const textAlign = style?.textAlign === "start" ? "left"
-      : style?.textAlign === "end" ? "right"
-      : "center";
-    const sharedText: Partial<CSSStyleDeclaration> = {
-      fontFamily:     style?.fontFamily ?? "Inter",
-      fontWeight:     String(style?.fontWeight ?? 600),
-      fontStyle:      style?.italic ? "italic" : "normal",
-      textDecoration: style?.underline ? "underline" : "none",
-      color:          style?.color ?? "#f6f7fb",
-      textAlign,
-      letterSpacing:  `${style?.letterSpacing ?? 0}em`,
-      textTransform:  (style?.textTransform ?? "none") as string,
-    };
-
-    const textBlock = card.querySelector<HTMLElement>('[data-text-field="text"]');
-    if (textBlock) {
-      Object.assign(textBlock.style, {
-        ...sharedText,
-        fontSize: `${Math.round((style?.fontSize ?? 34) * scale)}px`,
-        lineHeight: String(style?.lineHeight ?? 1.08),
-        whiteSpace: "pre-wrap",
-      });
-    }
-
-    // Media / action link
-    const media = card.querySelector<HTMLElement>("[data-media-field='media']");
-    if (media) {
-      media.style.maxWidth = `${Math.round((layout?.width ?? 420) * scale)}px`;
-      if (overlay.content.type === "icon") media.style.height = `${Math.round(64 * scale)}px`;
-      else if (overlay.content.type === "logo") media.style.height = `${Math.round(80 * scale)}px`;
-    }
-
-    const actionLink = card.querySelector<HTMLElement>("a");
-    if (actionLink) {
-      actionLink.style.marginTop = `${Math.round(16 * scale)}px`;
-      actionLink.style.fontSize  = `${Math.round(14 * scale)}px`;
-      if (style?.buttonLike) actionLink.style.padding = `${Math.round(9 * scale)}px ${Math.round(14 * scale)}px`;
-    }
-  }
-  onWireInteractivity();
-}
-
 export function RuntimePreview({
   manifest,
   mode: controlledMode,
@@ -242,6 +73,7 @@ export function RuntimePreview({
   onSelectOverlay,
   onOverlayLayoutChange,
   onInlineTextChange,
+  onOverlayStyleLiveChange,
   onOverlayStyleChange,
   onDuplicateOverlay,
   onDeleteOverlay,
@@ -258,94 +90,71 @@ export function RuntimePreview({
   onDuplicateSelection,
   onDeleteSelection,
 }: RuntimePreviewProps) {
-  // ── Refs ───────────────────────────────────────────────────────────────
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mountNodeRef = useRef<HTMLDivElement | null>(null);
 
   const isInteractingRef = useRef(false);
   const pendingManifestRef = useRef<ProjectManifest | null>(null);
-  const wireRafRef = useRef<number | null>(null);
+  const latestManifestRef = useRef(manifest);
+  const renderManifestRef = useRef(manifest);
+  const interactionSyncRafRef = useRef<number | null>(null);
   const syncRafRef = useRef<number | null>(null);
-  // Latest manifest captured for the pending RAF sync — always up to date.
-  const pendingSyncManifestRef = useRef<typeof renderManifest | null>(null);
+  const pendingSyncManifestRef = useRef<ProjectManifest | null>(null);
 
-  // ── State ──────────────────────────────────────────────────────────────
   const [internalMode, setInternalMode] = useState<"desktop" | "mobile">("desktop");
   const [renderManifest, setRenderManifest] = useState(manifest);
 
-  // ── Derived ────────────────────────────────────────────────────────────
+  latestManifestRef.current = manifest;
+  const renderSection = getManifestSection(renderManifest);
+  const latestSection = getManifestSection(manifest);
+  const effectiveRenderManifest =
+    renderSection?.id !== latestSection?.id ||
+    getSectionMediaSignature(renderSection) !== getSectionMediaSignature(latestSection)
+      ? manifest
+      : renderManifest;
+  renderManifestRef.current = effectiveRenderManifest;
+
   const mode = controlledMode ?? internalMode;
   const isControlledRuntime = Boolean(playback);
-  const section = renderManifest.sections[0];
+  const section = getManifestSection(effectiveRenderManifest);
   const hasRenderableMedia =
-    (section?.frameAssets.length ?? 0) > 0 ||
-    Boolean(section?.fallback.posterUrl) ||
-    Boolean(section?.fallback.fallbackVideoUrl);
-  const playbackStrategy = useMemo(() => {
-    if (!section) {
-      return "none";
-    }
-
-    return choosePlaybackMode(section, {
-      mode,
-      interactionMode: isControlledRuntime ? "controlled" : "scroll",
-    }).fallback;
-  }, [isControlledRuntime, mode, section]);
+    hasRenderableCanvasContent(manifest) ||
+    manifest.sections.some((candidate) => hasRenderableSectionContent(candidate));
+  const emptyCanvasBackground =
+    isControlledRuntime && !hasRenderableMedia
+      ? section?.backgroundColor ?? "var(--panel-bg-preview)"
+      : undefined;
 
   const selectedOverlay = useMemo(
-    () => section?.overlays.find((o: { id: string }) => o.id === selectedOverlayId),
-    [section?.overlays, selectedOverlayId],
+    () => latestSection?.overlays.find((overlay: { id: string }) => overlay.id === selectedOverlayId),
+    [latestSection?.overlays, selectedOverlayId],
   );
   const selectedStyle = selectedOverlay?.content.style;
   const isSelectedText =
     selectedOverlay?.content.type === "text" ||
     (!selectedOverlay?.content.type && Boolean(selectedOverlay));
 
-  // ── Restart key ────────────────────────────────────────────────────────
-  //
-  // The runtime closes over `section` at creation time. Any call to
-  // setProgress/renderForProgress will re-apply overlay positions from that
-  // stale snapshot via syncOverlayPresentationStyles, undoing DOM patches.
-  //
-  // We therefore include overlay layout AND timing in the restart key so the
-  // runtime is rebuilt whenever a position/size/timing commit happens. This
-  // means one restart per drag-commit or timing edit — acceptable because
-  // it's a single operation.
-  //
-  // Style/text/font changes are deliberately excluded: they change frequently
-  // (every keypress) and the light overlay-sync effect handles them correctly
-  // because setProgress does not re-apply style properties.
-  const restartKey = useMemo(() => {
-    const s = renderManifest.sections[0];
-    return JSON.stringify({
-      mode,
-      isControlledRuntime,
-      hasRenderableMedia,
-      frameCount: s?.frameCount ?? 0,
-      frameRangeStart: s?.progressMapping.frameRange.start ?? 0,
-      frameRangeEnd: s?.progressMapping.frameRange.end ?? 0,
-      sampleFrames: s?.frameAssets.slice(0, 2).map((f) => f.variants[0]?.url ?? ""),
-      posterUrl: s?.fallback.posterUrl ?? "",
-      fallbackVideoUrl: s?.fallback.fallbackVideoUrl ?? "",
-      firstFrameUrl: s?.fallback.firstFrameUrl ?? "",
-      presetId: s?.presetId ?? "",
-      playbackStrategy,
-    });
-  }, [hasRenderableMedia, isControlledRuntime, mode, playbackStrategy, renderManifest]);
-
-  // ── Interaction gate ───────────────────────────────────────────────────
   function setInteracting(active: boolean) {
     isInteractingRef.current = active;
-    if (!active && pendingManifestRef.current) {
-      const next = pendingManifestRef.current;
+    if (interactionSyncRafRef.current !== null) {
+      cancelAnimationFrame(interactionSyncRafRef.current);
+      interactionSyncRafRef.current = null;
+    }
+    if (!active) {
       pendingManifestRef.current = null;
-      if (renderManifest !== next) {
-        setRenderManifest(next);
-      }
+      interactionSyncRafRef.current = requestAnimationFrame(() => {
+        interactionSyncRafRef.current = null;
+        if (isInteractingRef.current) {
+          return;
+        }
+        const next = latestManifestRef.current;
+        if (renderManifestRef.current !== next) {
+          setRenderManifest(next);
+        }
+      });
     }
   }
 
-  // ── Manifest guard ─────────────────────────────────────────────────────
   useEffect(() => {
     if (isInteractingRef.current) {
       pendingManifestRef.current = manifest;
@@ -356,7 +165,13 @@ export function RuntimePreview({
     }
   }, [manifest, renderManifest]);
 
-  // ── Overlay interactivity wiring ───────────────────────────────────────
+  useEffect(() => () => {
+    if (interactionSyncRafRef.current !== null) {
+      cancelAnimationFrame(interactionSyncRafRef.current);
+      interactionSyncRafRef.current = null;
+    }
+  }, []);
+
   function wireOverlayInteractivity() {
     const container = containerRef.current;
     if (!container) return;
@@ -367,15 +182,38 @@ export function RuntimePreview({
       const overlayId = child.dataset.overlayId;
       if (!overlayId) continue;
 
-      child.onclick = (e) => {
+      child.onclick = (event) => {
         if (child.dataset.state !== "active") return;
-        e.preventDefault();
-        e.stopPropagation();
+        event.preventDefault();
+        event.stopPropagation();
         onSelectOverlay?.(overlayId, {
-          additive: (e as MouseEvent).metaKey || (e as MouseEvent).ctrlKey,
+          additive: (event as MouseEvent).metaKey || (event as MouseEvent).ctrlKey,
         });
       };
       child.style.cursor = child.dataset.state === "active" ? "pointer" : "";
+
+      const actionLink = child.querySelector<HTMLAnchorElement>("[data-overlay-action-link='true'], a");
+      if (actionLink) {
+        actionLink.style.cursor = "pointer";
+        actionLink.onmouseenter = () => {
+          actionLink.style.opacity = "0.92";
+          actionLink.style.transform = "translate3d(0, -1px, 0)";
+          actionLink.style.boxShadow = "0 8px 24px rgba(0,0,0,0.16)";
+        };
+        actionLink.onmouseleave = () => {
+          actionLink.style.opacity = "1";
+          actionLink.style.transform = "translate3d(0, 0, 0)";
+          actionLink.style.boxShadow = "";
+        };
+        actionLink.onmousedown = () => {
+          actionLink.style.opacity = "0.84";
+          actionLink.style.transform = "translate3d(0, 0, 0)";
+        };
+        actionLink.onmouseup = () => {
+          actionLink.style.opacity = "0.92";
+          actionLink.style.transform = "translate3d(0, -1px, 0)";
+        };
+      }
 
       const isSelected = overlayId === selectedOverlayId;
       const isActive = child.dataset.state === "active";
@@ -396,23 +234,16 @@ export function RuntimePreview({
   }
 
   function scheduleWireInteractivity() {
-    if (wireRafRef.current !== null) return;
-    wireRafRef.current = requestAnimationFrame(() => {
-      wireRafRef.current = null;
-      wireOverlayInteractivity();
-    });
+    wireOverlayInteractivity();
   }
 
   useEffect(() => {
     if (!isControlledRuntime) return;
     scheduleWireInteractivity();
-  }, [selectedOverlayId, renderManifest, isControlledRuntime]);
+  }, [selectedOverlayId, effectiveRenderManifest, isControlledRuntime]);
 
-  // ── Controller lifecycle (restart, scroll-mode, playhead, auto-deselect) ─
-  const { controllerRef, lastInternalProgressRef } = useRuntimeController({
-    manifest,
-    renderManifest,
-    restartKey,
+  const { controllerRef } = useRuntimeController({
+    renderManifest: effectiveRenderManifest,
     mode,
     isPlaying,
     isControlledRuntime,
@@ -425,35 +256,28 @@ export function RuntimePreview({
     scheduleWireInteractivity,
   });
 
-  // ── Light effect: full overlay DOM sync (no runtime restart) ─────────
-  //
-  // RAF-debounced: multiple manifest updates in the same frame (e.g. rapid
-  // color picker moves) collapse into a single DOM write per animation frame.
   useEffect(() => {
     if (!isControlledRuntime || !controllerRef.current) return;
 
-    // Capture the manifest at schedule time; the RAF callback reads from the
-    // ref so it always uses the value current at execution time.
-    pendingSyncManifestRef.current = renderManifest;
+    pendingSyncManifestRef.current = effectiveRenderManifest;
 
     if (syncRafRef.current !== null) {
-      // Already scheduled — the pending ref is updated above, nothing else needed.
       return;
     }
 
     syncRafRef.current = requestAnimationFrame(() => {
       syncRafRef.current = null;
-      const manifest = pendingSyncManifestRef.current;
+      const nextManifest = pendingSyncManifestRef.current;
       pendingSyncManifestRef.current = null;
-      if (!manifest || !controllerRef.current) return;
+      if (!nextManifest || !controllerRef.current) return;
       const container = containerRef.current;
       if (!container) return;
       applyManifestOverlayStyles(
-        manifest,
+        nextManifest,
         container,
         scheduleWireInteractivity,
       );
-    }); // end requestAnimationFrame
+    });
 
     return () => {
       if (syncRafRef.current !== null) {
@@ -461,9 +285,8 @@ export function RuntimePreview({
         syncRafRef.current = null;
       }
     };
-  }, [renderManifest, isControlledRuntime]);
+  }, [controllerRef, effectiveRenderManifest, isControlledRuntime]);
 
-  // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className={cn(standalone ? "block" : "grid h-full gap-4", className)}>
       {showControls ? (
@@ -506,6 +329,7 @@ export function RuntimePreview({
               : "relative min-h-screen bg-[var(--panel-bg-preview)]",
           stageClassName,
         )}
+        style={emptyCanvasBackground ? { background: emptyCanvasBackground } : undefined}
         onClick={(event) => {
           const target = event.target as HTMLElement | null;
           if (!target) {
@@ -533,7 +357,7 @@ export function RuntimePreview({
           }
         />
 
-        {!hasRenderableMedia ? (
+        {!hasRenderableMedia && !isControlledRuntime ? (
           <div className="absolute inset-0 grid place-items-center p-6">
             <div className="max-w-xl rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--panel-bg)] p-6 text-center">
               <Badge>{section?.presetId ?? "preset"}</Badge>
@@ -541,7 +365,7 @@ export function RuntimePreview({
                 The preview opens up as soon as media is attached.
               </h3>
               <p className="mt-3 text-sm leading-7 text-[var(--foreground-muted)]">
-                Upload a source or import a generated clip to see the full runtime come alive.
+                Upload a source clip to see the full runtime come alive.
               </p>
             </div>
           </div>
@@ -549,30 +373,32 @@ export function RuntimePreview({
 
         {isControlledRuntime && selectedOverlay && selectedOverlayId ? (
           <OverlayManipulator
-            key={selectedOverlayId}
             overlay={selectedOverlay}
             selectedOverlayId={selectedOverlayId}
             selectedOverlayIds={selectedOverlayIds}
             selectionOverlays={
               selectedOverlayIds?.length
-                ? section?.overlays.filter((overlay) => (
-                  selectedOverlayIds.includes(overlay.id)
-                  || (
-                    overlay.content.parentGroupId !== undefined
-                    && selectedOverlayIds.includes(overlay.content.parentGroupId)
-                  )
-                ))
-                : selectedOverlay && selectedOverlay.content.type === "group"
-                  ? section?.overlays.filter((overlay) => (
-                    overlay.id === selectedOverlay.id || overlay.content.parentGroupId === selectedOverlay.id
+                ? latestSection?.overlays.filter((overlay) => (
+                    selectedOverlayIds.includes(overlay.id)
+                    || (
+                      overlay.content.parentGroupId !== undefined
+                      && selectedOverlayIds.includes(overlay.content.parentGroupId)
+                    )
                   ))
+                : selectedOverlay && selectedOverlay.content.type === "group"
+                  ? latestSection?.overlays.filter((overlay) => (
+                      overlay.id === selectedOverlay.id || overlay.content.parentGroupId === selectedOverlay.id
+                    ))
                   : undefined
             }
             containerRef={containerRef}
             selectedStyle={selectedStyle}
             isTextStyle={isSelectedText}
             allowLayoutEditing={!selectedOverlay.content.parentGroupId}
-            onLayoutChange={(layout, options) => { onOverlayLayoutChange?.(selectedOverlayId, layout, options); }}
+            onLayoutChange={(layout, options) => {
+              onOverlayLayoutChange?.(selectedOverlayId, layout, options);
+            }}
+            onStyleLiveChange={(changes) => { onOverlayStyleLiveChange?.(selectedOverlayId, changes); }}
             onStyleChange={(changes) => { onOverlayStyleChange?.(selectedOverlayId, changes); }}
             onEdit={() => { onSelectOverlay?.(selectedOverlayId); }}
             canGroupSelection={canGroupSelection}

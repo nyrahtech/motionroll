@@ -1,6 +1,5 @@
 import { inngest } from "@/lib/inngest-client";
 import { processSourceAsset } from "@/lib/processing/pipeline";
-import { providerGenerationPoll } from "@/lib/provider-generation-poll";
 
 export { inngest };
 
@@ -12,4 +11,4 @@ export const processAssetRequested = inngest.createFunction(
   },
 );
 
-export const inngestFunctions = [processAssetRequested, providerGenerationPoll];
+export const inngestFunctions = [processAssetRequested];

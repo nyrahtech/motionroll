@@ -20,7 +20,7 @@ describe("publish panel runtime preview", () => {
     expect(source).toContain('forceSequence: "1"');
     expect(source).toContain('params.set("embed", "1")');
     expect(source).toContain('device === "desktop" ? "desktop" : "mobile"');
-    expect(source).toContain('xl:grid-cols-[minmax(0,1fr)_360px]');
+    expect(source).toContain('md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]');
     expect(source).not.toContain(">Download<");
   });
 
@@ -38,6 +38,7 @@ describe("publish panel runtime preview", () => {
     expect(previewSource).toContain("resolveRuntimeMode");
     expect(previewSource).toContain("resolveForceSequence");
     expect(previewSource).toContain("resolveEmbeddedPreview");
+    expect(previewSource).toContain("resolveLocalPreviewSessionId");
     expect(previewSource).not.toContain("overflow-x-hidden");
     expect(embedSource).toContain("searchParams");
     expect(embedSource).toContain("resolveRuntimeMode");

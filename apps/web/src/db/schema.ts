@@ -1,8 +1,6 @@
 import {
-  type GeneratedAsset,
   type OverlayContent,
   type OverlayTiming,
-  type PresetControl,
   type PresetDefaults,
   type PresetId,
   type ProjectDraftDocument,
@@ -10,7 +8,6 @@ import {
   type ProcessingJobPayload,
   type ProcessingOutputs,
   type ProjectManifest,
-  type ProviderCredentialMetadata,
 } from "@motionroll/shared";
 import {
   boolean,
@@ -38,6 +35,7 @@ export const sourceTypeEnum = pgEnum("source_type", ["video", "ai_clip"]);
 export const sourceOriginEnum = pgEnum("source_origin", ["upload", "ai_import"]);
 export const assetKindEnum = pgEnum("asset_kind", [
   "source_video",
+  "media_video",
   "frame_sequence",
   "frame",
   "poster",
@@ -62,20 +60,6 @@ export const publishTargetTypeEnum = pgEnum("publish_target_type", [
   "hosted_embed",
   "script_embed",
 ]);
-export const providerEnum = pgEnum("provider", ["runway", "luma", "sora", "other"]);
-export const providerConnectionStatusEnum = pgEnum("provider_connection_status", [
-  "disconnected",
-  "pending_validation",
-  "connected",
-  "error",
-]);
-export const generationStatusEnum = pgEnum("generation_status", [
-  "queued",
-  "running",
-  "completed",
-  "failed",
-  "unsupported",
-]);
 export const transitionScopeEnum = pgEnum("transition_scope", ["sequence", "moment"]);
 
 export const users = pgTable("users", {
@@ -86,27 +70,6 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const templates = pgTable(
-  "templates",
-  {
-    id: varchar("id", { length: 64 }).primaryKey(),
-    presetId: varchar("preset_id", { length: 64 }).$type<PresetId>().notNull(),
-    label: varchar("label", { length: 256 }).notNull(),
-    description: text("description").notNull(),
-    thumbnailUrl: text("thumbnail_url").notNull(),
-    defaults: jsonb("defaults").$type<PresetDefaults>().notNull(),
-    exposedControls: jsonb("exposed_controls").$type<PresetControl[]>().notNull(),
-    advancedControls: jsonb("advanced_controls").$type<PresetControl[]>().notNull(),
-    seededOverlays: jsonb("seeded_overlays").$type<
-      Array<{ id: string; timing: OverlayTiming; content: OverlayContent }>
-    >().notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => ({
-    presetIdx: uniqueIndex("templates_preset_idx").on(table.presetId),
-  }),
-);
-
 export const projects = pgTable(
   "projects",
   {
@@ -114,7 +77,6 @@ export const projects = pgTable(
     ownerId: varchar("owner_id", { length: 64 })
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
-    templateId: varchar("template_id", { length: 64 }).references(() => templates.id),
     title: varchar("title", { length: 256 }).notNull(),
     slug: varchar("slug", { length: 128 }).notNull(),
     selectedPreset: varchar("selected_preset", { length: 64 })
@@ -330,67 +292,7 @@ export const publishTargets = pgTable(
   }),
 );
 
-export const userProviderConnections = pgTable(
-  "user_provider_connections",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: varchar("user_id", { length: 64 })
-      .references(() => users.id, { onDelete: "cascade" })
-      .notNull(),
-    provider: providerEnum("provider").notNull(),
-    status: providerConnectionStatusEnum("status")
-      .default("pending_validation")
-      .notNull(),
-    accountLabel: varchar("account_label", { length: 256 }).notNull(),
-    encryptedCredentialPayload: text("encrypted_credential_payload").notNull(),
-    credentialMetadata: jsonb("credential_metadata")
-      .$type<ProviderCredentialMetadata>()
-      .notNull(),
-    lastError: text("last_error"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => ({
-    userIdx: index("provider_connections_user_idx").on(table.userId),
-  }),
-);
-
-export const aiGenerations = pgTable(
-  "ai_generations",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: varchar("user_id", { length: 64 })
-      .references(() => users.id, { onDelete: "cascade" })
-      .notNull(),
-    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
-    providerConnectionId: uuid("provider_connection_id").references(
-      () => userProviderConnections.id,
-      { onDelete: "set null" },
-    ),
-    provider: providerEnum("provider").notNull(),
-    externalGenerationId: text("external_generation_id"),
-    status: generationStatusEnum("status").default("unsupported").notNull(),
-    promptText: text("prompt_text"),
-    failureReason: text("failure_reason"),
-    outputUrl: text("output_url"),
-    requestPayload: jsonb("request_payload").notNull(),
-    responsePayload: jsonb("response_payload"),
-    importedAssetMetadata: jsonb("imported_asset_metadata").$type<GeneratedAsset | null>(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => ({
-    userIdx: index("ai_generations_user_idx").on(table.userId),
-    projectIdx: index("ai_generations_project_idx").on(table.projectId),
-  }),
-);
-
 export const userRelations = relations(users, ({ many }) => ({
-  projects: many(projects),
-  providerConnections: many(userProviderConnections),
-}));
-
-export const templateRelations = relations(templates, ({ many }) => ({
   projects: many(projects),
 }));
 
@@ -398,10 +300,6 @@ export const projectRelations = relations(projects, ({ one, many }) => ({
   owner: one(users, {
     fields: [projects.ownerId],
     references: [users.id],
-  }),
-  template: one(templates, {
-    fields: [projects.templateId],
-    references: [templates.id],
   }),
   sections: many(projectSections),
   assets: many(projectAssets),

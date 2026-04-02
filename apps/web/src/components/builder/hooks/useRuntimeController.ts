@@ -2,7 +2,7 @@
  * useRuntimeController - owns the ScrollSectionController lifecycle.
  *
  * Handles:
- * - Full runtime restart when structural manifest properties change (restartKey)
+ * - Stable controlled runtime creation for preview playback
  * - Scroll-mode runtime for non-controlled previews
  * - Playhead sync from the playback controller to the runtime
  * - Auto-deselect when playback leaves the selected overlay's timing window
@@ -18,9 +18,7 @@ import {
 import type { EditorPlaybackController } from "./useEditorPlayback";
 
 export type UseRuntimeControllerOptions = {
-  manifest: ProjectManifest;
   renderManifest: ProjectManifest;
-  restartKey: string;
   mode: "desktop" | "mobile";
   isPlaying: boolean;
   isControlledRuntime: boolean;
@@ -35,7 +33,6 @@ export type UseRuntimeControllerOptions = {
 
 export function useRuntimeController({
   renderManifest,
-  restartKey,
   mode,
   isPlaying,
   isControlledRuntime,
@@ -54,6 +51,7 @@ export function useRuntimeController({
   const selectedOverlayIdRef = useRef(selectedOverlayId);
   const isPlayingRef = useRef(isPlaying);
   const onSelectOverlayRef = useRef(onSelectOverlay);
+  const scheduleWireInteractivityRef = useRef(scheduleWireInteractivity);
 
   useEffect(() => {
     onPlayheadChangeRef.current = onPlayheadChange;
@@ -75,8 +73,21 @@ export function useRuntimeController({
     onSelectOverlayRef.current = onSelectOverlay;
   }, [onSelectOverlay]);
 
-  // Heavy effect: full runtime restart.
-  // Intentionally depends on restartKey, not renderManifest.
+  useEffect(() => {
+    scheduleWireInteractivityRef.current = scheduleWireInteractivity;
+  }, [scheduleWireInteractivity]);
+
+  useEffect(() => {
+    if (!isControlledRuntime || hasRenderableMedia) {
+      return;
+    }
+    const node = mountNodeRef.current;
+    controllerRef.current?.destroy();
+    controllerRef.current = null;
+    lastInternalProgressRef.current = null;
+    node?.replaceChildren();
+  }, [hasRenderableMedia, isControlledRuntime, mountNodeRef]);
+
   useEffect(() => {
     if (!isControlledRuntime || !hasRenderableMedia) return;
     const node = mountNodeRef.current;
@@ -85,7 +96,7 @@ export function useRuntimeController({
     controllerRef.current?.destroy();
     node.replaceChildren();
 
-    controllerRef.current = createScrollSection(node, renderManifest, {
+    controllerRef.current = createScrollSection(node, renderManifestRef.current, {
       initialProgress: playback?.getPlayhead() ?? 0,
       mode,
       interactionMode: "controlled",
@@ -98,19 +109,24 @@ export function useRuntimeController({
     });
     controllerRef.current.setOverlayTransitionsEnabled(isPlaying);
     controllerRef.current.setProgress(playback?.getPlayhead() ?? 0);
-    scheduleWireInteractivity();
+    scheduleWireInteractivityRef.current();
 
     return () => {
       controllerRef.current?.destroy();
+      controllerRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [restartKey]);
+  }, [
+    hasRenderableMedia,
+    isControlledRuntime,
+    mode,
+    mountNodeRef,
+  ]);
 
   useEffect(() => {
     if (!isControlledRuntime || !hasRenderableMedia) return;
     controllerRef.current?.updateManifest(renderManifest);
-    scheduleWireInteractivity();
-  }, [renderManifest, hasRenderableMedia, isControlledRuntime, scheduleWireInteractivity]);
+    scheduleWireInteractivityRef.current();
+  }, [renderManifest, hasRenderableMedia, isControlledRuntime]);
 
   useEffect(() => {
     if (isControlledRuntime || !hasRenderableMedia) return;
@@ -125,7 +141,10 @@ export function useRuntimeController({
       allowWheelScrub: false,
     });
 
-    return () => controllerRef.current?.destroy();
+    return () => {
+      controllerRef.current?.destroy();
+      controllerRef.current = null;
+    };
   }, [hasRenderableMedia, isControlledRuntime, mode, renderManifest, mountNodeRef]);
 
   useEffect(() => {
@@ -148,9 +167,9 @@ export function useRuntimeController({
         controllerRef.current?.setProgress(playheadProgress);
       }
 
-      const selectedOverlay = renderManifestRef.current.sections[0]?.overlays.find(
-        (overlay) => overlay.id === selectedOverlayIdRef.current,
-      );
+      const selectedOverlay = renderManifestRef.current.sections
+        .flatMap((section) => section.overlays)
+        .find((overlay) => overlay.id === selectedOverlayIdRef.current);
       if (!selectedOverlay || !isPlayingRef.current) {
         return;
       }

@@ -45,6 +45,17 @@ function TimelineLayerLabelInner({
   beginTrackReorder,
   onDeleteLayer,
 }: TimelineLayerLabelProps) {
+  const statusLabel =
+    isLayerReorderDrag && isDraggingRow
+      ? "Dragging layer"
+      : showInsertionCue
+        ? "Drop here"
+        : movePreviewForTrack
+          ? movePreviewForTrack.isCrossLayerMove
+            ? `Drop at ${previewTimeLabel}`
+            : `Preview at ${previewTimeLabel}`
+          : null;
+
   return (
     <div
       className="flex h-14 w-full select-none items-center gap-2 px-3"
@@ -107,25 +118,19 @@ function TimelineLayerLabelInner({
         >
           {track.label}
         </span>
-        <span
-          className="block text-[10px] uppercase tracking-[0.12em]"
-          style={{
-            color:
-              (isLayerReorderDrag && isDraggingRow) || isDropTarget
-                ? "var(--editor-accent)"
-                : "var(--editor-text-dim)",
-          }}
-        >
-          {isLayerReorderDrag && isDraggingRow
-            ? "Dragging layer"
-            : showInsertionCue
-              ? "Drop here"
-              : movePreviewForTrack
-                ? movePreviewForTrack.isCrossLayerMove
-                  ? `Drop at ${previewTimeLabel}`
-                  : `Preview at ${previewTimeLabel}`
-                : `Layer ${originalIndex + 1}`}
-        </span>
+        {statusLabel ? (
+          <span
+            className="block text-[10px] uppercase tracking-[0.12em]"
+            style={{
+              color:
+                (isLayerReorderDrag && isDraggingRow) || isDropTarget
+                  ? "var(--editor-accent)"
+                  : "var(--editor-text-dim)",
+            }}
+          >
+            {statusLabel}
+          </span>
+        ) : null}
       </div>
     </div>
   );

@@ -26,13 +26,11 @@ type SwitcherProject = {
 export function ProjectSwitcher({
   currentProjectId,
   currentProjectTitle,
-  sectionTitle,
+  bookmarkTitle,
   frameRangeStart,
   frameRangeEnd,
   scrubStrength,
   sectionHeightVh,
-  sceneEnterTransition,
-  sceneExitTransition,
   currentProjectCoverUrl,
   hasThumbnailOverride,
   projects,
@@ -44,19 +42,11 @@ export function ProjectSwitcher({
 }: {
   currentProjectId: string;
   currentProjectTitle: string;
-  sectionTitle: string;
+  bookmarkTitle: string;
   frameRangeStart: number;
   frameRangeEnd: number;
   scrubStrength: number;
   sectionHeightVh: number;
-  sceneEnterTransition: {
-    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
-    duration: number;
-  };
-  sceneExitTransition: {
-    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
-    duration: number;
-  };
   currentProjectCoverUrl: string;
   hasThumbnailOverride: boolean;
   projects: SwitcherProject[];
@@ -64,19 +54,11 @@ export function ProjectSwitcher({
   onOpenChange?: (open: boolean) => void;
   onSaveSettings: (values: {
     projectTitle: string;
-    sectionTitle: string;
+    bookmarkTitle: string;
     frameRangeStart: number;
     frameRangeEnd: number;
     scrubStrength: number;
     sectionHeightVh: number;
-    sceneEnterTransition: {
-      preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
-      duration: number;
-    };
-    sceneExitTransition: {
-      preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
-      duration: number;
-    };
   }) => Promise<void> | void;
   onThumbnailUpload: (file: File) => Promise<void>;
   onThumbnailReset: () => Promise<void>;
@@ -140,7 +122,7 @@ export function ProjectSwitcher({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        presetId: "scroll-sequence",
+        source: { kind: "blank" },
         title,
       }),
     });
@@ -268,11 +250,6 @@ export function ProjectSwitcher({
                     Open library
                   </a>
                 </Button>
-              </div>
-
-              <div className="section-divider" />
-
-              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="secondary"
@@ -281,13 +258,7 @@ export function ProjectSwitcher({
                   onClick={() => void createProject(`Project ${new Date().toLocaleDateString("en", { month: "short", day: "numeric" })}`)}
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  New blank
-                </Button>
-                <Button asChild type="button" variant="quiet" size="sm">
-                  <a href="/templates">
-                    <Copy className="h-3.5 w-3.5" />
-                    Browse templates
-                  </a>
+                  New Project
                 </Button>
               </div>
             </div>
@@ -300,13 +271,11 @@ export function ProjectSwitcher({
         onClose={() => setIsSettingsOpen(false)}
         values={{
           projectTitle: currentProjectTitle,
-          sectionTitle,
+          bookmarkTitle,
           frameRangeStart,
           frameRangeEnd,
           scrubStrength,
           sectionHeightVh,
-          sceneEnterTransition,
-          sceneExitTransition,
         }}
         coverUrl={currentProjectCoverUrl}
         hasThumbnailOverride={hasThumbnailOverride}

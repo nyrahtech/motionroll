@@ -2,10 +2,22 @@ import {
   clampProgress,
   frameIndexToSequenceProgress,
   normalizeTimingRange,
+  type OverlayMediaMetadata,
+  type OverlayPlaybackMode,
   type OverlayDefinition,
   type OverlayTiming,
 } from "@motionroll/shared";
-import type { HydratedOverlayDefinition } from "./editor-draft-types";
+
+export type HydratedOverlayDefinition = OverlayDefinition & {
+  content: OverlayDefinition["content"] & {
+    type: NonNullable<OverlayDefinition["content"]["type"]>;
+    layout: NonNullable<OverlayDefinition["content"]["layout"]>;
+    style: NonNullable<OverlayDefinition["content"]["style"]>;
+    background: NonNullable<OverlayDefinition["content"]["background"]>;
+    enterAnimation: NonNullable<OverlayDefinition["content"]["enterAnimation"]>;
+    exitAnimation: NonNullable<OverlayDefinition["content"]["exitAnimation"]>;
+  };
+};
 
 export const DESIGN_STAGE_WIDTH = 1440;
 export const DESIGN_STAGE_HEIGHT = 810;
@@ -102,6 +114,11 @@ export function hydrateOverlay(overlay: OverlayDefinition): HydratedOverlayDefin
       theme: overlay.content.theme ?? "light",
       treatment: overlay.content.treatment ?? "default",
       mediaUrl: overlay.content.mediaUrl,
+      mediaAssetId: overlay.content.mediaAssetId,
+      mediaPreviewUrl: overlay.content.mediaPreviewUrl,
+      mediaMetadata: overlay.content.mediaMetadata,
+      playbackMode: overlay.content.playbackMode ?? "normal",
+      blendMode: overlay.content.blendMode ?? "normal",
       linkHref: overlay.content.linkHref,
       textHtml: normalizeTextHtml(overlay.content.textHtml),
       layer: overlay.content.layer ?? 0,
@@ -263,6 +280,10 @@ export function createDefaultOverlay(
   options: {
     timing: OverlayTiming;
     mediaUrl?: string;
+    mediaAssetId?: string;
+    mediaPreviewUrl?: string;
+    mediaMetadata?: OverlayMediaMetadata;
+    playbackMode?: OverlayPlaybackMode;
   },
 ): HydratedOverlayDefinition {
   return {
@@ -280,10 +301,14 @@ export function createDefaultOverlay(
           ? "Moment highlight"
           : "New text block",
       mediaUrl: options.mediaUrl,
+      mediaAssetId: options.mediaAssetId,
+      mediaPreviewUrl: options.mediaPreviewUrl,
       align: "start",
       theme: "dark",
       treatment: "default",
       linkHref: undefined,
+      playbackMode: options.playbackMode ?? "normal",
+      blendMode: "normal",
       layer: 0,
       layout: {
         x: 0.08,
@@ -337,6 +362,7 @@ export function createDefaultOverlay(
         easing: "ease-in-out",
         duration: 0.35,
       },
+      mediaMetadata: options.mediaMetadata,
       parentGroupId: undefined,
     },
   };
@@ -544,14 +570,20 @@ export function sanitizeOverlayForSave(overlay: HydratedOverlayDefinition): Over
   const ctaHref = overlay.content.cta?.href?.trim() ?? "";
   const linkHref = overlay.content.linkHref?.trim();
   const mediaUrl = overlay.content.mediaUrl?.trim();
+  const mediaPreviewUrl = overlay.content.mediaPreviewUrl?.trim();
   return {
     ...overlay,
     timingSource: "manual",
     content: {
       ...overlay.content,
       mediaUrl: mediaUrl ? mediaUrl : undefined,
+      mediaAssetId: mediaUrl ? overlay.content.mediaAssetId : undefined,
+      mediaPreviewUrl: mediaPreviewUrl ? mediaPreviewUrl : undefined,
+      mediaMetadata: mediaUrl ? overlay.content.mediaMetadata : undefined,
+      playbackMode: overlay.content.playbackMode ?? "normal",
       linkHref: linkHref ? linkHref : undefined,
       cta: ctaLabel && ctaHref ? { label: ctaLabel, href: ctaHref } : undefined,
+      blendMode: overlay.content.blendMode ?? "normal",
       layer: overlay.content.layer ?? 0,
     },
   };

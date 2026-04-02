@@ -18,6 +18,102 @@ import {
   getSafeHref,
   withOpacity,
 } from "./overlay-calc";
+import {
+  resolveOverlayBlendModeCssValue,
+  resolveOverlayMediaKind,
+} from "./overlay-media";
+
+function isMediaCapableOverlay(overlay: OverlayDefinition) {
+  return (
+    overlay.content.type === "image" ||
+    overlay.content.type === "logo" ||
+    overlay.content.type === "icon"
+  );
+}
+
+function isBlendedMediaOverlay(overlay: OverlayDefinition) {
+  return isMediaCapableOverlay(overlay) && (overlay.content.blendMode ?? "normal") !== "normal";
+}
+
+function getOverlayLocalProgress(overlay: OverlayDefinition, progress: number) {
+  const duration = Math.max(overlay.timing.end - overlay.timing.start, 0.0001);
+  return Math.max(0, Math.min(1, (progress - overlay.timing.start) / duration));
+}
+
+function syncVideoTime(video: HTMLVideoElement, progress: number) {
+  if (!Number.isFinite(video.duration) || video.duration <= 0) {
+    video.dataset.pendingProgress = String(progress);
+    return;
+  }
+
+  const nextTime = progress * video.duration;
+  if (Math.abs((video.currentTime ?? 0) - nextTime) > 0.04) {
+    video.currentTime = nextTime;
+  }
+}
+
+function isPlayableOverlayVideo(
+  mediaElement: Element | null | undefined,
+): mediaElement is HTMLVideoElement {
+  if (!mediaElement) {
+    return false;
+  }
+
+  const tagName = mediaElement.tagName?.toLowerCase();
+  return (
+    tagName === "video" &&
+    typeof (mediaElement as HTMLVideoElement).pause === "function" &&
+    typeof (mediaElement as HTMLVideoElement).play === "function"
+  );
+}
+
+function getSafeVideoMethod<
+  TMethodName extends "pause" | "play",
+>(video: HTMLVideoElement, methodName: TMethodName) {
+  const candidate = Reflect.get(video, methodName);
+  if (typeof candidate !== "function") {
+    return null;
+  }
+
+  return candidate.bind(video) as TMethodName extends "pause"
+    ? () => void
+    : () => Promise<void>;
+}
+
+function syncOverlayVideoPlayback(
+  video: HTMLVideoElement,
+  overlay: OverlayDefinition,
+  progress: number,
+  active: boolean,
+) {
+  const pause = getSafeVideoMethod(video, "pause");
+  const play = getSafeVideoMethod(video, "play");
+  if (!pause || !play) {
+    return;
+  }
+
+  const playbackMode = overlay.content.playbackMode ?? "normal";
+
+  if (playbackMode === "scroll-scrub") {
+    video.loop = false;
+    pause();
+    syncVideoTime(video, getOverlayLocalProgress(overlay, progress));
+    return;
+  }
+
+  if (!active) {
+    pause();
+    if (Math.abs(video.currentTime ?? 0) > 0.04) {
+      video.currentTime = 0;
+    }
+    return;
+  }
+
+  video.loop = playbackMode === "loop";
+  if (video.paused) {
+    void play().catch(() => undefined);
+  }
+}
 
 export function appendTextElement(
   parent: HTMLElement,
@@ -41,6 +137,183 @@ export function appendTextElement(
   return element;
 }
 
+function applyActionLinkStyles(
+  link: HTMLAnchorElement,
+  overlay: OverlayDefinition,
+  stageScale = 1,
+) {
+  link.style.display = "inline-block";
+  link.style.marginTop = `${Math.round(16 * stageScale)}px`;
+  link.style.fontSize = `${Math.round(14 * stageScale)}px`;
+  link.style.fontWeight = "600";
+  link.style.cursor = "pointer";
+  link.style.transition = "opacity 140ms ease, transform 140ms ease, box-shadow 140ms ease";
+  link.style.transform = "translate3d(0, 0, 0)";
+  link.style.opacity = "1";
+  if (overlay.content.style?.buttonLike) {
+    link.style.padding = `${Math.round(9 * stageScale)}px ${Math.round(14 * stageScale)}px`;
+    link.style.borderRadius = ".7rem";
+    link.style.background = "rgba(214,246,255,0.92)";
+    link.style.color = "#091117";
+  } else {
+    link.style.padding = "";
+    link.style.borderRadius = "";
+    link.style.background = "";
+    link.style.color = "";
+  }
+}
+
+function listOverlayCards(root: HTMLElement) {
+  const cards: HTMLElement[] = [];
+  const stack = Array.from(root.children) as HTMLElement[];
+  while (stack.length > 0) {
+    const node = stack.shift();
+    if (!node) {
+      continue;
+    }
+    if (node.dataset?.overlayId) {
+      cards.push(node);
+    }
+    stack.push(...(Array.from(node.children) as HTMLElement[]));
+  }
+  return cards;
+}
+
+function createOverlayCard(
+  overlay: OverlayDefinition,
+  interactionMode: "scroll" | "controlled",
+  allowOverlayTransitions: boolean,
+) {
+  const card = document.createElement("article");
+  card.dataset.overlayId = overlay.id;
+  card.dataset.contentType = overlay.content.type ?? "text";
+  card.className = `motionroll-overlay motionroll-theme-${overlay.content.theme}`;
+  card.style.transition =
+    interactionMode === "controlled" && !allowOverlayTransitions
+      ? "none"
+      : getOverlayTransitionStyle(overlay);
+  card.style.opacity = "0";
+  card.style.visibility = "hidden";
+  card.style.pointerEvents = "none";
+  card.style.willChange = "transform, opacity, filter";
+  card.style.zIndex = String(100 + (overlay.content.layer ?? 0));
+  return card;
+}
+
+function syncOverlayCardContent(
+  card: HTMLElement,
+  overlay: OverlayDefinition,
+  mode: "desktop" | "mobile",
+) {
+  for (const child of Array.from(card.children)) {
+    const element = child as HTMLElement;
+    if (
+      element.dataset.textField ||
+      element.dataset.mediaField ||
+      element.dataset.overlayActionLink === "true"
+    ) {
+      element.remove();
+    }
+  }
+
+  if (overlay.content.type !== "text" && overlay.content.type !== "group") {
+    appendMediaElement(card, overlay, mode);
+  }
+
+  if (overlay.content.text) {
+    const textBlock = appendTextElement(
+      card,
+      "p",
+      overlay.content.text,
+      {
+        margin: "0",
+        whiteSpace: "pre-wrap",
+        fontSize: `${(overlay.content.style?.fontSize ?? (mode === "mobile" ? 20 : 34)) * (mode === "mobile" ? 0.76 : 1)}px`,
+        lineHeight: "1.1",
+      },
+      "text",
+      overlay.content.textHtml,
+    );
+    applyTextStyles(textBlock, overlay, {
+      margin: "0",
+      whiteSpace: "pre-wrap",
+      lineHeight: String(overlay.content.style?.lineHeight ?? 1.08),
+    });
+  }
+
+  const actionableHref = overlay.content.linkHref ?? overlay.content.cta?.href;
+  if (!actionableHref) {
+    return;
+  }
+
+  const safeHref = getSafeHref(actionableHref);
+  if (!safeHref) {
+    return;
+  }
+
+  const link = document.createElement("a");
+  link.dataset.overlayActionLink = "true";
+  link.textContent = overlay.content.cta?.label ?? "Open";
+  link.href = safeHref;
+  link.rel = safeHref.startsWith("http") ? "noreferrer noopener" : "";
+  applyActionLinkStyles(link, overlay);
+  card.appendChild(link);
+}
+
+function syncOverlayRootChildren(
+  overlayRoot: HTMLElement,
+  section: ProjectSectionManifest,
+  mode: "desktop" | "mobile",
+  interactionMode: "scroll" | "controlled",
+  allowOverlayTransitions: boolean,
+) {
+  const overlaysById = new Map(section.overlays.map((overlay) => [overlay.id, overlay] as const));
+  for (const card of listOverlayCards(overlayRoot)) {
+    if (!overlaysById.has(card.dataset.overlayId ?? "")) {
+      card.remove();
+    }
+  }
+
+  const orderedOverlays = getOverlaysInStackOrder(section.overlays);
+  const overlayElements = new Map<string, HTMLElement>();
+  const existingCards = new Map(
+    listOverlayCards(overlayRoot).map((card) => [
+      card.dataset.overlayId ?? "",
+      card,
+    ]),
+  );
+
+  for (const overlay of orderedOverlays) {
+    const existingCard = existingCards.get(overlay.id);
+    const card =
+      existingCard ??
+      createOverlayCard(overlay, interactionMode, allowOverlayTransitions);
+
+    card.dataset.overlayId = overlay.id;
+    card.dataset.contentType = overlay.content.type ?? "text";
+    card.className = `motionroll-overlay motionroll-theme-${overlay.content.theme}`;
+    card.style.transition =
+      interactionMode === "controlled" && !allowOverlayTransitions
+        ? "none"
+        : getOverlayTransitionStyle(overlay);
+    card.style.zIndex = String(100 + (overlay.content.layer ?? 0));
+    syncOverlayCardContent(card, overlay, mode);
+    overlayElements.set(overlay.id, card);
+  }
+
+  for (const overlay of orderedOverlays) {
+    const card = overlayElements.get(overlay.id);
+    if (!card) {
+      continue;
+    }
+    const parent =
+      overlay.content.parentGroupId
+        ? overlayElements.get(overlay.content.parentGroupId) ?? overlayRoot
+        : overlayRoot;
+    parent.appendChild(card);
+  }
+}
+
 export function applyOverlayCardStyles(
   card: HTMLElement,
   overlay: OverlayDefinition,
@@ -52,6 +325,8 @@ export function applyOverlayCardStyles(
   const layout = overlay.content.layout;
   const style = overlay.content.style;
   const background = overlay.content.background;
+  const blendedMediaOverlay = isBlendedMediaOverlay(overlay);
+  const contentSizedOverlay = overlay.content.type === "text" && !background?.enabled;
   const defaultTop = `${Math.round(32 * stageScale)}px`;
   const defaultLeft = `${Math.round(32 * stageScale)}px`;
   const placement = getOverlayPixelPlacement(overlay, stageRoot, stageScale);
@@ -71,8 +346,8 @@ export function applyOverlayCardStyles(
     overlay.content.align === "center" ? `${Math.round(localAnchorTop)}px` : `${Math.round(localTop)}px`;
   card.style.right = "auto";
   card.style.bottom = "auto";
-  card.style.width = `${placement.width}px`;
-  if (placement.height) {
+  card.style.width = contentSizedOverlay ? "auto" : `${placement.width}px`;
+  if (placement.height && !contentSizedOverlay) {
     const nextHeight = `${placement.height}px`;
     card.style.minHeight = nextHeight;
     card.style.height = nextHeight;
@@ -92,6 +367,7 @@ export function applyOverlayCardStyles(
   card.style.transform = overlay.content.align === "center" ? "translate3d(-50%, -50%, 0)" : "translate3d(0, 0, 0)";
   card.style.transformOrigin = "center center";
   card.style.opacity = String(style?.opacity ?? 1);
+  card.style.mixBlendMode = "normal";
   card.style.background =
     background?.enabled
       ? withOpacity(background.color ?? "#0d1016", background.opacity ?? 0.82)
@@ -101,17 +377,25 @@ export function applyOverlayCardStyles(
   card.style.borderColor = withOpacity(
     background?.borderColor ?? "#d6f6ff",
     background?.borderOpacity ?? (overlay.content.type === "group" ? 0.18 : 0),
-  );
+    );
   card.style.borderWidth = background?.enabled || overlay.content.type === "group" ? "1px" : "0";
   card.style.borderStyle = overlay.content.type === "group" ? "dashed" : "solid";
   card.style.borderRadius = `${background?.radius ?? 14}px`;
   card.style.padding =
     overlay.content.type === "group"
       ? "0px"
-      : `${Math.round((background?.paddingY ?? 14) * stageScale)}px ${Math.round((background?.paddingX ?? 18) * stageScale)}px`;
+      : contentSizedOverlay
+        ? "0px"
+        : `${Math.round((background?.paddingY ?? 14) * stageScale)}px ${Math.round((background?.paddingX ?? 18) * stageScale)}px`;
   card.style.backdropFilter =
     background?.enabled ? "blur(18px)" : "none";
-  card.style.overflow = overlay.content.type === "group" ? "visible" : "";
+  card.style.boxShadow =
+    background?.enabled || overlay.content.type === "group"
+      ? "0 10px 28px rgba(0, 0, 0, 0.22)"
+      : "none";
+  card.style.overflow =
+    overlay.content.type === "group" || blendedMediaOverlay ? "visible" : "hidden";
+  card.style.backgroundClip = "padding-box";
 
   if (!layout) {
     card.style.left = overlay.content.align === "center" ? "50%" : defaultLeft;
@@ -139,19 +423,23 @@ export function applyOverlayContentStyles(
 
   if (media) {
     media.style.maxWidth = `${Math.round((overlay.content.layout?.width ?? 420) * stageScale)}px`;
+    media.style.mixBlendMode = isMediaCapableOverlay(overlay)
+      ? resolveOverlayBlendModeCssValue(overlay.content.blendMode)
+      : "normal";
+    media.style.background = "transparent";
+    media.style.display = "block";
     if (overlay.content.type === "icon") {
       media.style.height = `${Math.round(64 * stageScale)}px`;
     } else if (overlay.content.type === "logo") {
       media.style.height = `${Math.round(80 * stageScale)}px`;
     }
+    if (isBlendedMediaOverlay(overlay)) {
+      media.style.borderRadius = "0";
+    }
   }
 
   if (actionLink) {
-    actionLink.style.marginTop = `${Math.round(16 * stageScale)}px`;
-    actionLink.style.fontSize = `${Math.round(14 * stageScale)}px`;
-    if (overlay.content.style?.buttonLike) {
-      actionLink.style.padding = `${Math.round(9 * stageScale)}px ${Math.round(14 * stageScale)}px`;
-    }
+    applyActionLinkStyles(actionLink as HTMLAnchorElement, overlay, stageScale);
   }
 }
 
@@ -217,6 +505,42 @@ export function appendMediaElement(
     return;
   }
 
+  const mediaKind = resolveOverlayMediaKind({
+    src: overlay.content.mediaUrl,
+    metadata: overlay.content.mediaMetadata,
+  });
+
+  if (mediaKind === "video") {
+    const video = document.createElement("video");
+    video.src = overlay.content.mediaUrl;
+    video.dataset.mediaField = "media";
+    video.muted = true;
+    video.loop = overlay.content.playbackMode === "loop";
+    video.autoplay = overlay.content.playbackMode !== "scroll-scrub";
+    video.playsInline = true;
+    video.preload = "auto";
+    video.style.width = "100%";
+    video.style.maxWidth = `${overlay.content.layout?.width ?? (mode === "mobile" ? 260 : 420)}px`;
+    video.style.height = overlay.content.type === "icon" ? "64px" : overlay.content.type === "logo" ? "80px" : "auto";
+    video.style.objectFit = overlay.content.type === "image" ? "cover" : "contain";
+    video.style.borderRadius =
+      overlay.content.type === "image" && !isBlendedMediaOverlay(overlay) ? ".7rem" : "0";
+    video.style.marginBottom = overlay.content.text ? ".8rem" : "0";
+    video.style.mixBlendMode = isMediaCapableOverlay(overlay)
+      ? resolveOverlayBlendModeCssValue(overlay.content.blendMode)
+      : "normal";
+    video.style.background = "transparent";
+    video.style.display = "block";
+    video.addEventListener("loadedmetadata", () => {
+      const pendingProgress = Number(video.dataset.pendingProgress ?? "");
+      if (Number.isFinite(pendingProgress)) {
+        syncVideoTime(video, pendingProgress);
+      }
+    });
+    parent.appendChild(video);
+    return;
+  }
+
   const image = document.createElement("img");
   image.src = overlay.content.mediaUrl;
   image.alt = overlay.content.text ?? "Overlay media";
@@ -225,8 +549,14 @@ export function appendMediaElement(
   image.style.maxWidth = `${overlay.content.layout?.width ?? (mode === "mobile" ? 260 : 420)}px`;
   image.style.height = overlay.content.type === "icon" ? "64px" : overlay.content.type === "logo" ? "80px" : "auto";
   image.style.objectFit = overlay.content.type === "image" ? "cover" : "contain";
-  image.style.borderRadius = overlay.content.type === "image" ? ".7rem" : "0";
+  image.style.borderRadius =
+    overlay.content.type === "image" && !isBlendedMediaOverlay(overlay) ? ".7rem" : "0";
   image.style.marginBottom = overlay.content.text ? ".8rem" : "0";
+  image.style.mixBlendMode = isMediaCapableOverlay(overlay)
+    ? resolveOverlayBlendModeCssValue(overlay.content.blendMode)
+    : "normal";
+  image.style.background = "transparent";
+  image.style.display = "block";
   parent.appendChild(image);
 }
 
@@ -239,8 +569,7 @@ export function syncOverlayPresentationStyles(
   const stageScale = getStageScale(stageRoot);
   const overlayMap = new Map(section.overlays.map((overlay) => [overlay.id, overlay] as const));
 
-  for (const child of Array.from(overlayRoot.querySelectorAll<HTMLElement>("[data-overlay-id]"))) {
-    const card = child as HTMLElement;
+  for (const card of listOverlayCards(overlayRoot)) {
     const overlay = overlayMap.get(card.dataset.overlayId ?? "");
     if (!overlay) {
       continue;
@@ -268,8 +597,7 @@ export function renderOverlayState(
   root.dataset.activeOverlayId = activeOverlayId ?? "";
   const overlayMap = new Map(section.overlays.map((item) => [item.id, item] as const));
 
-  for (const element of Array.from(root.querySelectorAll<HTMLElement>("[data-overlay-id]"))) {
-    const overlayElement = element as HTMLElement;
+  for (const overlayElement of listOverlayCards(root)) {
     const overlay = overlayMap.get(overlayElement.dataset.overlayId ?? "");
     if (!overlay) {
       continue;
@@ -296,6 +624,12 @@ export function renderOverlayState(
     if (overlayElement.style.transition !== nextTransition) overlayElement.style.transition = nextTransition;
     if (overlayElement.style.filter !== animationState.filter) overlayElement.style.filter = animationState.filter;
     if (overlayElement.style.clipPath !== animationState.clipPath) overlayElement.style.clipPath = animationState.clipPath;
+
+    const mediaElement = overlayElement.querySelector<HTMLElement>("[data-media-field='media']");
+    if (isPlayableOverlayVideo(mediaElement)) {
+      const mediaVideo = mediaElement;
+      syncOverlayVideoPlayback(mediaVideo, overlay, progress, animationState.active);
+    }
   }
 }
 
@@ -322,62 +656,8 @@ export function ensureOverlayRoot(
     const overlayElements = new Map<string, HTMLElement>();
     const orderedOverlays = getOverlaysInStackOrder(section.overlays);
     for (const overlay of orderedOverlays) {
-      const card = document.createElement("article");
-      card.dataset.overlayId = overlay.id;
-      card.dataset.contentType = overlay.content.type ?? "text";
-      card.className = `motionroll-overlay motionroll-theme-${overlay.content.theme}`;
-      card.style.transition =
-        interactionMode === "controlled" && !allowOverlayTransitions
-          ? "none"
-          : getOverlayTransitionStyle(overlay);
-      card.style.opacity = "0";
-      card.style.visibility = "hidden";
-      card.style.pointerEvents = "none";
-      card.style.willChange = "transform, opacity, filter";
-      card.style.zIndex = String(100 + (overlay.content.layer ?? 0));
-      applyOverlayCardStyles(card, overlay, container, mode);
-
-      if (overlay.content.type !== "text" && overlay.content.type !== "group") {
-        appendMediaElement(card, overlay, mode);
-      }
-
-      if (overlay.content.text) {
-        const textBlock = appendTextElement(card, "p", overlay.content.text, {
-          margin: "0",
-          whiteSpace: "pre-wrap",
-          fontSize: `${(overlay.content.style?.fontSize ?? (mode === "mobile" ? 20 : 34)) * (mode === "mobile" ? 0.76 : 1)}px`,
-          lineHeight: "1.1",
-        }, "text", overlay.content.textHtml);
-        applyTextStyles(textBlock, overlay, {
-          margin: "0",
-          whiteSpace: "pre-wrap",
-          lineHeight: String(overlay.content.style?.lineHeight ?? 1.08),
-        });
-      }
-
-      const actionableHref = overlay.content.linkHref ?? overlay.content.cta?.href;
-      if (actionableHref) {
-        const safeHref = getSafeHref(actionableHref);
-        if (safeHref) {
-          const link = document.createElement("a");
-          link.textContent = overlay.content.cta?.label ?? "Open";
-          link.href = safeHref;
-          link.rel = safeHref.startsWith("http") ? "noreferrer noopener" : "";
-          link.style.display = "inline-block";
-          link.style.marginTop = "1rem";
-          link.style.fontSize = ".85rem";
-          link.style.fontWeight = "600";
-          link.style.cursor = "pointer";
-          if (overlay.content.style?.buttonLike) {
-            link.style.padding = ".55rem .85rem";
-            link.style.borderRadius = ".7rem";
-            link.style.background = "rgba(214,246,255,0.92)";
-            link.style.color = "#091117";
-          }
-          card.appendChild(link);
-        }
-      }
-
+      const card = createOverlayCard(overlay, interactionMode, allowOverlayTransitions);
+      syncOverlayCardContent(card, overlay, mode);
       overlayElements.set(overlay.id, card);
     }
 
@@ -390,6 +670,8 @@ export function ensureOverlayRoot(
           : overlayRoot;
       parent.appendChild(card);
     }
+  } else {
+    syncOverlayRootChildren(overlayRoot, section, mode, interactionMode, allowOverlayTransitions);
   }
 
   for (const overlay of getOverlaysInStackOrder(section.overlays).filter((item) => !item.content.parentGroupId)) {
@@ -403,4 +685,3 @@ export function ensureOverlayRoot(
 
   return overlayRoot;
 }
-

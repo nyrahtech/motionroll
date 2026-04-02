@@ -1,24 +1,24 @@
-import { and, asc, eq } from "drizzle-orm";
+import { presetDefinitionMap } from "@motionroll/shared";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
-  projectMoments,
-  projectOverlays,
-  projectSections,
-  projectTransitions,
   projects,
   publishTargets,
 } from "@/db/schema";
 import { env } from "@/lib/env";
 import { getDerivedAssetsSnapshot } from "@/lib/project-assets";
 import {
+  buildCompatibilitySectionFromDraft,
   buildPublishTargetSummary,
-  buildSectionManifest,
   validateProjectManifest,
 } from "./manifest-helpers";
-import { buildSectionValuesFromDraft, parseProjectDraftDocument } from "./project-draft";
+import {
+  buildProjectDraftDocument,
+  createProjectDraftDocument,
+  parseProjectDraftDocument,
+} from "./project-draft";
 
 type BuildProjectManifestOptions = {
-  /** userId to scope the ownership check. If omitted, no ownership filter is applied (publish-read path). */
   userId?: string;
   publishVersion?: number;
   persistDraftManifest?: boolean;
@@ -39,8 +39,6 @@ export async function buildProjectManifest(
   projectId: string,
   options: BuildProjectManifestOptions = {},
 ) {
-  // If userId is provided, scope to that owner (editor/API paths).
-  // If not provided (e.g. public embed read path), look up by projectId alone.
   const whereClause = options.userId
     ? and(eq(projects.id, projectId), eq(projects.ownerId, options.userId))
     : eq(projects.id, projectId);
@@ -48,7 +46,6 @@ export async function buildProjectManifest(
   const project = await db.query.projects.findFirst({
     where: whereClause,
     with: {
-      sections: { orderBy: [asc(projectSections.sortOrder)] },
       assets: { with: { variants: true } },
       publishTargets: true,
     },
@@ -60,75 +57,35 @@ export async function buildProjectManifest(
 
   const hostedTarget = project.publishTargets.find((t) => t.targetType === "hosted_embed");
   const publishVersion = options.publishVersion ?? project.publishVersion;
-  const draft = project.draftJson ? parseProjectDraftDocument(project.draftJson) : null;
-  const baseSection = project.sections[0];
-  const draftSection = draft && baseSection ? buildSectionValuesFromDraft(baseSection, draft) : null;
-
-  const sections = await Promise.all(
-    (draftSection ? [draftSection] : project.sections).map(async (section) => {
-      const overlays = await db.query.projectOverlays.findMany({
-        where: eq(projectOverlays.projectSectionId, section.id),
-        orderBy: [asc(projectOverlays.sortOrder)],
-      });
-      const moments = await db.query.projectMoments.findMany({
-        where: eq(projectMoments.projectSectionId, section.id),
-        orderBy: [asc(projectMoments.sortOrder)],
-      });
-      const transitions = await db.query.projectTransitions.findMany({
-        where: eq(projectTransitions.projectSectionId, section.id),
-        orderBy: [asc(projectTransitions.sortOrder)],
-      });
-
-      const resolvedSection = {
-        id: section.id,
-        presetId: section.presetId ?? project.selectedPreset,
-        title: section.title,
-        commonConfig: {
-          sectionHeightVh: section.commonConfig.sectionHeightVh,
-          scrubStrength: section.commonConfig.scrubStrength,
-          frameRange: section.commonConfig.frameRange ?? { start: 0, end: 180 },
-          fallbackBehavior: section.commonConfig.fallbackBehavior ?? {
-            mobile: "sequence",
-            reducedMotion: "poster",
+  const draft = project.draftJson
+    ? parseProjectDraftDocument(project.draftJson)
+    : project.lastManifest
+      ? buildProjectDraftDocument(
+          {
+            title: project.title,
+            selectedPreset: project.selectedPreset,
           },
-          motion: section.commonConfig.motion ?? {
-            easing: "power2.out",
-            pin: true,
-            preloadWindow: 6,
-          },
-        },
-        presetConfig: (section.presetConfig ?? {}) as Record<string, string | number | boolean | string[]>,
-      };
-
-      const resolvedOverlays =
-        draftSection && section.id === draftSection.id
-          ? draftSection.overlays.map((overlay) => ({
-              overlayKey: overlay.overlayKey,
-              timing: overlay.timing,
-              content: overlay.content,
-            }))
-          : overlays;
-      const resolvedTransitions =
-        draftSection && section.id === draftSection.id && draftSection.transitions
-          ? draftSection.transitions
-          : transitions.map((transition) => ({
-              ...transition,
-              phase: "enter" as const,
-            }));
-
-      return buildSectionManifest({
-        section: resolvedSection,
-        overlays: resolvedOverlays,
-        moments,
-        transitions: resolvedTransitions.map((transition) => ({
-          ...transition,
-          preset: transition.preset as "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve",
-          easing: transition.easing as "linear" | "ease-out" | "ease-in-out" | "back-out" | "expo-out",
-        })),
-        assets: options.assetsOverride ?? getDerivedAssetsSnapshot(project.assets),
-      });
-    }),
-  );
+          project.lastManifest as never,
+        )
+      : createProjectDraftDocument({
+          title: project.title,
+          presetId: project.selectedPreset,
+          scrollHeightVh:
+            presetDefinitionMap.get(project.selectedPreset)?.defaults.common.sectionHeightVh ?? 240,
+          scrubStrength:
+            presetDefinitionMap.get(project.selectedPreset)?.defaults.common.scrubStrength ?? 1,
+          frameRange:
+            presetDefinitionMap.get(project.selectedPreset)?.defaults.common.frameRange ?? {
+              start: 0,
+              end: 180,
+            },
+          bookmarkTitle: "Hero",
+        });
+  const derivedAssets = options.assetsOverride ?? getDerivedAssetsSnapshot(project.assets);
+  const compatibilitySection = buildCompatibilitySectionFromDraft({
+    draft,
+    assets: derivedAssets,
+  });
 
   const publishTarget = buildPublishTargetSummary({
     slug: hostedTarget?.slug ?? project.slug,
@@ -141,11 +98,11 @@ export async function buildProjectManifest(
   });
 
   const manifest = validateProjectManifest({
-    version: "1.0.0",
+    version: "2.0.0",
     project: {
       id: project.id,
       slug: hostedTarget?.slug ?? project.slug,
-      title: draft?.title ?? project.title,
+      title: draft.title,
       ownerId: project.ownerId,
       publishVersion,
       latestPublishVersion: project.latestPublishVersion,
@@ -153,8 +110,27 @@ export async function buildProjectManifest(
       previewUrl: publishTarget.previewUrl,
     },
     publishTarget,
-    selectedPreset: draft?.presetId ?? project.selectedPreset,
-    sections,
+    selectedPreset: draft.presetId,
+    canvas: {
+      id: draft.canvas.id ?? compatibilitySection.id,
+      presetId: draft.presetId,
+      title: draft.bookmarks[0]?.title ?? compatibilitySection.title,
+      frameAssets: compatibilitySection.frameAssets,
+      frameCount: compatibilitySection.frameCount,
+      progressMapping: compatibilitySection.progressMapping,
+      backgroundColor: draft.canvas.backgroundColor ?? compatibilitySection.backgroundColor,
+      backgroundTrack: draft.canvas.backgroundTrack,
+      fallback: compatibilitySection.fallback,
+      motion: {
+        ...compatibilitySection.motion,
+        sectionHeightVh: draft.canvas.scrollHeightVh,
+        scrubStrength: draft.canvas.scrubStrength,
+      },
+      presetConfig: compatibilitySection.presetConfig,
+      runtimeProfile: compatibilitySection.runtimeProfile,
+    },
+    bookmarks: draft.bookmarks,
+    layers: draft.layers,
     generatedAt: (options.publishedAt ?? project.updatedAt).toISOString(),
   });
 

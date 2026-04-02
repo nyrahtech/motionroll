@@ -2,8 +2,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { ensureUserWorkspace } from "./workspace-bootstrap";
 
 /**
- * Ensures the signed-in user has a real workspace row, global templates,
- * and a first-run demo workspace.
+ * Ensures the signed-in user has a real workspace row.
  */
 export async function ensureUserWorkspaceById(
   userId: string,

@@ -7,19 +7,11 @@ import { ProjectSwitcher } from "./project-switcher";
 interface TopBarProps {
   projectId: string;
   projectName: string;
-  sectionTitle: string; // displayed as scene name
+  bookmarkTitle: string;
   frameRangeStart: number;
   frameRangeEnd: number;
   scrubStrength: number;
   sectionHeightVh: number;
-  sceneEnterTransition: {
-    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
-    duration: number;
-  };
-  sceneExitTransition: {
-    preset: "none" | "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
-    duration: number;
-  };
   currentProjectCoverUrl: string;
   hasThumbnailOverride: boolean;
   previewMode: "desktop" | "mobile";
@@ -47,13 +39,11 @@ interface TopBarProps {
   };
   onSaveProjectSettings: (values: {
     projectTitle: string;
-    sectionTitle: string;
+    bookmarkTitle: string;
     frameRangeStart: number;
     frameRangeEnd: number;
     scrubStrength: number;
     sectionHeightVh: number;
-    sceneEnterTransition: TopBarProps["sceneEnterTransition"];
-    sceneExitTransition: TopBarProps["sceneExitTransition"];
   }) => Promise<void> | void;
   onProjectThumbnailUpload: (file: File) => Promise<void>;
   onProjectThumbnailReset: () => Promise<void>;
@@ -75,8 +65,10 @@ function SaveIndicator({
   const tone =
     saveStatus.local === "saving" || saveStatus.remote === "syncing"
       ? { color: "#facc15", label: "Saving" }
-      : saveStatus.local === "error" || saveStatus.remote === "error" || saveStatus.hasUnsyncedChanges
+    : saveStatus.local === "error" || saveStatus.remote === "error"
         ? { color: "#f87171", label: "Unsaved" }
+      : saveStatus.hasUnsyncedChanges
+        ? { color: "#facc15", label: "Unsaved" }
         : { color: "var(--editor-accent)", label: "Save" };
 
   return (
@@ -104,23 +96,6 @@ function SaveIndicator({
           Retry sync
         </button>
       ) : null}
-      {onRetrySync &&
-      saveStatus.hasUnsyncedChanges &&
-      saveStatus.remote !== "syncing" &&
-      saveStatus.remote !== "error" &&
-      saveStatus.local !== "error" ? (
-        <button
-          type="button"
-          onClick={() => void onRetrySync()}
-          className="rounded border px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-[var(--editor-hover)]"
-          style={{
-            borderColor: "var(--editor-border)",
-            color: "var(--editor-text-dim)",
-          }}
-        >
-          Sync now
-        </button>
-      ) : null}
     </span>
   );
 }
@@ -128,13 +103,11 @@ function SaveIndicator({
 export function TopBar({
   projectId,
   projectName,
-  sectionTitle,
+  bookmarkTitle,
   frameRangeStart,
   frameRangeEnd,
   scrubStrength,
   sectionHeightVh,
-  sceneEnterTransition,
-  sceneExitTransition,
   currentProjectCoverUrl,
   hasThumbnailOverride,
   previewMode,
@@ -167,13 +140,11 @@ export function TopBar({
         <ProjectSwitcher
           currentProjectId={projectId}
           currentProjectTitle={projectName}
-          sectionTitle={sectionTitle}
+          bookmarkTitle={bookmarkTitle}
           frameRangeStart={frameRangeStart}
           frameRangeEnd={frameRangeEnd}
           scrubStrength={scrubStrength}
           sectionHeightVh={sectionHeightVh}
-          sceneEnterTransition={sceneEnterTransition}
-          sceneExitTransition={sceneExitTransition}
           currentProjectCoverUrl={currentProjectCoverUrl}
           hasThumbnailOverride={hasThumbnailOverride}
           projects={projects}
@@ -197,11 +168,15 @@ export function TopBar({
             className="interactive-soft flex h-7 items-center gap-1.5 rounded px-2.5 text-xs"
             style={{
               background:
-                previewMode === "desktop" ? "var(--editor-selected)" : "transparent",
+                previewMode === "desktop" ? "rgba(103,232,249,0.18)" : "transparent",
               color:
                 previewMode === "desktop"
-                  ? "var(--editor-accent)"
+                  ? "white"
                   : "var(--editor-text-dim)",
+              boxShadow:
+                previewMode === "desktop"
+                  ? "inset 0 0 0 1px rgba(103,232,249,0.2)"
+                  : "none",
             }}
           >
             <Monitor className="h-3.5 w-3.5" />
@@ -213,11 +188,15 @@ export function TopBar({
             className="interactive-soft flex h-7 items-center gap-1.5 rounded px-2.5 text-xs"
             style={{
               background:
-                previewMode === "mobile" ? "var(--editor-selected)" : "transparent",
+                previewMode === "mobile" ? "rgba(103,232,249,0.18)" : "transparent",
               color:
                 previewMode === "mobile"
-                  ? "var(--editor-accent)"
+                  ? "white"
                   : "var(--editor-text-dim)",
+              boxShadow:
+                previewMode === "mobile"
+                  ? "inset 0 0 0 1px rgba(103,232,249,0.2)"
+                  : "none",
             }}
           >
             <Smartphone className="h-3.5 w-3.5" />

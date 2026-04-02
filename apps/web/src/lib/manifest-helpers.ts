@@ -1,6 +1,9 @@
 import {
+  type BackgroundMedia,
   type FallbackConfig,
   type OverlayDefinition,
+  type ProjectDraftDocument,
+  type ProjectManifest,
   type ProjectSectionManifest,
   ProjectManifestSchema,
   type PublishTargetSummary,
@@ -65,7 +68,13 @@ function getSectionDurationSecondsFromAssets(input: {
   assets: AssetRow[];
   frameCount: number;
   sequenceFrameCount: number;
+  backgroundMedia?: BackgroundMedia;
 }) {
+  const backgroundDurationMs = input.backgroundMedia?.metadata?.durationMs;
+  if (typeof backgroundDurationMs === "number" && backgroundDurationMs > 0) {
+    return backgroundDurationMs / 1000;
+  }
+
   const sourceAsset = input.assets.find((asset) => asset.kind === "source_video");
   const sourceDurationMs = (sourceAsset?.metadata as { durationMs?: number } | undefined)?.durationMs;
   if (typeof sourceDurationMs === "number" && sourceDurationMs > 0) {
@@ -284,6 +293,10 @@ export function buildSectionManifest(input: {
       sectionHeightVh: number;
       scrubStrength: number;
       frameRange: { start: number; end: number };
+      backgroundColor?: string;
+      backgroundMedia?: BackgroundMedia;
+      backgroundVideoEndBehavior?: "loop" | "hold" | "stop";
+      backgroundVideoRange?: { startMs: number; endMs?: number };
       fallbackBehavior: {
         mobile: "poster" | "video" | "sequence";
         reducedMotion: "poster" | "video" | "sequence";
@@ -334,6 +347,7 @@ export function buildSectionManifest(input: {
     assets: input.assets,
     frameCount,
     sequenceFrameCount,
+    backgroundMedia: input.section.commonConfig.backgroundMedia,
   });
 
   return {
@@ -370,6 +384,21 @@ export function buildSectionManifest(input: {
       easing: transition.easing,
       duration: transition.durationMs / 1000,
     })),
+    ...(input.section.commonConfig.backgroundColor
+      ? { backgroundColor: input.section.commonConfig.backgroundColor }
+      : {}),
+    ...(input.section.commonConfig.backgroundMedia
+      ? { backgroundMedia: input.section.commonConfig.backgroundMedia }
+      : {}),
+    ...(input.section.commonConfig.backgroundMedia
+      ? {
+          backgroundVideoEndBehavior:
+            input.section.commonConfig.backgroundVideoEndBehavior ?? "loop",
+        }
+      : {}),
+    ...(input.section.commonConfig.backgroundMedia && input.section.commonConfig.backgroundVideoRange
+      ? { backgroundVideoRange: input.section.commonConfig.backgroundVideoRange }
+      : {}),
     fallback: resolveManifestFallback({
       presetId: input.section.presetId,
       requestedMobileBehavior: input.section.commonConfig.fallbackBehavior.mobile,
@@ -391,8 +420,75 @@ export function buildSectionManifest(input: {
   };
 }
 
+export function buildCompatibilitySectionFromDraft(input: {
+  draft: ProjectDraftDocument;
+  assets: AssetRow[];
+}) {
+  return buildSectionManifest({
+    section: {
+      id: input.draft.canvas.id ?? "canvas-root",
+      presetId: input.draft.presetId,
+      title: input.draft.bookmarks[0]?.title ?? input.draft.title ?? "Canvas",
+      commonConfig: {
+        sectionHeightVh: input.draft.canvas.scrollHeightVh,
+        scrubStrength: input.draft.canvas.scrubStrength,
+        frameRange: input.draft.canvas.frameRange,
+        backgroundColor: input.draft.canvas.backgroundColor,
+        backgroundMedia: input.draft.canvas.backgroundTrack?.media,
+        backgroundVideoEndBehavior: input.draft.canvas.backgroundTrack?.endBehavior,
+        backgroundVideoRange: input.draft.canvas.backgroundTrack?.mediaRange,
+        fallbackBehavior: {
+          mobile: "sequence",
+          reducedMotion: "poster",
+        },
+        motion: {
+          easing: "power2.out",
+          pin: true,
+          preloadWindow: 6,
+        },
+      },
+      presetConfig: {},
+    },
+    overlays: input.draft.layers.map((layer) => ({
+      overlayKey: layer.id,
+      timing: layer.timing,
+      content: layer.content,
+    })),
+    assets: input.assets,
+  });
+}
+
+export function withManifestCompatibility(manifest: zless<ProjectManifest>): ProjectManifest {
+  const compatibilitySection: ProjectSectionManifest = {
+    id: manifest.canvas.id,
+    presetId: manifest.canvas.presetId,
+    title: manifest.canvas.title,
+    frameAssets: manifest.canvas.frameAssets,
+    frameCount: manifest.canvas.frameCount,
+    progressMapping: manifest.canvas.progressMapping,
+    overlays: manifest.layers,
+    moments: [],
+    transitions: [],
+    backgroundColor: manifest.canvas.backgroundColor,
+    backgroundMedia: manifest.canvas.backgroundTrack?.media,
+    backgroundVideoEndBehavior: manifest.canvas.backgroundTrack?.endBehavior,
+    backgroundVideoRange: manifest.canvas.backgroundTrack?.mediaRange,
+    fallback: manifest.canvas.fallback,
+    motion: manifest.canvas.motion,
+    presetConfig: manifest.canvas.presetConfig,
+    runtimeProfile: manifest.canvas.runtimeProfile,
+  };
+
+  return {
+    ...manifest,
+    sections: [compatibilitySection],
+  };
+}
+
+type zless<T> = Omit<T, "sections">;
+
 export function validateProjectManifest(manifest: unknown) {
-  return ProjectManifestSchema.parse(manifest);
+  return withManifestCompatibility(ProjectManifestSchema.parse(manifest));
 }
 
 export function buildPublishTargetSummary(input: PublishTargetSummary) {

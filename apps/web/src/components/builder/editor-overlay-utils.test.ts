@@ -16,8 +16,8 @@ import {
   deleteRootOverlays,
   reorderOverlayLayers,
   getGroupSelectionEligibility,
+  type HydratedOverlayDefinition,
 } from "./editor-overlay-utils";
-import type { HydratedOverlayDefinition } from "./editor-draft-types";
 
 function makeOverlay(
   id: string,
@@ -34,6 +34,7 @@ function makeOverlay(
       align: "start",
       theme: "dark",
       treatment: "default",
+      blendMode: "normal",
       layer,
       parentGroupId,
       style: { fontFamily: "Inter", fontSize: 34, fontWeight: 600, color: "#fff", lineHeight: 1.08,

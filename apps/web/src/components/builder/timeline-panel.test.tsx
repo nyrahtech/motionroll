@@ -19,13 +19,13 @@ describe("timeline panel", () => {
       <TimelinePanel
         tracks={[
           {
-            id: "scene-track",
-            label: "Scene clip",
+            id: "bookmark-track",
+            label: "Bookmark clip",
             type: "section",
             clips: [
               {
-                id: "scene-clip",
-                label: "Scene",
+                id: "bookmark-clip",
+                label: "Bookmark",
                 trackType: "section",
                 start: 0,
                 end: 1,
@@ -64,10 +64,17 @@ describe("timeline panel", () => {
         onDeleteClip={() => undefined}
         onMoveClipToLayer={() => undefined}
         onMoveClipToNewLayer={() => undefined}
+        onSelectBookmark={() => undefined}
+        onRenameBookmark={() => undefined}
+        onDuplicateBookmark={() => undefined}
+        onDeleteBookmark={() => undefined}
+        onAddBookmark={() => undefined}
+        onAddBookmarkAfter={() => undefined}
+        onReorderBookmarks={() => undefined}
         onSetClipEnterAnimationType={() => undefined}
         onSetClipExitAnimationType={() => undefined}
-        onSetSceneEnterTransitionPreset={() => undefined}
-        onSetSceneExitTransitionPreset={() => undefined}
+        onSetBookmarkEnterTransitionPreset={() => undefined}
+        onSetBookmarkExitTransitionPreset={() => undefined}
         onReorderTracks={() => undefined}
       />,
     );
@@ -80,6 +87,7 @@ describe("timeline panel", () => {
     expect(markup).toContain('title="Next frame"');
     expect(markup).toContain('title="Jump to end"');
     expect(markup).toContain("Layers");
+    expect(markup).toContain("Add Bookmark");
     expect(markup).not.toContain(">Layer</button>");
   });
 
@@ -93,16 +101,17 @@ describe("timeline panel", () => {
     expect(source).not.toContain('className="pointer-events-none fixed z-[30] overflow-hidden rounded-md border"');
   });
 
-  it("keeps scene clip actions focused on transitions and delete flow", () => {
+  it("keeps bookmark clip actions on the bookmark clips themselves", () => {
     const source = readFileSync(
       resolve(process.cwd(), "src/components/builder/timeline", "TimelineTrackRow.tsx"),
       "utf8",
     );
 
+    expect(source).toContain("Rename");
+    expect(source).toContain("Add Bookmark");
     expect(source).toContain(">Enter animation<");
     expect(source).toContain(">Exit animation<");
     expect(source).toContain(">Delete<");
-    expect(source).toContain('label: "Crossfade"');
     expect(source).not.toContain("Scene settings");
     expect(source).not.toContain("Replace scene");
     expect(source).not.toContain("Jump to start");
@@ -128,6 +137,7 @@ describe("timeline panel", () => {
     expect(panelSource).toContain('className="min-h-0 flex-1"');
     expect(panelSource).toContain('className="relative min-w-0 flex-1" style={{ width: totalTrackW }}');
     expect(panelSource).toContain('className="pointer-events-none absolute inset-0 z-[48] overflow-hidden"');
+    expect(panelSource).toContain('{bookmarkTrack?.label ?? "Bookmarks"}');
     expect(rulerSource).toContain('className="sticky left-0 z-[60] flex h-8 shrink-0 items-center border-r px-3"');
     expect(rulerSource).toContain('boxShadow: "10px 0 0 var(--editor-panel-elevated)"');
     expect(labelSource).toContain('className="flex h-14 w-full select-none items-center gap-2 px-3"');
@@ -162,12 +172,37 @@ describe("timeline panel", () => {
 
   it("keeps the timeline scrolled to the active playhead during playback and jump transport", () => {
     const panelSource = readFileSync(
-      resolve(process.cwd(), "src/components/builder/timeline-panel.tsx"),
+      resolve(process.cwd(), "src/components/builder/hooks/useTimelinePanelState.ts"),
       "utf8",
     );
 
     expect(panelSource).toContain("return playback.subscribe(syncScrollToPlayhead)");
     expect(panelSource).toContain("const playheadX = TIMELINE_START_OFFSET + playback.getPlayhead() * totalW");
     expect(panelSource).toContain("scroll.scrollLeft = Math.max(0, playheadX - PLAYHEAD_SCROLL_PADDING)");
+  });
+
+  it("auto-scrolls the timeline vertically and horizontally during drag near viewport edges", () => {
+    const hookSource = readFileSync(
+      resolve(process.cwd(), "src/components/builder/hooks/useTimelineDrag.ts"),
+      "utf8",
+    );
+
+    expect(hookSource).toContain("const autoScrollBoundsRef = useRef<{ maxScrollLeft: number; maxScrollTop: number } | null>(null)");
+    expect(hookSource).toContain("autoScrollBoundsRef.current = scroll");
+    expect(hookSource).toContain("const topDist = pointer.y - rect.top");
+    expect(hookSource).toContain("const bottomDist = rect.bottom - pointer.y");
+    expect(hookSource).toContain("const didScroll = nextScrollLeft !== scroll.scrollLeft || nextScrollTop !== scroll.scrollTop");
+    expect(hookSource).toContain("scroll.scrollTop = nextScrollTop");
+    expect(hookSource).toContain("scroll.scrollLeft = nextScrollLeft");
+  });
+
+  it("shows a single layer name unless there is drag status to display", () => {
+    const labelSource = readFileSync(
+      resolve(process.cwd(), "src/components/builder/timeline", "TimelineLayerLabel.tsx"),
+      "utf8",
+    );
+
+    expect(labelSource).toContain("const statusLabel =");
+    expect(labelSource).not.toContain(": `Layer ${originalIndex + 1}`");
   });
 });

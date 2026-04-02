@@ -66,7 +66,11 @@ export type UseTimelineDragProps = {
   // Callbacks
   onSelectionChange: (selection: TimelineSelection, options?: { additive?: boolean }) => void;
   onReorderTracks: (fromIndex: number, toIndex: number) => void;
-  onClipTimingChange: (clipId: string, timing: { start: number; end: number }) => void;
+  onClipTimingChange: (
+    clipId: string,
+    timing: { start: number; end: number },
+    options?: { dragMode?: "move" | "resize-start" | "resize-end" },
+  ) => void;
   onCommitClipMove: (move: { clipId: string; start: number; end: number; targetLayer?: number }) => void;
   onPlayheadChange: (v: number) => void;
 };
@@ -83,6 +87,7 @@ export function useTimelineDrag({
   onSelectionChange, onReorderTracks, onClipTimingChange, onCommitClipMove, onPlayheadChange,
 }: UseTimelineDragProps) {
   const playheadScrubCleanupRef = useRef<(() => void) | null>(null);
+  const autoScrollBoundsRef = useRef<{ maxScrollLeft: number; maxScrollTop: number } | null>(null);
 
   function disableDocumentSelection() {
     const previousUserSelect = document.body.style.userSelect;
@@ -144,13 +149,26 @@ export function useTimelineDrag({
   function getAutoScrollVelocity() {
     const scroll = scrollRef.current;
     const pointer = pointerClientRef.current;
-    if (!scroll || !pointer) return 0;
+    if (!scroll || !pointer) return { x: 0, y: 0 };
     const rect = scroll.getBoundingClientRect();
     const leftDist = pointer.x - rect.left;
     const rightDist = rect.right - pointer.x;
-    if (leftDist < EDGE_SCROLL_THRESHOLD) return -getEdgeScrollStep(leftDist);
-    if (rightDist < EDGE_SCROLL_THRESHOLD) return getEdgeScrollStep(rightDist);
-    return 0;
+    const topDist = pointer.y - rect.top;
+    const bottomDist = rect.bottom - pointer.y;
+    return {
+      x:
+        leftDist < EDGE_SCROLL_THRESHOLD
+          ? -getEdgeScrollStep(leftDist)
+          : rightDist < EDGE_SCROLL_THRESHOLD
+            ? getEdgeScrollStep(rightDist)
+            : 0,
+      y:
+        topDist < EDGE_SCROLL_THRESHOLD
+          ? -getEdgeScrollStep(topDist)
+          : bottomDist < EDGE_SCROLL_THRESHOLD
+            ? getEdgeScrollStep(bottomDist)
+            : 0,
+    };
   }
 
   function stopAutoScroll() {
@@ -159,16 +177,38 @@ export function useTimelineDrag({
       autoScrollRafRef.current = null;
     }
     autoScrollDriverRef.current = null;
+    autoScrollBoundsRef.current = null;
   }
 
   function startAutoScroll(driver: () => void) {
+    if (autoScrollDriverRef.current === driver && autoScrollRafRef.current != null) {
+      return;
+    }
     stopAutoScroll();
+    const scroll = scrollRef.current;
+    autoScrollBoundsRef.current = scroll
+      ? {
+          maxScrollLeft: Math.max(0, scroll.scrollWidth - scroll.clientWidth),
+          maxScrollTop: Math.max(0, scroll.scrollHeight - scroll.clientHeight),
+        }
+      : null;
     autoScrollDriverRef.current = driver;
     function loop() {
       const velocity = getAutoScrollVelocity();
-      if (velocity !== 0 && scrollRef.current) {
-        scrollRef.current.scrollLeft += velocity;
-        driver();
+      if ((velocity.x !== 0 || velocity.y !== 0) && scrollRef.current) {
+        const scroll = scrollRef.current;
+        const bounds = autoScrollBoundsRef.current ?? {
+          maxScrollLeft: Math.max(0, scroll.scrollWidth - scroll.clientWidth),
+          maxScrollTop: Math.max(0, scroll.scrollHeight - scroll.clientHeight),
+        };
+        const nextScrollLeft = Math.max(0, Math.min(bounds.maxScrollLeft, scroll.scrollLeft + velocity.x));
+        const nextScrollTop = Math.max(0, Math.min(bounds.maxScrollTop, scroll.scrollTop + velocity.y));
+        const didScroll = nextScrollLeft !== scroll.scrollLeft || nextScrollTop !== scroll.scrollTop;
+        if (didScroll) {
+          scroll.scrollLeft = nextScrollLeft;
+          scroll.scrollTop = nextScrollTop;
+          driver();
+        }
       }
       autoScrollRafRef.current = requestAnimationFrame(loop);
     }
@@ -243,6 +283,9 @@ export function useTimelineDrag({
   function updateClipDragFromPointer(clientX: number, clientY: number) {
     const state = clipDragStateRef.current;
     if (!state) return;
+    const clip = layerTracks.flatMap((track) => track.clips).find((entry) => entry.id === state.clipId);
+    const sceneBoundsStart = clip?.metadata?.bookmarkStartProgress ?? 0;
+    const sceneBoundsEnd = clip?.metadata?.bookmarkEndProgress ?? 1;
 
     const scroll = scrollRef.current;
     const scrollDelta = (scroll?.scrollLeft ?? 0) - state.startScrollLeft;
@@ -264,12 +307,26 @@ export function useTimelineDrag({
 
     if (state.type === "move") {
       const progressDelta = dx / Math.max(totalW, 1);
-      const rawStart = clampProgress(state.initialStart + progressDelta);
-      const rawEnd = clampProgress(state.initialEnd + progressDelta);
-      const duration = state.initialEnd - state.initialStart;
+      const sceneWidth = Math.max(sceneBoundsEnd - sceneBoundsStart, 0);
+      const duration = Math.min(state.initialEnd - state.initialStart, sceneWidth);
+      const maxStart = Math.max(sceneBoundsEnd - duration, sceneBoundsStart);
+      const boundedStart = Math.min(
+        Math.max(state.initialStart + progressDelta, sceneBoundsStart),
+        maxStart,
+      );
+      const rawStart = clampProgress(boundedStart);
       const { value: snappedStart, snapped } = snap(rawStart);
-      const start = snapped ? snappedStart : rawStart;
-      const end = clampProgress(start + duration);
+      let start = Math.min(
+        Math.max(snapped ? snappedStart : rawStart, sceneBoundsStart),
+        maxStart,
+      );
+      let end = Math.min(start + duration, sceneBoundsEnd);
+      if (end - start < duration) {
+        start = Math.max(sceneBoundsStart, sceneBoundsEnd - duration);
+        end = Math.min(start + duration, sceneBoundsEnd);
+      }
+      start = clampProgress(start);
+      end = clampProgress(end);
 
       const targetLayerIndex = typeof state.layerTrackIndex === "number"
         ? detectDropTrackIndex(clientY) ?? state.layerTrackIndex
@@ -318,7 +375,6 @@ export function useTimelineDrag({
             })
           : null;
       if (ghostPos) {
-        const clip = layerTracks.flatMap((t) => t.clips).find((c) => c.id === state.clipId);
         setClipGhost({
           label: clip?.label ?? state.clipId,
           top: ghostPos.top,
@@ -333,15 +389,31 @@ export function useTimelineDrag({
       const progressDelta = dx / Math.max(totalW, 1);
       const MIN_CLIP_PROGRESS = 0.04;
       if (state.type === "resize-start") {
-        const rawStart = clampProgress(state.initialStart + progressDelta);
+        const rawStart = clampProgress(
+          Math.min(
+            Math.max(state.initialStart + progressDelta, sceneBoundsStart),
+            state.initialEnd - MIN_CLIP_PROGRESS,
+          ),
+        );
         const { value: start } = snap(rawStart);
-        const end = Math.max(start + MIN_CLIP_PROGRESS, state.initialEnd);
-        syncClipTimingPreview({ clipId: state.clipId, start, end });
+        syncClipTimingPreview({
+          clipId: state.clipId,
+          start: Math.min(Math.max(start, sceneBoundsStart), state.initialEnd - MIN_CLIP_PROGRESS),
+          end: state.initialEnd,
+        });
       } else {
-        const rawEnd = clampProgress(state.initialEnd + progressDelta);
+        const rawEnd = clampProgress(
+          Math.max(
+            Math.min(state.initialEnd + progressDelta, sceneBoundsEnd),
+            state.initialStart + MIN_CLIP_PROGRESS,
+          ),
+        );
         const { value: end } = snap(rawEnd);
-        const start = Math.min(end - MIN_CLIP_PROGRESS, state.initialStart);
-        syncClipTimingPreview({ clipId: state.clipId, start, end });
+        syncClipTimingPreview({
+          clipId: state.clipId,
+          start: state.initialStart,
+          end: Math.max(Math.min(end, sceneBoundsEnd), state.initialStart + MIN_CLIP_PROGRESS),
+        });
       }
     }
   }
@@ -442,16 +514,19 @@ export function useTimelineDrag({
       setDraggingClipMode(null);
     }
     const restoreSelection = disableDocumentSelection();
+    const dragAutoScrollDriver = () =>
+      updateClipDragFromPointer(
+        pointerClientRef.current?.x ?? e.clientX,
+        pointerClientRef.current?.y ?? e.clientY,
+      );
 
     function handleMove(ev: MouseEvent) {
       pointerClientRef.current = { x: ev.clientX, y: ev.clientY };
       updateClipDragFromPointer(ev.clientX, ev.clientY);
-      startAutoScroll(() => updateClipDragFromPointer(
-        pointerClientRef.current?.x ?? ev.clientX,
-        pointerClientRef.current?.y ?? ev.clientY,
-      ));
     }
 
+    pointerClientRef.current = { x: e.clientX, y: e.clientY };
+    startAutoScroll(dragAutoScrollDriver);
     function handleUp() {
       const state = clipDragStateRef.current;
       const didDrag = moveDragActivatedRef.current;
@@ -469,7 +544,11 @@ export function useTimelineDrag({
         } else {
           const preview = clipTimingPreviewRef.current;
           if (preview) {
-            onClipTimingChange(state.clipId, { start: preview.start, end: preview.end });
+            onClipTimingChange(
+              state.clipId,
+              { start: preview.start, end: preview.end },
+              { dragMode: state.type },
+            );
           }
         }
         suppressPostDragClick();
@@ -502,12 +581,19 @@ export function useTimelineDrag({
       startY: e.clientY,
     };
     const restoreSelection = disableDocumentSelection();
+    const trackAutoScrollDriver = () =>
+      updateTrackReorderFromPointer(
+        pointerClientRef.current?.x ?? e.clientX,
+        pointerClientRef.current?.y ?? e.clientY,
+      );
 
     function handleMove(ev: MouseEvent) {
       pointerClientRef.current = { x: ev.clientX, y: ev.clientY };
       updateTrackReorderFromPointer(ev.clientX, ev.clientY);
     }
 
+    pointerClientRef.current = { x: e.clientX, y: e.clientY };
+    startAutoScroll(trackAutoScrollDriver);
     function handleUp() {
       const state = trackReorderStateRef.current;
       const didDrag =

@@ -1,7 +1,7 @@
 import React from "react";
 import { requirePageAuth } from "@/lib/auth";
 import { LibraryPage } from "@/components/library/library-page";
-import { getArchivedProjects, getDemoProjects, getRecentProjects } from "@/lib/data/projects";
+import { getMyProjects } from "@/lib/data/projects";
 
 export const dynamic = "force-dynamic";
 
@@ -22,28 +22,14 @@ export default async function LibraryRoute({
 } = {}) {
   const { userId } = await requirePageAuth();
   const resolvedSearchParams = searchParams ? await searchParams : {};
-  const [recentProjectsResult, demoProjectsResult, archivedProjectsResult] = await Promise.allSettled([
-    getRecentProjects(userId),
-    getDemoProjects(userId),
-    getArchivedProjects(userId),
-  ]);
+  const myProjectsResult = await Promise.allSettled([getMyProjects(userId)]).then((results) => results[0]);
 
-  const recentProjects =
-    recentProjectsResult.status === "fulfilled" ? recentProjectsResult.value : [];
-  const demoProjects =
-    demoProjectsResult.status === "fulfilled" ? demoProjectsResult.value : [];
-  const archivedProjects =
-    archivedProjectsResult.status === "fulfilled" ? archivedProjectsResult.value : [];
-  const workspaceDegraded =
-    recentProjectsResult.status === "rejected" ||
-    demoProjectsResult.status === "rejected" ||
-    archivedProjectsResult.status === "rejected";
+  const myProjects = myProjectsResult.status === "fulfilled" ? myProjectsResult.value : [];
+  const workspaceDegraded = myProjectsResult.status === "rejected";
 
   return (
     <LibraryPage
-      recentProjects={recentProjects}
-      demoProjects={demoProjects}
-      archivedProjects={archivedProjects}
+      myProjects={myProjects}
       workspaceDegraded={workspaceDegraded}
       workspaceNotice={resolveWorkspaceNotice(resolvedSearchParams.workspace)}
     />

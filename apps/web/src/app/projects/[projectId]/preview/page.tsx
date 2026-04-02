@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import { requirePageAuth } from "@/lib/auth";
-import { StandaloneRuntime } from "@/components/runtime/standalone-runtime";
 import { getProjectById } from "@/lib/data/projects";
 import { buildProjectManifest } from "@/lib/manifest";
 import { PreviewExitButton } from "./preview-exit-button";
+import { LocalPreviewRuntime } from "./local-preview-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +19,25 @@ function resolveEmbeddedPreview(value?: string) {
   return value === "1" || value === "true";
 }
 
+function resolveLocalPreviewSessionId(draftSource?: string, session?: string) {
+  if (draftSource !== "local") {
+    return undefined;
+  }
+  return session;
+}
+
 export default async function ProjectPreviewPage({
   params,
   searchParams,
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams?: Promise<{ mode?: string; forceSequence?: string; embed?: string }>;
+  searchParams?: Promise<{
+    mode?: string;
+    forceSequence?: string;
+    embed?: string;
+    draftSource?: string;
+    session?: string;
+  }>;
 }) {
   const { userId } = await requirePageAuth();
   const { projectId } = await params;
@@ -41,11 +54,15 @@ export default async function ProjectPreviewPage({
 
   return (
     <main className="bg-black">
-      <StandaloneRuntime
-        manifest={manifest}
+      <LocalPreviewRuntime
+        projectId={projectId}
+        fallbackManifest={manifest}
         mode={resolveRuntimeMode(resolvedSearchParams.mode)}
-        reducedMotion={false}
         forceSequence={resolveForceSequence(resolvedSearchParams.forceSequence)}
+        localPreviewSessionId={resolveLocalPreviewSessionId(
+          resolvedSearchParams.draftSource,
+          resolvedSearchParams.session,
+        )}
       />
       {resolveEmbeddedPreview(resolvedSearchParams.embed) ? null : (
         <div

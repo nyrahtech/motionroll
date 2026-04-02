@@ -1,21 +1,9 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { z } from "zod";
 import { requirePageAuth } from "@/lib/auth";
-import { createProjectFromPreset } from "@/lib/data/projects";
-
-const createProjectSchema = z.object({
-  presetId: z.enum([
-    "scroll-sequence",
-    "product-reveal",
-    "feature-walkthrough",
-    "before-after",
-    "device-spin",
-    "chaptered-scroll-story",
-  ]),
-  title: z.string().min(1).max(128).optional(),
-});
+import { createProjectFromSource } from "@/lib/data/projects";
+import { createProjectSourceSchema } from "../lib/project-creation";
 
 function isRetryableWorkspaceFailure(error: unknown) {
   if (!(error instanceof Error)) {
@@ -32,14 +20,16 @@ function isRetryableWorkspaceFailure(error: unknown) {
 
 export async function createProjectAction(formData: FormData) {
   const { userId } = await requirePageAuth();
-  const parsed = createProjectSchema.parse({
-    presetId: formData.get("presetId"),
-    title: formData.get("title") || undefined,
-  });
+  const rawSource = formData.get("source");
+  const parsedSource = createProjectSourceSchema.parse(
+    typeof rawSource === "string" ? JSON.parse(rawSource) : null,
+  );
+  const rawTitle = formData.get("title");
+  const title = typeof rawTitle === "string" && rawTitle.trim() ? rawTitle : undefined;
 
   let project;
   try {
-    project = await createProjectFromPreset(userId, parsed.presetId, parsed.title);
+    project = await createProjectFromSource(userId, parsedSource, title);
   } catch (error) {
     if (isRetryableWorkspaceFailure(error)) {
       redirect("/library?workspace=create_failed");

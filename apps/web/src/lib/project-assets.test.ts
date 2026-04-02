@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  collectReferencedMediaAssetIds,
   getDerivedAssetsSnapshot,
   getPrimarySourceAsset,
   getRenderableAssetPreview,
   getSourceAssetValidationError,
+  rewriteManifestMediaUrls,
 } from "./project-assets";
 
 describe("project asset helpers", () => {
@@ -156,5 +158,125 @@ describe("project asset helpers", () => {
         },
       }),
     ).toBe("Only the active primary source can be processed for this project.");
+  });
+
+  it("collects referenced background and overlay media asset ids", () => {
+    expect(
+      collectReferencedMediaAssetIds({
+        canvas: {
+          backgroundTrack: {
+            media: { assetId: "asset-bg", url: "https://example.com/bg.mp4" },
+          },
+        },
+        layers: [
+          {
+            id: "overlay-1",
+            timing: { start: 0, end: 1 },
+            timingSource: "manual",
+            content: {
+              align: "start",
+              theme: "dark",
+              treatment: "default",
+              mediaUrl: "https://example.com/overlay.mp4",
+              mediaAssetId: "asset-overlay",
+              playbackMode: "normal",
+              blendMode: "normal",
+              enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
+              exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
+            },
+          },
+        ],
+        sections: [],
+      } as never),
+    ).toEqual(["asset-bg", "asset-overlay"]);
+  });
+
+  it("rewrites referenced media urls in the manifest", () => {
+    const rewritten = rewriteManifestMediaUrls(
+      {
+        version: "1.0.0",
+        generatedAt: new Date(0).toISOString(),
+        selectedPreset: "product-reveal",
+        project: {
+          id: "11111111-1111-1111-1111-111111111111",
+          slug: "demo",
+          title: "Demo",
+          ownerId: "local",
+          publishVersion: 1,
+          previewUrl: "/preview/demo",
+        },
+        publishTarget: {
+          slug: "demo",
+          targetType: "hosted_embed",
+          version: 1,
+          previewUrl: "/preview/demo",
+          isReady: true,
+        },
+        canvas: {
+          id: "canvas-root",
+          presetId: "product-reveal",
+          title: "Canvas",
+          frameAssets: [],
+          frameCount: 0,
+          progressMapping: {
+            startProgress: 0,
+            endProgress: 1,
+            frameCount: 1,
+            frameRange: { start: 0, end: 1 },
+          },
+          backgroundTrack: {
+            id: "background-track",
+            start: 0,
+            end: 1,
+            media: {
+              assetId: "asset-bg",
+              url: "https://example.com/background.mp4",
+            },
+            endBehavior: "loop",
+          },
+          fallback: {
+            mobileBehavior: "poster",
+            reducedMotionBehavior: "poster",
+          },
+          motion: {
+            sectionHeightVh: 240,
+            scrubStrength: 1,
+            easing: "linear",
+            pin: true,
+            preloadWindow: 4,
+          },
+          presetConfig: {},
+          runtimeProfile: { kind: "product-reveal" },
+        },
+        bookmarks: [],
+        layers: [
+          {
+            id: "overlay-1",
+            timing: { start: 0, end: 1 },
+            timingSource: "manual",
+            content: {
+              type: "image",
+              mediaUrl: "https://example.com/overlay.mp4",
+              mediaAssetId: "asset-overlay",
+              playbackMode: "loop",
+              align: "start",
+              theme: "dark",
+              treatment: "default",
+              blendMode: "normal",
+              enterAnimation: { type: "fade", easing: "ease-out", duration: 0.45, delay: 0 },
+              exitAnimation: { type: "none", easing: "ease-in-out", duration: 0.35 },
+            },
+          },
+        ],
+        sections: [],
+      } as never,
+      new Map([
+        ["asset-bg", "media/background.mp4"],
+        ["asset-overlay", "media/overlay.mp4"],
+      ]),
+    );
+
+    expect(rewritten.canvas.backgroundTrack?.media.url).toBe("media/background.mp4");
+    expect(rewritten.layers[0]?.content.mediaUrl).toBe("media/overlay.mp4");
   });
 });

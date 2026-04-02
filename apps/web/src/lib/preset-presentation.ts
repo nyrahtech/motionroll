@@ -4,7 +4,7 @@ export const presetPresentation = {
   "product-reveal": {
     category: "Launch",
     bestFor: "Hero product storytelling",
-    sourceHint: "Works best with turntable captures, launch films, or clean AI rotations.",
+    sourceHint: "Works best with turntable captures, launch films, or clean product rotations.",
     pace: "Recommended",
     heroLabel: "Recommended starting point",
   },

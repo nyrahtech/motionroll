@@ -29,10 +29,13 @@ class FakeElement {
   poster = "";
   preload = "";
   currentTime = 0;
+  duration = 4;
+  readyState = 0;
   autoplay = false;
   loop = false;
   muted = false;
   playsInline = false;
+  paused = true;
   ariaHidden = "false";
   clientWidth = 960;
   clientHeight = 540;
@@ -45,8 +48,14 @@ class FakeElement {
     this.tagName = tagName;
   }
 
-  play = vi.fn(async () => undefined);
-  pause = vi.fn(() => undefined);
+  play = vi.fn(async () => {
+    this.paused = false;
+    return undefined;
+  });
+  pause = vi.fn(() => {
+    this.paused = true;
+    return undefined;
+  });
 
   addEventListener(eventName: string, listener: () => void) {
     this.listeners[eventName] ??= [];
@@ -217,6 +226,7 @@ function createManifest(frameBasePath = "/frames"): ProjectManifest {
               align: "start" as const,
               theme: "light" as const,
               treatment: "default" as const,
+              blendMode: "normal" as const,
               layer: 0,
               enterAnimation: defaultEnterAnimation,
               exitAnimation: defaultExitAnimation,
@@ -231,6 +241,7 @@ function createManifest(frameBasePath = "/frames"): ProjectManifest {
               align: "end" as const,
               theme: "dark" as const,
               treatment: "default" as const,
+              blendMode: "normal" as const,
               layer: 1,
               enterAnimation: defaultEnterAnimation,
               exitAnimation: defaultExitAnimation,
@@ -268,6 +279,28 @@ function createManifest(frameBasePath = "/frames"): ProjectManifest {
   };
 }
 
+function createMultiSectionManifest(): ProjectManifest {
+  const baseManifest = createManifest("/frames-a");
+  const firstSection = baseManifest.sections[0]!;
+  const secondSection = createManifest("/frames-b").sections[0]!;
+
+  return {
+    ...baseManifest,
+    sections: [
+      {
+        ...firstSection,
+        id: "scene-1",
+        title: "Scene 1",
+      },
+      {
+        ...secondSection,
+        id: "scene-2",
+        title: "Scene 2",
+      },
+    ],
+  };
+}
+
 async function flushPromises() {
   await Promise.resolve();
   await Promise.resolve();
@@ -296,6 +329,9 @@ describe("runtime controlled progress", () => {
           (listener) => listener !== callback,
         );
       },
+    });
+    vi.stubGlobal("CSS", {
+      supports: vi.fn(() => true),
     });
     vi.stubGlobal("Image", FakeImage);
   });
@@ -346,6 +382,22 @@ describe("runtime controlled progress", () => {
     expect((overlayRoot as unknown as FakeElement).dataset.activeOverlayId).toBe("overlay-2");
   });
 
+  it("rejects multi-scene manifests in controlled mode after the single-canvas cutover", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createMultiSectionManifest();
+
+    expect(() =>
+      createScrollSection(container, manifest, {
+        mode: "mobile",
+        interactionMode: "controlled",
+        reducedMotion: true,
+      }),
+    ).toThrow(
+      "Scene-based multi-section manifests are unsupported after the single-canvas refactor.",
+    );
+  });
+
   it("forces sequence rendering in controlled mobile mode when frames exist", async () => {
     const { createScrollSection } = await import("../src");
     const container = new FakeElement("div") as unknown as HTMLElement;
@@ -368,59 +420,6 @@ describe("runtime controlled progress", () => {
     const drawCalls = ((canvas as unknown as FakeCanvasElement).context.drawImage as ReturnType<typeof vi.fn>).mock.calls;
     expect(drawCalls.length).toBeGreaterThan(0);
     expect((container as unknown as FakeElement).children.some((child) => child.tagName === "video")).toBe(false);
-  });
-
-  it("renders and clears the scene crossfade layer in the runtime stage", async () => {
-    const { createScrollSection } = await import("../src");
-    const container = new FakeElement("div") as unknown as HTMLElement;
-    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
-    const canvas = new FakeCanvasElement() as unknown as HTMLCanvasElement;
-    const manifest = createManifest();
-    const section = manifest.sections[0]!;
-
-    const controller = createScrollSection(container, {
-      ...manifest,
-      sections: [
-        {
-          ...section,
-          transitions: [
-            {
-              id: "scene-transition",
-              scope: "sequence" as const,
-              phase: "enter" as const,
-              fromId: section.id,
-              toId: section.id,
-              preset: "crossfade" as const,
-              easing: "ease-in-out" as const,
-              duration: 0.4,
-            },
-          ],
-          motion: {
-            ...section.motion,
-            durationSeconds: 8,
-          },
-        },
-      ],
-    }, {
-      mode: "mobile",
-      interactionMode: "controlled",
-      reducedMotion: false,
-      overlayRoot,
-      canvas,
-    });
-
-    controller.setProgress(0.02);
-    await flushPromises();
-
-    const transitionLayer = (container as unknown as FakeElement).querySelector(
-      '[data-scene-transition-layer="true"]',
-    ) as FakeElement | null;
-    expect(transitionLayer).not.toBeNull();
-    expect(transitionLayer?.style.opacity).toBe("0.6");
-
-    controller.setProgress(0.1);
-    await flushPromises();
-    expect((container as unknown as FakeElement).querySelector('[data-scene-transition-layer="true"]')).toBeNull();
   });
 
   it("prefers fallback video in controlled mode when the frame sequence is too sparse for smooth playback", async () => {
@@ -520,9 +519,860 @@ describe("runtime controlled progress", () => {
       overlayRoot,
     });
 
-    const overlayCards = (overlayRoot as unknown as FakeElement).children;
+    const overlayCards = (overlayRoot as unknown as FakeElement).children as FakeElement[];
     expect(overlayCards.map((child) => child.dataset.overlayId)).toEqual(["overlay-bottom", "overlay-top"]);
     expect(overlayCards.map((child) => child.style.zIndex)).toEqual(["100", "102"]);
+  });
+
+  it("renders metadata-marked overlay media as video and blends the media node instead of the card", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          overlays: [
+            {
+              ...section.overlays[0]!,
+              content: {
+                ...section.overlays[0]!.content,
+                type: "image",
+                mediaUrl: "/overlay/opaque-source",
+                mediaMetadata: {
+                  kind: "video",
+                  mimeType: "video/mp4",
+                },
+                blendMode: "screen",
+              },
+            },
+          ],
+        },
+      ],
+    }, {
+      mode: "desktop",
+      reducedMotion: false,
+      overlayRoot,
+    });
+
+    const card = (overlayRoot as unknown as FakeElement).children[0];
+    const media = card?.children.find((child) => child.tagName === "video");
+    expect(card?.style.mixBlendMode).toBe("normal");
+    expect(card?.style.background).toBe("transparent");
+    expect(media?.style.mixBlendMode).toBe("screen");
+    expect(media?.style.borderRadius).toBe("0");
+  });
+
+  it("does not try to run video playback controls for image overlays", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          overlays: [
+            {
+              ...section.overlays[0]!,
+              content: {
+                ...section.overlays[0]!.content,
+                type: "image",
+                mediaUrl: "/overlay/still-frame.png",
+              },
+            },
+          ],
+        },
+      ],
+    }, {
+      mode: "mobile",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    expect(() => controller.setProgress(0.5)).not.toThrow();
+
+    const card = (overlayRoot as unknown as FakeElement).children[0];
+    expect(card?.children.some((child) => child.tagName === "img")).toBe(true);
+  });
+
+  it("renders scene background video and syncs it with controlled progress", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: [],
+          frameCount: 0,
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+            metadata: { kind: "video", mimeType: "video/mp4", durationMs: 4000 },
+          },
+        },
+      ],
+    }, {
+      mode: "desktop",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    controller.setProgress(0.5);
+
+    const backgroundVideo = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "video" && child.dataset.sceneBackgroundVideo === "true",
+    );
+    expect(backgroundVideo?.src).toBe("/background.mp4");
+    expect(backgroundVideo?.currentTime).toBe(2);
+
+    controller.setOverlayTransitionsEnabled(true);
+    expect(backgroundVideo?.play).toHaveBeenCalled();
+
+    controller.setOverlayTransitionsEnabled(false);
+    expect(backgroundVideo?.pause).toHaveBeenCalled();
+  });
+
+  it("shows a background poster until the scene background video is ready", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: [],
+          frameCount: 0,
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+            posterUrl: "/background-poster.jpg",
+            metadata: { kind: "video", mimeType: "video/mp4", durationMs: 4000 },
+          },
+        },
+      ],
+    }, {
+      mode: "desktop",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    const backgroundVideo = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "video" && child.dataset.sceneBackgroundVideo === "true",
+    ) as (FakeElement & { onloadeddata?: (() => void) | null }) | undefined;
+    const backgroundPoster = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "img" && child.dataset.sceneBackgroundPoster === "true",
+    );
+
+    expect(backgroundPoster?.src).toBe("/background-poster.jpg");
+    expect(backgroundPoster?.style.visibility).toBe("visible");
+
+    backgroundVideo?.onloadeddata?.();
+
+    expect(backgroundPoster?.style.visibility).toBe("hidden");
+    expect(backgroundPoster?.style.opacity).toBe("0");
+  });
+
+  it("hides the background poster during controlled progress once the video is ready", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: [],
+          frameCount: 0,
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+            posterUrl: "/background-poster.jpg",
+            metadata: { kind: "video", mimeType: "video/mp4", durationMs: 4000 },
+          },
+        },
+      ],
+    }, {
+      mode: "desktop",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    const backgroundVideo = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "video" && child.dataset.sceneBackgroundVideo === "true",
+    )!;
+    const backgroundPoster = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "img" && child.dataset.sceneBackgroundPoster === "true",
+    )!;
+
+    backgroundVideo.readyState = 4;
+    controller.setProgress(0.25);
+
+    expect(backgroundPoster.style.visibility).toBe("hidden");
+    expect(backgroundPoster.style.opacity).toBe("0");
+  });
+
+  it("maps controlled background-video playback from the scene-local visible range", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: [],
+          frameCount: 20,
+          progressMapping: {
+            startProgress: 0,
+            endProgress: 1,
+            frameCount: 20,
+            frameRange: {
+              start: 10,
+              end: 19,
+            },
+          },
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+            metadata: { kind: "video", mimeType: "video/mp4", durationMs: 4000 },
+          },
+        },
+      ],
+    }, {
+      mode: "desktop",
+      interactionMode: "controlled",
+      overlayRoot,
+      initialProgress: frameIndexToSequenceProgress(10, 20),
+    });
+
+    controller.setProgress(frameIndexToSequenceProgress(15, 20));
+
+    const backgroundVideo = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "video" && child.dataset.sceneBackgroundVideo === "true",
+    );
+    expect(backgroundVideo?.currentTime).toBeCloseTo(2.222, 2);
+  });
+
+  it("holds or hides a trimmed background video after the kept range ends", async () => {
+    const { createScrollSection } = await import("../src");
+    const buildController = () => {
+      const container = new FakeElement("div") as unknown as HTMLElement;
+      const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+      const manifest = createManifest();
+      const section = manifest.sections[0]!;
+
+      const controller = createScrollSection(container, {
+        ...manifest,
+        sections: [
+          {
+            ...section,
+            frameAssets: [],
+            frameCount: 96,
+            progressMapping: {
+              ...section.progressMapping,
+              frameCount: 96,
+              frameRange: {
+                start: 0,
+                end: 95,
+              },
+            },
+            backgroundMedia: {
+              assetId: "asset-bg",
+              url: "/background.mp4",
+              metadata: { kind: "video", mimeType: "video/mp4", durationMs: 4000 },
+            },
+            backgroundVideoRange: {
+              startMs: 500,
+              endMs: 1500,
+            },
+          },
+        ],
+      }, {
+        mode: "desktop",
+        interactionMode: "controlled",
+        overlayRoot,
+      });
+
+      const backgroundVideo = (container as unknown as FakeElement).children.find(
+        (child) => child.tagName === "video" && child.dataset.sceneBackgroundVideo === "true",
+      )!;
+
+      return { controller, backgroundVideo, manifest, section };
+    };
+
+    const hold = buildController();
+    hold.controller.updateManifest({
+      ...hold.manifest,
+      sections: [
+        {
+          ...hold.section,
+          frameAssets: [],
+          frameCount: 96,
+          progressMapping: {
+            ...hold.section.progressMapping,
+            frameCount: 96,
+            frameRange: { start: 0, end: 95 },
+          },
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+            metadata: { kind: "video", mimeType: "video/mp4", durationMs: 4000 },
+          },
+          backgroundVideoEndBehavior: "hold",
+          backgroundVideoRange: { startMs: 500, endMs: 1500 },
+        },
+      ],
+    });
+    hold.controller.setProgress(1);
+    expect(hold.backgroundVideo.currentTime).toBeGreaterThan(1.49);
+    expect(hold.backgroundVideo.currentTime).toBeLessThan(1.5);
+    expect(hold.backgroundVideo.style.visibility).toBe("visible");
+
+    const stop = buildController();
+    stop.controller.updateManifest({
+      ...stop.manifest,
+      sections: [
+        {
+          ...stop.section,
+          frameAssets: [],
+          frameCount: 96,
+          progressMapping: {
+            ...stop.section.progressMapping,
+            frameCount: 96,
+            frameRange: { start: 0, end: 95 },
+          },
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+            metadata: { kind: "video", mimeType: "video/mp4", durationMs: 4000 },
+          },
+          backgroundVideoEndBehavior: "stop",
+          backgroundVideoRange: { startMs: 500, endMs: 1500 },
+        },
+      ],
+    });
+    stop.controller.setProgress(1);
+    expect(stop.backgroundVideo.style.visibility).toBe("hidden");
+  });
+
+  it("keeps hold-last-frame background video playing normally before the kept range ends", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: [],
+          frameCount: 96,
+          progressMapping: {
+            ...section.progressMapping,
+            frameCount: 96,
+            frameRange: { start: 0, end: 95 },
+          },
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+            metadata: { kind: "video", mimeType: "video/mp4", durationMs: 4000 },
+          },
+          backgroundVideoEndBehavior: "hold",
+          backgroundVideoRange: { startMs: 500, endMs: 1500 },
+        },
+      ],
+    }, {
+      mode: "desktop",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    const backgroundVideo = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "video" && child.dataset.sceneBackgroundVideo === "true",
+    )!;
+
+    controller.setProgress(0.125);
+
+    expect(backgroundVideo.currentTime).toBeGreaterThan(0.99);
+    expect(backgroundVideo.currentTime).toBeLessThan(1.01);
+  });
+
+  it("keeps background playback steady when late metadata arrives for the same URL", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: [],
+          frameCount: 0,
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+          },
+        },
+      ],
+    }, {
+      mode: "desktop",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    controller.setProgress(0.5);
+
+    const backgroundVideo = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "video" && child.dataset.sceneBackgroundVideo === "true",
+    )!;
+    const before = backgroundVideo.currentTime;
+
+    controller.updateManifest({
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: [],
+          frameCount: 0,
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+            metadata: { kind: "video", mimeType: "video/mp4", durationMs: 4000 },
+          },
+        },
+      ],
+    });
+
+    expect(backgroundVideo.currentTime).toBe(before);
+  });
+
+  it("retries background playback when metadata arrives after controlled playback starts", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: [],
+          frameCount: 0,
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+          },
+        },
+      ],
+    }, {
+      mode: "desktop",
+      interactionMode: "controlled",
+      overlayRoot,
+      enableOverlayTransitions: true,
+    });
+
+    const backgroundVideo = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "video" && child.dataset.sceneBackgroundVideo === "true",
+    )!;
+
+    backgroundVideo.duration = 4;
+    backgroundVideo.listeners.loadedmetadata?.forEach((listener) => listener());
+
+    expect(backgroundVideo.play).toHaveBeenCalled();
+  });
+
+  it("does not micro-seek a playing background video when it is already close to the expected time", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: [],
+          frameCount: 0,
+          progressMapping: {
+            ...section.progressMapping,
+            frameCount: 96,
+            frameRange: { start: 0, end: 95 },
+          },
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+            metadata: { kind: "video", mimeType: "video/mp4", durationMs: 4000 },
+          },
+        },
+      ],
+    }, {
+      mode: "desktop",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    const backgroundVideo = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "video" && child.dataset.sceneBackgroundVideo === "true",
+    )!;
+
+    backgroundVideo.readyState = 4;
+    controller.setOverlayTransitionsEnabled(true);
+    backgroundVideo.currentTime = 2.14;
+    controller.setProgress(0.5);
+
+    expect(backgroundVideo.currentTime).toBe(2.14);
+  });
+
+  it("does not trust natural background playback before the video is ready", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: [],
+          frameCount: 0,
+          backgroundMedia: {
+            assetId: "asset-bg",
+            url: "/background.mp4",
+            metadata: { kind: "video", mimeType: "video/mp4", durationMs: 4000 },
+          },
+        },
+      ],
+    }, {
+      mode: "desktop",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    const backgroundVideo = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "video" && child.dataset.sceneBackgroundVideo === "true",
+    )!;
+
+    backgroundVideo.readyState = 0;
+    backgroundVideo.currentTime = 0;
+    controller.setProgress(0.02);
+
+    expect(backgroundVideo.currentTime).toBeCloseTo(0.08, 2);
+  });
+
+  it("does not micro-seek a playing fallback video when it is already close to the expected time", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: Array.from({ length: 47 }, (_, index) => ({
+            index,
+            path: `frame-${index}`,
+            variants: [{ kind: "mobile" as const, url: `/frames/${index}-mobile.jpg` }],
+          })),
+          frameCount: 47,
+          progressMapping: {
+            ...section.progressMapping,
+            frameCount: 47,
+            frameRange: { start: 0, end: 46 },
+          },
+          motion: {
+            ...section.motion,
+            durationSeconds: 28.3,
+          },
+          fallback: {
+            ...section.fallback,
+            fallbackVideoUrl: "/fallback.mp4",
+          },
+        },
+      ],
+    }, {
+      mode: "mobile",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    const fallbackVideo = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "video" && child.src === "/fallback.mp4",
+    )!;
+
+    controller.setOverlayTransitionsEnabled(true);
+    fallbackVideo.currentTime = 2.12;
+    controller.setProgress(0.5);
+
+    expect(fallbackVideo.currentTime).toBe(2.12);
+  });
+
+  it("maps controlled fallback-video playback from the scene-local visible range", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          frameAssets: Array.from({ length: 10 }, (_, index) => ({
+            index,
+            path: `frame-${index}`,
+            variants: [{ kind: "mobile" as const, url: `/frames/${index}-mobile.jpg` }],
+          })),
+          frameCount: 20,
+          progressMapping: {
+            startProgress: 0,
+            endProgress: 1,
+            frameCount: 20,
+            frameRange: { start: 10, end: 19 },
+          },
+          motion: {
+            ...section.motion,
+            durationSeconds: 4,
+          },
+          fallback: {
+            ...section.fallback,
+            fallbackVideoUrl: "/fallback.mp4",
+          },
+        },
+      ],
+    }, {
+      mode: "mobile",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    const fallbackVideo = (container as unknown as FakeElement).children.find(
+      (child) => child.tagName === "video" && child.src === "/fallback.mp4",
+    )!;
+
+    controller.setProgress(frameIndexToSequenceProgress(15, 20));
+
+    expect(fallbackVideo.currentTime).toBeCloseTo(2.222, 2);
+  });
+
+  it("scroll-scrubs video overlays across the clip lifetime", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          overlays: [
+            {
+              ...section.overlays[0]!,
+              timing: { start: 0.25, end: 0.75 },
+              content: {
+                ...section.overlays[0]!.content,
+                type: "image",
+                mediaUrl: "/overlay/product-spin.mp4",
+                mediaMetadata: { kind: "video", mimeType: "video/mp4" },
+                playbackMode: "scroll-scrub",
+              },
+            },
+          ],
+        },
+      ],
+    }, {
+      mode: "desktop",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    controller.setProgress(0.5);
+
+    const card = (overlayRoot as unknown as FakeElement).children[0];
+    const video = card?.children.find((child) => child.tagName === "video");
+    expect(video?.pause).toHaveBeenCalled();
+    expect(video?.currentTime).toBe(2);
+  });
+
+  it("fails closed if a video overlay node loses callable media controls", async () => {
+    const { createScrollSection } = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    const controller = createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          overlays: [
+            {
+              ...section.overlays[0]!,
+              content: {
+                ...section.overlays[0]!.content,
+                type: "image",
+                mediaUrl: "/overlay/product-spin.mp4",
+                mediaMetadata: { kind: "video", mimeType: "video/mp4" },
+                playbackMode: "scroll-scrub",
+              },
+            },
+          ],
+        },
+      ],
+    }, {
+      mode: "desktop",
+      interactionMode: "controlled",
+      overlayRoot,
+    });
+
+    const card = (overlayRoot as unknown as FakeElement).children[0];
+    const video = card?.children.find((child) => child.tagName === "video") as
+      | (FakeElement & { pause?: unknown; play?: unknown })
+      | undefined;
+
+    expect(video).toBeTruthy();
+    if (video) {
+      video.pause = "not-a-function";
+      video.play = "still-not-a-function";
+    }
+
+    expect(() => controller.setProgress(0.5)).not.toThrow();
+  });
+
+  it("uses plus-lighter for add blend when supported and falls back to screen otherwise", async () => {
+    const { createScrollSection } = await import("../src");
+    const buildController = async () => {
+      const container = new FakeElement("div") as unknown as HTMLElement;
+      const overlayRoot = new FakeElement("div") as unknown as HTMLElement;
+      const manifest = createManifest();
+      const section = manifest.sections[0]!;
+
+      createScrollSection(container, {
+        ...manifest,
+        sections: [
+          {
+            ...section,
+            overlays: [
+              {
+                ...section.overlays[0]!,
+                content: {
+                  ...section.overlays[0]!.content,
+                  type: "image",
+                  mediaUrl: "/overlay/glow.png",
+                  blendMode: "add",
+                },
+              },
+            ],
+          },
+        ],
+      }, {
+        mode: "desktop",
+        reducedMotion: false,
+        overlayRoot,
+      });
+
+      return overlayRoot as unknown as FakeElement;
+    };
+
+    let overlayRoot = await buildController();
+    expect(overlayRoot.children[0]?.style.mixBlendMode).toBe("normal");
+    expect(overlayRoot.children[0]?.children[0]?.style.mixBlendMode).toBe("plus-lighter");
+
+    vi.resetModules();
+    vi.stubGlobal("document", {
+      createElement: (tagName: string) =>
+        tagName === "canvas" ? new FakeCanvasElement() : new FakeElement(tagName),
+    });
+    vi.stubGlobal("window", {
+      devicePixelRatio: 1,
+      innerHeight: 1000,
+      addEventListener: (eventName: string, callback: () => void) => {
+        windowListeners[eventName] ??= [];
+        windowListeners[eventName].push(callback);
+      },
+      removeEventListener: (eventName: string, callback: () => void) => {
+        windowListeners[eventName] = (windowListeners[eventName] ?? []).filter(
+          (listener) => listener !== callback,
+        );
+      },
+    });
+    vi.stubGlobal("CSS", {
+      supports: vi.fn(() => false),
+    });
+    vi.stubGlobal("Image", FakeImage);
+
+    const runtimeWithFallback = await import("../src");
+    const container = new FakeElement("div") as unknown as HTMLElement;
+    const fallbackOverlayRoot = new FakeElement("div") as unknown as HTMLElement;
+    const manifest = createManifest();
+    const section = manifest.sections[0]!;
+
+    runtimeWithFallback.createScrollSection(container, {
+      ...manifest,
+      sections: [
+        {
+          ...section,
+          overlays: [
+            {
+              ...section.overlays[0]!,
+              content: {
+                ...section.overlays[0]!.content,
+                type: "image",
+                mediaUrl: "/overlay/glow.png",
+                blendMode: "add",
+              },
+            },
+          ],
+        },
+      ],
+    }, {
+      mode: "desktop",
+      reducedMotion: false,
+      overlayRoot: fallbackOverlayRoot as unknown as HTMLElement,
+    });
+
+    expect((fallbackOverlayRoot.children[0] as FakeElement | undefined)?.style.mixBlendMode).toBe("normal");
+    expect((fallbackOverlayRoot.children[0]?.children[0] as FakeElement | undefined)?.style.mixBlendMode).toBe("screen");
   });
 
   it("maps trimmed scene progress locally within the visible sequence range", async () => {
@@ -643,7 +1493,7 @@ describe("runtime controlled progress", () => {
     expect(card!.style.filter ?? "blur(0px)").toBe("blur(0px)");
 
     controller.setProgress(0.84);
-    expect(Number(card!.style.opacity)).toBeCloseTo(1, 2);
+    expect(Number(card!.style.opacity)).toBeLessThan(1);
     expect(card!.style.filter ?? "blur(0px)").toBe("blur(0px)");
     expect(card!.style.clipPath ?? "inset(0% 0% 0% 0%)").toBe("inset(0% 0% 0% 0%)");
   });
@@ -677,6 +1527,7 @@ describe("runtime controlled progress", () => {
             align: "start" as const,
             theme: "light" as const,
             treatment: "default" as const,
+            blendMode: "normal" as const,
             layer: 0,
             enterAnimation: {
               type: "fade" as const,

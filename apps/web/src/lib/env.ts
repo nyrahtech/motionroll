@@ -27,7 +27,7 @@ const defaults = {
   PROCESSING_TEMP_DIR: "./apps/web/uploads",
   UPLOAD_MAX_VIDEO_BYTES: "524288000",
   PROCESSING_MAX_FRAMES: "900",
-  SOURCE_RETENTION_DEFAULT: "delete_after_success",
+  SOURCE_RETENTION_DEFAULT: "keep_source",
   FFMPEG_BINARY: "ffmpeg",
   CREDENTIAL_ENCRYPTION_KEY: "dev-dev-dev-dev-dev-dev-dev-dev",
   INNGEST_EVENT_KEY: "local-dev-key",

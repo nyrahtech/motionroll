@@ -7,265 +7,106 @@ import {
 type DraftSourceProject = {
   title: string;
   selectedPreset: ProjectDraftDocument["presetId"];
-  sections: Array<{
-    id: string;
-    title: string;
-    commonConfig: {
-      sectionHeightVh: number;
-      scrubStrength: number;
-      frameRange?: { start: number; end: number };
-    };
-    overlays?: Array<{
-      id?: string;
-      overlayKey: string;
-      sortOrder?: number;
-      timing: { start: number; end: number };
-      content: Partial<ProjectDraftDocument["overlays"][number]["content"]>;
-    }>;
-    transitions?: Array<{
-      id?: string;
-      scope: "sequence" | "moment";
-      phase?: "enter" | "exit";
-      fromKey?: string;
-      toKey?: string;
-      preset: "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
-      easing?: "linear" | "ease-out" | "ease-in-out" | "back-out" | "expo-out";
-      durationMs?: number;
-    }>;
-  }>;
 };
 
-export function parseProjectDraftDocument(input: unknown) {
-  const legacyInput = input as {
-    sceneTransitionPreset?: ProjectDraftDocument["sceneEnterTransition"]["preset"];
-    sceneEnterTransition?: ProjectDraftDocument["sceneEnterTransition"];
-    sceneExitTransition?: ProjectDraftDocument["sceneExitTransition"];
-  } | null;
+const DEFAULT_BOOKMARK_ID = "bookmark-root";
+const DEFAULT_CANVAS_ID = "canvas-root";
+const DEFAULT_BOOKMARK_TITLE = "Canvas";
 
-  return ProjectDraftDocumentSchema.parse({
-    ...legacyInput,
-    sceneEnterTransition:
-      legacyInput?.sceneEnterTransition ??
-      (legacyInput?.sceneTransitionPreset
-        ? { preset: legacyInput.sceneTransitionPreset, duration: 0.4 }
-        : undefined),
-    sceneExitTransition:
-      legacyInput?.sceneExitTransition ?? {
-        preset: "none",
-        duration: 0.4,
+export class UnsupportedLegacyProjectDraftError extends Error {
+  code = "unsupported_version" as const;
+
+  constructor(message = "Scene-based project drafts are unsupported after the single-canvas refactor.") {
+    super(message);
+    this.name = "UnsupportedLegacyProjectDraftError";
+  }
+}
+
+export function createProjectDraftDocument(input: {
+  title: string;
+  presetId: ProjectDraftDocument["presetId"];
+  scrollHeightVh: number;
+  scrubStrength: number;
+  frameRange: { start: number; end: number };
+  backgroundColor?: string;
+  bookmarkTitle?: string;
+  layers?: ProjectDraftDocument["layers"];
+}): ProjectDraftDocument {
+  return {
+    version: 3 as const,
+    title: input.title,
+    presetId: input.presetId,
+    canvas: {
+      id: DEFAULT_CANVAS_ID,
+      scrollHeightVh: input.scrollHeightVh,
+      scrubStrength: input.scrubStrength,
+      frameRange: input.frameRange,
+      backgroundColor: input.backgroundColor,
+    },
+    bookmarks: [
+      {
+        id: DEFAULT_BOOKMARK_ID,
+        title: input.bookmarkTitle?.trim() || DEFAULT_BOOKMARK_TITLE,
+        position: 0,
       },
-  });
+    ],
+    layers: input.layers ?? [],
+  } satisfies ProjectDraftDocument;
+}
+
+export function serializeProjectDraftDocument(
+  draft: ProjectDraftDocument,
+): ProjectDraftDocument {
+  return {
+    version: 3,
+    title: draft.title,
+    presetId: draft.presetId,
+    canvas: draft.canvas,
+    bookmarks: draft.bookmarks,
+    layers: draft.layers,
+  };
+}
+
+export function parseProjectDraftDocument(input: unknown): ProjectDraftDocument {
+  const maybeDraft = input as ({ version?: number; scenes?: unknown[] } & Record<string, unknown>) | null;
+
+  if (typeof maybeDraft?.version === "number" && maybeDraft.version < 3) {
+    throw new UnsupportedLegacyProjectDraftError();
+  }
+
+  if (Array.isArray(maybeDraft?.scenes) && !("canvas" in (maybeDraft ?? {}))) {
+    throw new UnsupportedLegacyProjectDraftError();
+  }
+
+  return ProjectDraftDocumentSchema.parse(maybeDraft);
 }
 
 export function buildProjectDraftDocument(
   project: DraftSourceProject,
   manifest: ProjectManifest,
 ): ProjectDraftDocument {
-  const projectSection = project.sections[0];
-  const manifestSection = manifest.sections[0];
-  const overlays =
-    manifestSection?.overlays ??
-    (projectSection?.overlays ?? []).map((overlay) => ({
-      id: overlay.overlayKey,
-      timing: overlay.timing,
-      content: overlay.content,
-    }));
-  const layerCount = Math.max(
-    1,
-    overlays.reduce(
-      (maxLayer, overlay) =>
-        overlay.content.parentGroupId
-          ? maxLayer
-          : Math.max(maxLayer, overlay.content.layer ?? 0),
-      -1,
-    ) + 1,
-  );
-
-  return ProjectDraftDocumentSchema.parse({
-    version: 1,
+  return {
+    version: 3,
     title: project.title,
     presetId: project.selectedPreset,
-    sectionTitle:
-      projectSection?.title ?? manifestSection?.title ?? "Primary cinematic section",
-    sceneEnterTransition: {
-      preset:
-        manifestSection?.transitions.find(
-          (transition) => transition.scope === "sequence" && transition.phase === "enter",
-        )?.preset ?? "none",
-      duration:
-        manifestSection?.transitions.find(
-          (transition) => transition.scope === "sequence" && transition.phase === "enter",
-        )?.duration ?? 0.4,
+    canvas: {
+      id: manifest.canvas.id ?? DEFAULT_CANVAS_ID,
+      scrollHeightVh: manifest.canvas.motion.sectionHeightVh,
+      scrubStrength: manifest.canvas.motion.scrubStrength,
+      frameRange: manifest.canvas.progressMapping.frameRange,
+      backgroundColor: manifest.canvas.backgroundColor,
+      backgroundTrack: manifest.canvas.backgroundTrack,
     },
-    sceneExitTransition: {
-      preset:
-        manifestSection?.transitions.find(
-          (transition) => transition.scope === "sequence" && transition.phase === "exit",
-        )?.preset ?? "none",
-      duration:
-        manifestSection?.transitions.find(
-          (transition) => transition.scope === "sequence" && transition.phase === "exit",
-        )?.duration ?? 0.4,
-    },
-    sectionHeightVh:
-      projectSection?.commonConfig.sectionHeightVh ??
-      manifestSection?.motion.sectionHeightVh ??
-      240,
-    scrubStrength:
-      projectSection?.commonConfig.scrubStrength ??
-      manifestSection?.motion.scrubStrength ??
-      1,
-    frameRangeStart:
-      manifestSection?.progressMapping.frameRange.start ??
-      projectSection?.commonConfig.frameRange?.start ??
-      0,
-    frameRangeEnd:
-      manifestSection?.progressMapping.frameRange.end ??
-      projectSection?.commonConfig.frameRange?.end ??
-      180,
-    layerCount,
-    overlays,
-  });
-}
-
-export function buildSectionValuesFromDraft<
-  TSection extends {
-    id: string;
-    title: string;
-    commonConfig: Record<string, unknown> & {
-      sectionHeightVh: number;
-      scrubStrength: number;
-      frameRange?: { start: number; end: number };
-    };
-    presetId?: ProjectDraftDocument["presetId"];
-    sortOrder?: number;
-    presetConfig?: Record<string, unknown>;
-    projectId?: string;
-    overlays?: Array<{
-      id?: string;
-      overlayKey: string;
-      sortOrder?: number;
-      timing: { start: number; end: number };
-      content: unknown;
-    }>;
-    transitions?: Array<{
-      id?: string;
-      scope: "sequence" | "moment";
-      phase?: "enter" | "exit";
-      fromKey?: string;
-      toKey?: string;
-      preset: "fade" | "crossfade" | "wipe" | "zoom-dissolve" | "blur-dissolve";
-      easing?: "linear" | "ease-out" | "ease-in-out" | "back-out" | "expo-out";
-      durationMs?: number;
-    }>;
-  },
->(section: TSection | undefined, draft: ProjectDraftDocument) {
-  const existingFallbackBehavior =
-    (section?.commonConfig as {
-      fallbackBehavior?: {
-        mobile: "poster" | "video" | "sequence";
-        reducedMotion: "poster" | "video" | "sequence";
-      };
-    })?.fallbackBehavior ?? {
-      mobile: "sequence",
-      reducedMotion: "poster",
-    };
-  const existingMotion =
-    (section?.commonConfig as {
-      motion?: {
-        easing: "linear" | "power2.out" | "power3.out";
-        pin: boolean;
-        preloadWindow: number;
-      };
-    })?.motion ?? {
-      easing: "power2.out",
-      pin: true,
-      preloadWindow: 6,
-    };
-  const existingText =
-    (section?.commonConfig as {
-      text?: { content: string };
-    })?.text ?? {
-      content: draft.overlays[0]?.content.text ?? "Primary text block",
-    };
-  const existingCta =
-    (section?.commonConfig as {
-      cta?: { label: string; href: string };
-    })?.cta ?? {
-      label: "",
-      href: "",
-    };
-
-  return {
-    ...(section ?? {}),
-    id: section?.id ?? "draft-section",
-    projectId: section?.projectId ?? "draft-project",
-    title: draft.sectionTitle,
-    presetId: section?.presetId ?? draft.presetId,
-    sortOrder: section?.sortOrder ?? 0,
-    presetConfig: section?.presetConfig ?? {},
-    commonConfig: {
-      ...(section?.commonConfig ?? {}),
-      sectionHeightVh: draft.sectionHeightVh,
-      scrubStrength: draft.scrubStrength,
-      frameRange: {
-        start: draft.frameRangeStart,
-        end: draft.frameRangeEnd,
-      },
-      fallbackBehavior: existingFallbackBehavior,
-      motion: existingMotion,
-      text: existingText,
-      cta: existingCta,
-    },
-    overlays: draft.overlays.map((overlay) => ({
-      id:
-        section?.overlays?.find((existingOverlay) => existingOverlay.overlayKey === overlay.id)?.id ??
-        overlay.id,
-      overlayKey: overlay.id,
-      sortOrder:
-        section?.overlays?.find((existingOverlay) => existingOverlay.overlayKey === overlay.id)
-          ?.sortOrder ??
-        draft.overlays.findIndex((draftOverlay) => draftOverlay.id === overlay.id),
-      timing: overlay.timing,
-      content: overlay.content,
-    })),
-    transitions: [
-      draft.sceneEnterTransition.preset !== "none"
-        ? {
-            id:
-              section?.transitions?.find(
-                (transition) => transition.scope === "sequence" && (transition.phase ?? "enter") === "enter",
-              )?.id ?? "scene-enter-transition",
-            scope: "sequence" as const,
-            phase: "enter" as const,
-            fromKey: section?.id ?? "draft-section",
-            toKey: section?.id ?? "draft-section",
-            preset: draft.sceneEnterTransition.preset,
-            easing:
-              section?.transitions?.find(
-                (transition) => transition.scope === "sequence" && (transition.phase ?? "enter") === "enter",
-              )?.easing ?? "ease-in-out",
-            durationMs: Math.round(draft.sceneEnterTransition.duration * 1000),
-          }
-        : null,
-      draft.sceneExitTransition.preset !== "none"
-        ? {
-            id:
-              section?.transitions?.find(
-                (transition) => transition.scope === "sequence" && (transition.phase ?? "enter") === "exit",
-              )?.id ?? "scene-exit-transition",
-            scope: "sequence" as const,
-            phase: "exit" as const,
-            fromKey: section?.id ?? "draft-section",
-            toKey: section?.id ?? "draft-section",
-            preset: draft.sceneExitTransition.preset,
-            easing:
-              section?.transitions?.find(
-                (transition) => transition.scope === "sequence" && (transition.phase ?? "enter") === "exit",
-              )?.easing ?? "ease-in-out",
-            durationMs: Math.round(draft.sceneExitTransition.duration * 1000),
-          }
-        : null,
-    ].filter((transition): transition is NonNullable<typeof transition> => Boolean(transition)),
+    bookmarks:
+      manifest.bookmarks.length > 0
+        ? manifest.bookmarks
+        : [
+            {
+              id: DEFAULT_BOOKMARK_ID,
+              title: DEFAULT_BOOKMARK_TITLE,
+              position: 0,
+            },
+          ],
+    layers: manifest.layers,
   };
 }

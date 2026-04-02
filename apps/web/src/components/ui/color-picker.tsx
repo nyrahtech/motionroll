@@ -14,10 +14,44 @@ type ColorPickerProps = {
   onCommitChange: (value: string) => void;
   opacity?: number;
   onOpacityChange?: (value: number) => void;
+  selectionChrome?: boolean;
   className?: string;
 };
 
+type PickerVisualState = {
+  hex: string;
+  hexInputValue: string;
+  hue: number;
+  saturation: number;
+  valueLevel: number;
+  opacityValue: number | null;
+};
+
+type EyeDropperResult = {
+  sRGBHex: string;
+};
+
+type EyeDropperInstance = {
+  open: () => Promise<EyeDropperResult>;
+};
+
+type WindowWithEyeDropper = Window & typeof globalThis & {
+  EyeDropper?: new () => EyeDropperInstance;
+};
+
 const numberInputClassName = "h-9 rounded-[12px]";
+const checkerboardBackgroundImage = [
+  "linear-gradient(45deg, rgba(255,255,255,0.08) 25%, transparent 25%)",
+  "linear-gradient(-45deg, rgba(255,255,255,0.08) 25%, transparent 25%)",
+  "linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.08) 75%)",
+  "linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.08) 75%)",
+].join(", ");
+
+const checkerboardBackgroundStyle = {
+  backgroundImage: checkerboardBackgroundImage,
+  backgroundPosition: "0 0, 0 6px, 6px -6px, -6px 0px",
+  backgroundSize: "12px 12px",
+} satisfies React.CSSProperties;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -133,11 +167,99 @@ function hsvToHex(h: number, s: number, v: number) {
   return rgbToHex(rgb.r, rgb.g, rgb.b);
 }
 
+function toRgbaString(hex: string, alpha: number) {
+  const rgb = hexToRgb(hex);
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${clamp(alpha, 0, 1)})`;
+}
+
+function buildVisualState(value: string, opacity?: number): PickerVisualState {
+  const normalized = normalizeHex(value) ?? "#ffffff";
+  const hsv = hexToHsv(normalized);
+  return {
+    hex: normalized,
+    hexInputValue: normalized.toUpperCase(),
+    hue: hsv.h,
+    saturation: hsv.s,
+    valueLevel: hsv.v,
+    opacityValue: typeof opacity === "number" ? clamp(opacity, 0, 1) : null,
+  };
+}
+
+function buildVisualStateFromCurrent(
+  current: PickerVisualState,
+  value: string,
+  opacity?: number,
+): PickerVisualState {
+  const normalized = normalizeHex(value) ?? "#ffffff";
+  const nextOpacity = typeof opacity === "number" ? clamp(opacity, 0, 1) : null;
+  if (normalized === current.hex) {
+    return {
+      ...current,
+      hex: normalized,
+      hexInputValue: normalized.toUpperCase(),
+      opacityValue: nextOpacity,
+    };
+  }
+  const hsv = hexToHsv(normalized);
+  return {
+    hex: normalized,
+    hexInputValue: normalized.toUpperCase(),
+    hue: hsv.h,
+    saturation: hsv.s,
+    valueLevel: hsv.v,
+    opacityValue: nextOpacity,
+  };
+}
+
+function visualStatesEqual(left: PickerVisualState, right: PickerVisualState) {
+  return (
+    left.hex === right.hex &&
+    left.hexInputValue === right.hexInputValue &&
+    Math.abs(left.hue - right.hue) < 0.0001 &&
+    Math.abs(left.saturation - right.saturation) < 0.0001 &&
+    Math.abs(left.valueLevel - right.valueLevel) < 0.0001 &&
+    left.opacityValue === right.opacityValue
+  );
+}
+
+function capturePointer(target: EventTarget & { setPointerCapture?: (pointerId: number) => void }, pointerId: number) {
+  try {
+    target.setPointerCapture?.(pointerId);
+  } catch {
+    // Pointer capture is best-effort in tests and across browsers.
+  }
+}
+
+function releasePointer(
+  target: EventTarget & {
+    hasPointerCapture?: (pointerId: number) => boolean;
+    releasePointerCapture?: (pointerId: number) => void;
+  },
+  pointerId: number,
+) {
+  try {
+    if (target.hasPointerCapture?.(pointerId)) {
+      target.releasePointerCapture?.(pointerId);
+    }
+  } catch {
+    // Pointer capture is best-effort in tests and across browsers.
+  }
+}
+
 function PickerLabel({ children }: { children: React.ReactNode }) {
   return (
     <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--foreground-faint)]">
       {children}
     </span>
+  );
+}
+
+function renderTrackThumb(leftPercent: number) {
+  return (
+    <span
+      className="pointer-events-none absolute top-1/2 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[rgba(255, 255, 255, 0.93)] bg-[rgba(10,12,18,0.98)] shadow-[0_0_0_1px_rgba(8,10,14,0.58),0_3px_10px_rgba(0,0,0,0.28)]"
+      style={{ left: `${leftPercent}%` }}
+    />
   );
 }
 
@@ -150,84 +272,290 @@ export function ColorPicker({
   onCommitChange,
   opacity,
   onOpacityChange,
+  selectionChrome = false,
   className,
 }: ColorPickerProps) {
-  const [draftHex, setDraftHex] = React.useState(value);
-  const [hexInputValue, setHexInputValue] = React.useState(value.toUpperCase());
-  const [draftHsv, setDraftHsv] = React.useState(() => hexToHsv(value));
+  const [visualState, setVisualState] = React.useState(() => buildVisualState(value, opacity));
   const pickerRef = React.useRef<HTMLDivElement | null>(null);
-  const draftHexRef = React.useRef(draftHex);
+  const hueTrackRef = React.useRef<HTMLDivElement | null>(null);
+  const opacityTrackRef = React.useRef<HTMLDivElement | null>(null);
+  const nativeColorInputRef = React.useRef<HTMLInputElement | null>(null);
+  const visualStateRef = React.useRef(visualState);
+  const frameRef = React.useRef<number | null>(null);
+  const pendingLiveHexRef = React.useRef<string | null>(null);
+  const pendingOpacityRef = React.useRef<number | null>(null);
+  const lastLiveHexRef = React.useRef(visualState.hex);
+  const lastOpacityRef = React.useRef(visualState.opacityValue);
 
-  React.useEffect(() => {
-    const normalized = normalizeHex(value) ?? "#ffffff";
-    setDraftHex(normalized);
-    setHexInputValue(normalized.toUpperCase());
-    setDraftHsv(hexToHsv(normalized));
-  }, [value]);
+  const flushScheduledWork = React.useCallback(() => {
+    frameRef.current = null;
+    const nextState = visualStateRef.current;
+    setVisualState((current) => (visualStatesEqual(current, nextState) ? current : { ...nextState }));
 
-  React.useEffect(() => {
-    draftHexRef.current = draftHex;
-  }, [draftHex]);
+    if (pendingLiveHexRef.current !== null && pendingLiveHexRef.current !== lastLiveHexRef.current) {
+      onLiveChange?.(pendingLiveHexRef.current);
+      lastLiveHexRef.current = pendingLiveHexRef.current;
+    }
+    pendingLiveHexRef.current = null;
 
-  const applyHex = React.useCallback(
-    (nextHex: string, commit = false) => {
-      setDraftHex(nextHex);
-      setHexInputValue(nextHex.toUpperCase());
-      setDraftHsv(hexToHsv(nextHex));
-      onLiveChange?.(nextHex);
-      if (commit) {
-        onCommitChange(nextHex);
+    if (pendingOpacityRef.current !== null && pendingOpacityRef.current !== lastOpacityRef.current) {
+      onOpacityChange?.(pendingOpacityRef.current);
+      lastOpacityRef.current = pendingOpacityRef.current;
+    }
+    pendingOpacityRef.current = null;
+  }, [onLiveChange, onOpacityChange]);
+
+  const scheduleVisualFlush = React.useCallback(
+    (options?: { liveHex?: string; opacityValue?: number }) => {
+      if (options?.liveHex !== undefined) {
+        pendingLiveHexRef.current = options.liveHex;
       }
+      if (options?.opacityValue !== undefined) {
+        pendingOpacityRef.current = options.opacityValue;
+      }
+      if (frameRef.current !== null) {
+        return;
+      }
+      frameRef.current = requestAnimationFrame(flushScheduledWork);
     },
-    [onCommitChange, onLiveChange],
+    [flushScheduledWork],
   );
 
-  const updateFromPointer = React.useCallback(
+  const flushScheduledWorkNow = React.useCallback(() => {
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    flushScheduledWork();
+  }, [flushScheduledWork]);
+
+  React.useEffect(() => {
+    const nextState = buildVisualStateFromCurrent(visualStateRef.current, value, opacity);
+    if (!visualStatesEqual(visualStateRef.current, nextState)) {
+      visualStateRef.current = nextState;
+      setVisualState(nextState);
+    }
+  }, [opacity, value]);
+
+  React.useEffect(
+    () => () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+      }
+      frameRef.current = null;
+      pendingLiveHexRef.current = null;
+      pendingOpacityRef.current = null;
+    },
+    [],
+  );
+
+  const syncVisualState = React.useCallback(
+    (nextState: PickerVisualState, options?: { liveHex?: string; opacityValue?: number }) => {
+      visualStateRef.current = nextState;
+      scheduleVisualFlush(options);
+    },
+    [scheduleVisualFlush],
+  );
+
+  const updateHexValue = React.useCallback(
+    (nextHex: string, commit = false) => {
+      const normalized = normalizeHex(nextHex);
+      if (!normalized) {
+        return;
+      }
+      const nextHsv = hexToHsv(normalized);
+      const nextState: PickerVisualState = {
+        ...visualStateRef.current,
+        hex: normalized,
+        hexInputValue: normalized.toUpperCase(),
+        hue: nextHsv.h,
+        saturation: nextHsv.s,
+        valueLevel: nextHsv.v,
+      };
+      syncVisualState(nextState, { liveHex: normalized });
+      if (commit) {
+        flushScheduledWorkNow();
+        onCommitChange(normalized);
+      }
+    },
+    [flushScheduledWorkNow, onCommitChange, syncVisualState],
+  );
+
+  const updateFromSurfacePointer = React.useCallback(
     (clientX: number, clientY: number, commit = false) => {
       const picker = pickerRef.current;
       if (!picker) {
         return;
       }
-
       const rect = picker.getBoundingClientRect();
-      const saturation = clamp((clientX - rect.left) / rect.width, 0, 1);
-      const valueLevel = 1 - clamp((clientY - rect.top) / rect.height, 0, 1);
-      const nextHex = hsvToHex(draftHsv.h, saturation, valueLevel);
-      setDraftHsv((current) => ({ ...current, s: saturation, v: valueLevel }));
-      setDraftHex(nextHex);
-      setHexInputValue(nextHex.toUpperCase());
-      onLiveChange?.(nextHex);
+      const saturation = clamp((clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
+      const valueLevel = 1 - clamp((clientY - rect.top) / Math.max(rect.height, 1), 0, 1);
+      const nextHex = hsvToHex(visualStateRef.current.hue, saturation, valueLevel);
+      syncVisualState(
+        {
+          ...visualStateRef.current,
+          saturation,
+          valueLevel,
+          hex: nextHex,
+          hexInputValue: nextHex.toUpperCase(),
+        },
+        { liveHex: nextHex },
+      );
       if (commit) {
+        flushScheduledWorkNow();
         onCommitChange(nextHex);
       }
     },
-    [draftHsv.h, onCommitChange, onLiveChange],
+    [flushScheduledWorkNow, onCommitChange, syncVisualState],
   );
 
-  const handlePickerPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    updateFromPointer(event.clientX, event.clientY);
-    event.currentTarget.setPointerCapture(event.pointerId);
+  const updateHueFromClient = React.useCallback(
+    (clientX: number, commit = false) => {
+      const track = hueTrackRef.current;
+      if (!track) {
+        return;
+      }
+      const rect = track.getBoundingClientRect();
+      const progress = clamp((clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
+      const hue = progress * 360;
+      const nextHex = hsvToHex(hue, visualStateRef.current.saturation, visualStateRef.current.valueLevel);
+      syncVisualState(
+        {
+          ...visualStateRef.current,
+          hue,
+          hex: nextHex,
+          hexInputValue: nextHex.toUpperCase(),
+        },
+        { liveHex: nextHex },
+      );
+      if (commit) {
+        flushScheduledWorkNow();
+        onCommitChange(nextHex);
+      }
+    },
+    [flushScheduledWorkNow, onCommitChange, syncVisualState],
+  );
+
+  const updateOpacityFromClient = React.useCallback(
+    (clientX: number, flush = false) => {
+      const track = opacityTrackRef.current;
+      if (!track || typeof visualStateRef.current.opacityValue !== "number") {
+        return;
+      }
+      const rect = track.getBoundingClientRect();
+      const progress = clamp((clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
+      syncVisualState(
+        {
+          ...visualStateRef.current,
+          opacityValue: progress,
+        },
+        { opacityValue: progress },
+      );
+      if (flush) {
+        flushScheduledWorkNow();
+      }
+    },
+    [flushScheduledWorkNow, syncVisualState],
+  );
+
+  const handleHexInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const nextValue = event.currentTarget.value.toUpperCase();
+    const nextState = {
+      ...visualStateRef.current,
+      hexInputValue: nextValue,
+    };
+    visualStateRef.current = nextState;
+    setVisualState(nextState);
+    const normalized = normalizeHex(nextValue);
+    if (normalized) {
+      updateHexValue(normalized);
+    }
   };
 
-  const handlePickerPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.buttons === 0) {
+  const handleHexInputBlur = () => {
+    const normalized = normalizeHex(visualStateRef.current.hexInputValue) ?? visualStateRef.current.hex;
+    updateHexValue(normalized, true);
+  };
+
+  const handleHueKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const currentHue = visualStateRef.current.hue;
+    let nextHue = currentHue;
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") nextHue = currentHue - 5;
+    else if (event.key === "ArrowRight" || event.key === "ArrowUp") nextHue = currentHue + 5;
+    else if (event.key === "Home") nextHue = 0;
+    else if (event.key === "End") nextHue = 360;
+    else return;
+
+    event.preventDefault();
+    const boundedHue = clamp(nextHue, 0, 360);
+    const nextHex = hsvToHex(
+      boundedHue,
+      visualStateRef.current.saturation,
+      visualStateRef.current.valueLevel,
+    );
+    syncVisualState(
+      {
+        ...visualStateRef.current,
+        hue: boundedHue,
+        hex: nextHex,
+        hexInputValue: nextHex.toUpperCase(),
+      },
+      { liveHex: nextHex },
+    );
+    flushScheduledWorkNow();
+    onCommitChange(nextHex);
+  };
+
+  const handleOpacityKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (typeof visualStateRef.current.opacityValue !== "number") {
       return;
     }
-    updateFromPointer(event.clientX, event.clientY);
+    const currentOpacity = visualStateRef.current.opacityValue;
+    let nextOpacity = currentOpacity;
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") nextOpacity = currentOpacity - 0.05;
+    else if (event.key === "ArrowRight" || event.key === "ArrowUp") nextOpacity = currentOpacity + 0.05;
+    else if (event.key === "Home") nextOpacity = 0;
+    else if (event.key === "End") nextOpacity = 1;
+    else return;
+
+    event.preventDefault();
+    syncVisualState(
+      {
+        ...visualStateRef.current,
+        opacityValue: clamp(nextOpacity, 0, 1),
+      },
+      { opacityValue: clamp(nextOpacity, 0, 1) },
+    );
+    flushScheduledWorkNow();
   };
 
-  const handlePickerPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-    updateFromPointer(event.clientX, event.clientY, true);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+  const handleScreenColorPick = React.useCallback(async () => {
+    const win = window as WindowWithEyeDropper;
+    if (win.EyeDropper) {
+      try {
+        const picker = new win.EyeDropper();
+        const result = await picker.open();
+        updateHexValue(result.sRGBHex, true);
+        return;
+      } catch (error) {
+        const maybeAbort = error as { name?: string } | null;
+        if (maybeAbort?.name === "AbortError") {
+          return;
+        }
+      }
     }
-  };
+    nativeColorInputRef.current?.click();
+  }, [updateHexValue]);
 
   const pickerCursorStyle = {
-    left: `${draftHsv.s * 100}%`,
-    top: `${(1 - draftHsv.v) * 100}%`,
+    left: `${visualState.saturation * 100}%`,
+    top: `${(1 - visualState.valueLevel) * 100}%`,
   };
+  const hueThumbPercent = clamp((visualState.hue / 360) * 100, 0, 100);
+  const opacityThumbPercent =
+    typeof visualState.opacityValue === "number"
+      ? clamp(visualState.opacityValue * 100, 0, 100)
+      : null;
 
   const trigger =
     variant === "icon" ? (
@@ -270,7 +598,18 @@ export function ColorPicker({
         <Popover.Content
           sideOffset={8}
           align="start"
-          className="z-50 w-[248px] rounded-[14px] border border-[var(--editor-border)] bg-[var(--editor-panel-elevated)] p-3 shadow-lg"
+          data-overlay-selection-chrome={selectionChrome ? "true" : undefined}
+          onOpenAutoFocus={(event) => {
+            if (selectionChrome) {
+              event.preventDefault();
+            }
+          }}
+          onCloseAutoFocus={(event) => {
+            if (selectionChrome) {
+              event.preventDefault();
+            }
+          }}
+          className="z-[2147483646] w-[248px] rounded-[14px] border border-[var(--editor-border)] bg-[var(--editor-panel-elevated)] p-3 shadow-lg"
         >
           <div className="space-y-3">
             <div className="grid gap-2">
@@ -280,86 +619,173 @@ export function ColorPicker({
                 style={{
                   backgroundImage:
                     "linear-gradient(to top, black, transparent), linear-gradient(to right, white, transparent)",
-                  backgroundColor: `hsl(${draftHsv.h} 100% 50%)`,
+                  backgroundColor: `hsl(${visualState.hue} 100% 50%)`,
                 }}
-                onPointerDown={handlePickerPointerDown}
-                onPointerMove={handlePickerPointerMove}
-                onPointerUp={handlePickerPointerUp}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  updateFromSurfacePointer(event.clientX, event.clientY);
+                  capturePointer(event.currentTarget, event.pointerId);
+                }}
+                onPointerMove={(event) => {
+                  if (event.buttons === 0) {
+                    return;
+                  }
+                  updateFromSurfacePointer(event.clientX, event.clientY);
+                }}
+                onPointerUp={(event) => {
+                  updateFromSurfacePointer(event.clientX, event.clientY, true);
+                  releasePointer(event.currentTarget, event.pointerId);
+                }}
               >
                 <span
                   className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white shadow-[0_0_0_1px_rgba(8,10,14,0.6)]"
                   style={pickerCursorStyle}
                 />
               </div>
-              <input
-                aria-label={`${label} hue`}
-                type="range"
-                min="0"
-                max="360"
-                step="1"
-                value={Math.round(draftHsv.h)}
-                className="h-2 w-full cursor-pointer appearance-none rounded-full bg-transparent accent-[var(--editor-accent)]"
-                style={{
-                  background:
-                    "linear-gradient(90deg, #ff4d4d 0%, #ffd54a 17%, #5cff79 33%, #37d2ff 50%, #4e7dff 67%, #ca63ff 83%, #ff4d4d 100%)",
-                }}
-                onChange={(event) => {
-                  const nextHue = Number(event.currentTarget.value);
-                  const nextHex = hsvToHex(nextHue, draftHsv.s, draftHsv.v);
-                  setDraftHsv((current) => ({ ...current, h: nextHue }));
-                  setDraftHex(nextHex);
-                  setHexInputValue(nextHex.toUpperCase());
-                  onLiveChange?.(nextHex);
-                }}
-                onPointerUp={() => onCommitChange(draftHexRef.current)}
-                onBlur={() => onCommitChange(draftHexRef.current)}
-              />
+
+              <div className="grid gap-1.5">
+                <div className="flex items-center justify-between">
+                  <PickerLabel>Hue</PickerLabel>
+                </div>
+                <div
+                  ref={hueTrackRef}
+                  aria-label={`${label} hue`}
+                  role="slider"
+                  tabIndex={0}
+                  aria-valuemin={0}
+                  aria-valuemax={360}
+                  aria-valuenow={Math.round(visualState.hue)}
+                  className="relative h-4 w-full cursor-pointer overflow-visible"
+                  onKeyDown={handleHueKeyDown}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    updateHueFromClient(event.clientX);
+                    capturePointer(event.currentTarget, event.pointerId);
+                  }}
+                  onPointerMove={(event) => {
+                    if (event.buttons === 0) {
+                      return;
+                    }
+                    updateHueFromClient(event.clientX);
+                  }}
+                  onPointerUp={(event) => {
+                    updateHueFromClient(event.clientX, true);
+                    releasePointer(event.currentTarget, event.pointerId);
+                  }}
+                >
+                  <span
+                    className="absolute inset-x-0 top-1/2 h-3 -translate-y-1/2 rounded-full border border-[rgba(255,255,255,0.08)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                    style={{
+                      background:
+                        "linear-gradient(90deg, #ff4d4d 0%, #ffd54a 17%, #5cff79 33%, #37d2ff 50%, #4e7dff 67%, #ca63ff 83%, #ff4d4d 100%)",
+                    }}
+                  />
+                  {renderTrackThumb(hueThumbPercent)}
+                </div>
+              </div>
+
+              {typeof visualState.opacityValue === "number" && onOpacityChange ? (
+                <div className="grid gap-1.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <PickerLabel>Opacity</PickerLabel>
+                    <span className="text-[11px] font-medium text-[var(--foreground-muted)]">
+                      {Math.round(visualState.opacityValue * 100)}%
+                    </span>
+                  </div>
+                  <div
+                    ref={opacityTrackRef}
+                    aria-label={`${label} opacity`}
+                    role="slider"
+                    tabIndex={0}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(visualState.opacityValue * 100)}
+                    className="relative h-4 w-full cursor-pointer overflow-visible"
+                    onKeyDown={handleOpacityKeyDown}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      updateOpacityFromClient(event.clientX);
+                      capturePointer(event.currentTarget, event.pointerId);
+                    }}
+                    onPointerMove={(event) => {
+                      if (event.buttons === 0) {
+                        return;
+                      }
+                      updateOpacityFromClient(event.clientX);
+                    }}
+                    onPointerUp={(event) => {
+                      updateOpacityFromClient(event.clientX, true);
+                      releasePointer(event.currentTarget, event.pointerId);
+                    }}
+                  >
+                    <span
+                      className="absolute inset-x-0 top-1/2 h-3 -translate-y-1/2 overflow-hidden rounded-full border border-[rgba(255,255,255,0.08)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                      style={{
+                        ...checkerboardBackgroundStyle,
+                        backgroundColor: "rgba(11, 15, 22, 0.85)",
+                      }}
+                    >
+                      <span
+                        className="absolute inset-0"
+                        style={{
+                          background: `linear-gradient(90deg, ${toRgbaString(visualState.hex, 0)} 0%, ${toRgbaString(visualState.hex, 1)} 100%)`,
+                        }}
+                      />
+                    </span>
+                    {opacityThumbPercent !== null ? renderTrackThumb(opacityThumbPercent) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
-            <div
-              className={cn(
-                "grid gap-3",
-                typeof opacity === "number" && onOpacityChange
-                  ? "grid-cols-[minmax(0,1fr)_92px]"
-                  : undefined,
-              )}
-            >
-              <label className="grid gap-2">
+
+            <div className="flex items-end gap-2">
+              <label className="min-w-0 flex-1 grid gap-2">
                 <PickerLabel>Hex</PickerLabel>
                 <Input
                   className={numberInputClassName}
-                  value={hexInputValue}
-                  onChange={(event) => {
-                    const nextValue = event.currentTarget.value.toUpperCase();
-                    setHexInputValue(nextValue);
-                    const normalized = normalizeHex(nextValue);
-                    if (normalized) {
-                      setDraftHex(normalized);
-                      setDraftHsv(hexToHsv(normalized));
-                      onLiveChange?.(normalized);
+                  value={visualState.hexInputValue}
+                  onChange={handleHexInputChange}
+                  onBlur={handleHexInputBlur}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleHexInputBlur();
                     }
-                  }}
-                  onBlur={() => {
-                    const normalized = normalizeHex(hexInputValue) ?? draftHex;
-                    applyHex(normalized, true);
                   }}
                 />
               </label>
-              {typeof opacity === "number" && onOpacityChange ? (
-                <label className="grid gap-2">
-                  <PickerLabel>Opacity</PickerLabel>
-                  <Input
-                    className={numberInputClassName}
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={Math.round(opacity * 100)}
-                    onChange={(event) =>
-                      onOpacityChange(clamp(Number(event.currentTarget.value), 0, 100) / 100)
-                    }
-                  />
-                </label>
-              ) : null}
+
+              <div className="grid gap-2">
+                <PickerLabel>Pick</PickerLabel>
+                <button
+                  type="button"
+                  aria-label={`${label} screen color picker`}
+                  className="focus-ring flex h-9 w-10 items-center justify-center rounded-[12px] border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)] transition-colors hover:border-[rgba(255,255,255,0.14)]"
+                  onClick={() => {
+                    void handleScreenColorPick();
+                  }}
+                >
+                  <span
+                    className="relative h-5 w-5 overflow-hidden rounded-full border border-[rgba(255,255,255,0.14)]"
+                    style={checkerboardBackgroundStyle}
+                  >
+                    <span
+                      className="absolute inset-0"
+                      style={{ backgroundColor: visualState.hex }}
+                    />
+                  </span>
+                </button>
+                <input
+                  ref={nativeColorInputRef}
+                  aria-label={`${label} native color input`}
+                  type="color"
+                  value={visualState.hex}
+                  tabIndex={-1}
+                  className="sr-only"
+                  onInput={(event) => updateHexValue(event.currentTarget.value)}
+                  onChange={(event) => updateHexValue(event.currentTarget.value, true)}
+                />
+              </div>
             </div>
           </div>
         </Popover.Content>

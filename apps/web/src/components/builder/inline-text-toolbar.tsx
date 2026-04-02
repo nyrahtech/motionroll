@@ -31,15 +31,27 @@ type Props = {
   fontWeight?: number;
   fontSize?: number;
   color?: string;
+  opacity?: number;
   italic?: boolean;
   underline?: boolean;
   textAlign?: "start" | "center" | "end";
   isTextStyle?: boolean;
+  onLiveChange?: (changes: Partial<{
+    fontFamily: string;
+    fontWeight: number;
+    fontSize: number;
+    color: string;
+    opacity: number;
+    italic: boolean;
+    underline: boolean;
+    textAlign: "start" | "center" | "end";
+  }>) => void;
   onChange?: (changes: Partial<{
     fontFamily: string;
     fontWeight: number;
     fontSize: number;
     color: string;
+    opacity: number;
     italic: boolean;
     underline: boolean;
     textAlign: "start" | "center" | "end";
@@ -83,10 +95,12 @@ export function InlineTextToolbar({
   fontWeight = 600,
   fontSize = 34,
   color = "#f6f7fb",
+  opacity = 1,
   italic = false,
   underline = false,
   textAlign = "start",
   isTextStyle = true,
+  onLiveChange,
   onChange,
   canGroup = false,
   canUngroup = false,
@@ -97,15 +111,16 @@ export function InlineTextToolbar({
   maxWidth,
 }: Props) {
   const btn =
-    "flex h-8 min-w-8 items-center justify-center rounded-md px-1.5 transition-colors hover:bg-[var(--editor-hover)] hover:text-white focus:outline-none";
-  const activeBtn = "text-[var(--editor-accent)]";
+    "flex h-8 min-w-8 items-center justify-center rounded-md border border-transparent px-1.5 transition-colors hover:bg-[var(--editor-hover)] hover:text-white focus:outline-none";
+  const activeBtn =
+    "border-[rgba(103,232,249,0.22)] bg-[rgba(103,232,249,0.16)] text-white shadow-[inset_0_0_0_1px_rgba(103,232,249,0.08)]";
   const dimBtn = "text-[var(--editor-text-dim)]";
   const dividerClassName = "mx-0.5 h-5 w-px";
   const showActions = Boolean(canGroup || canUngroup || onDuplicate || onDelete);
 
   return (
     <div
-      className="absolute z-30 flex max-w-full items-center gap-0.5 overflow-x-auto rounded-xl border px-1.5 py-1 shadow-2xl backdrop-blur no-scrollbar"
+      className="pointer-events-auto absolute z-[200] flex max-w-full items-center gap-0.5 overflow-x-auto rounded-xl border px-1.5 py-1 shadow-2xl backdrop-blur no-scrollbar"
       style={{
         top: Math.max(8, position.top),
         left: Math.max(8, position.left),
@@ -123,7 +138,7 @@ export function InlineTextToolbar({
             <SelectTrigger className="h-8 min-w-[132px] rounded-md bg-[var(--editor-shell)] px-2 text-xs text-[var(--editor-text)]">
               <SelectValue placeholder="Font" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent selectionChrome>
               {fonts.map((font) => (
                 <SelectItem key={font} value={font}>
                   {font}
@@ -146,8 +161,11 @@ export function InlineTextToolbar({
             title="Text color"
             variant="icon"
             value={color}
-            onLiveChange={(value) => onChange?.({ color: value })}
+            onLiveChange={(value) => onLiveChange?.({ color: value })}
             onCommitChange={(value) => onChange?.({ color: value })}
+            opacity={opacity}
+            onOpacityChange={(value) => onChange?.({ opacity: value })}
+            selectionChrome
             className="h-8 w-8 rounded-md border-transparent bg-transparent p-0 hover:border-transparent hover:bg-transparent"
           />
 

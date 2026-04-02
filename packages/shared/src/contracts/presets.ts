@@ -582,7 +582,7 @@ const presetDefinitionInputs = [
         text: {
           kicker: "Industrial design",
           headline: "Spin the device with stable, deterministic frame mapping.",
-          body: "Designed for turntable captures and clean AI-generated rotations that need premium fallback behavior.",
+          body: "Designed for turntable captures and clean product rotations that need premium fallback behavior.",
         },
         cta: {
           label: "Inspect hardware",

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireAuth = vi.fn();
-const getRecentProjects = vi.fn();
-const createProjectFromPreset = vi.fn();
+const getMyProjects = vi.fn();
+const createProjectFromSource = vi.fn();
 const parseBody = vi.fn();
 
 vi.mock("@/lib/auth", () => ({
@@ -10,8 +10,8 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 vi.mock("@/lib/data/projects", () => ({
-  getRecentProjects,
-  createProjectFromPreset,
+  getMyProjects,
+  createProjectFromSource,
 }));
 
 vi.mock("@/lib/rate-limiter", () => ({
@@ -28,8 +28,8 @@ describe("/api/projects", () => {
   beforeEach(() => {
     vi.resetModules();
     requireAuth.mockReset();
-    getRecentProjects.mockReset();
-    createProjectFromPreset.mockReset();
+    getMyProjects.mockReset();
+    createProjectFromSource.mockReset();
     parseBody.mockReset();
 
     requireAuth.mockResolvedValue({
@@ -40,18 +40,18 @@ describe("/api/projects", () => {
   });
 
   it("returns the authenticated user's recent projects", async () => {
-    getRecentProjects.mockResolvedValueOnce([{ id: "project_123", title: "Project" }]);
+    getMyProjects.mockResolvedValueOnce([{ id: "project_123", title: "Project" }]);
 
     const { GET } = await import("../route");
     const response = await GET();
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual([{ id: "project_123", title: "Project" }]);
-    expect(getRecentProjects).toHaveBeenCalledWith("user_test_123");
+    expect(getMyProjects).toHaveBeenCalledWith("user_test_123");
   });
 
   it("returns retryable degraded state when workspace data is temporarily unavailable", async () => {
-    getRecentProjects.mockRejectedValueOnce(
+    getMyProjects.mockRejectedValueOnce(
       new Error("Failed query: select * from projects\ncause: connect ECONNREFUSED 127.0.0.1:5432"),
     );
 
@@ -68,9 +68,9 @@ describe("/api/projects", () => {
 
   it("creates a project for the authenticated user", async () => {
     parseBody.mockResolvedValueOnce({
-      data: { presetId: "product-reveal", title: "New Project" },
+      data: { source: { kind: "demo", demoId: "ocean-depth" }, title: "New Project" },
     });
-    createProjectFromPreset.mockResolvedValueOnce({
+    createProjectFromSource.mockResolvedValueOnce({
       id: "project_123",
       title: "New Project",
     });
@@ -80,7 +80,7 @@ describe("/api/projects", () => {
       new Request("http://localhost", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ presetId: "product-reveal", title: "New Project" }),
+        body: JSON.stringify({ source: { kind: "demo", demoId: "ocean-depth" }, title: "New Project" }),
       }),
     );
 
@@ -89,18 +89,18 @@ describe("/api/projects", () => {
       id: "project_123",
       title: "New Project",
     });
-    expect(createProjectFromPreset).toHaveBeenCalledWith(
+    expect(createProjectFromSource).toHaveBeenCalledWith(
       "user_test_123",
-      "product-reveal",
+      { kind: "demo", demoId: "ocean-depth" },
       "New Project",
     );
   });
 
   it("returns retryable degraded state when project creation hits a temporary backend failure", async () => {
     parseBody.mockResolvedValueOnce({
-      data: { presetId: "product-reveal", title: "New Project" },
+      data: { source: { kind: "blank" }, title: "New Project" },
     });
-    createProjectFromPreset.mockRejectedValueOnce(
+    createProjectFromSource.mockRejectedValueOnce(
       new Error("Failed query: insert into projects\ncause: connect ECONNREFUSED 127.0.0.1:5432"),
     );
 
@@ -109,7 +109,7 @@ describe("/api/projects", () => {
       new Request("http://localhost", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ presetId: "product-reveal", title: "New Project" }),
+        body: JSON.stringify({ source: { kind: "blank" }, title: "New Project" }),
       }),
     );
 

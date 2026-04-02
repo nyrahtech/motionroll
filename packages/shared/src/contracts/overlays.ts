@@ -28,6 +28,22 @@ export type TextTransform = z.infer<typeof TextTransformSchema>;
 export const BackgroundModeSchema = z.enum(["transparent", "solid"]);
 export type BackgroundMode = z.infer<typeof BackgroundModeSchema>;
 
+export const OverlayBlendModeSchema = z.enum(["normal", "screen", "add"]);
+export type OverlayBlendMode = z.infer<typeof OverlayBlendModeSchema>;
+
+export const OverlayMediaKindSchema = z.enum(["image", "video"]);
+export type OverlayMediaKind = z.infer<typeof OverlayMediaKindSchema>;
+
+export const OverlayMediaMetadataSchema = z.object({
+  kind: OverlayMediaKindSchema.optional(),
+  mimeType: z.string().min(1).optional(),
+  contentType: z.string().min(1).optional(),
+});
+export type OverlayMediaMetadata = z.infer<typeof OverlayMediaMetadataSchema>;
+
+export const OverlayPlaybackModeSchema = z.enum(["normal", "loop", "scroll-scrub"]);
+export type OverlayPlaybackMode = z.infer<typeof OverlayPlaybackModeSchema>;
+
 export const OverlayAnimationTypeSchema = z.enum([
   "none",
   "fade",
@@ -180,6 +196,11 @@ const OverlayContentInputSchema = z.object({
   theme: OverlayThemeSchema.default("light"),
   treatment: OverlayTreatmentSchema.default("default"),
   mediaUrl: z.string().min(1).optional(),
+  mediaAssetId: z.string().min(1).optional(),
+  mediaPreviewUrl: z.string().min(1).optional(),
+  mediaMetadata: OverlayMediaMetadataSchema.optional(),
+  playbackMode: OverlayPlaybackModeSchema.default("normal"),
+  blendMode: OverlayBlendModeSchema.default("normal"),
   linkHref: z.string().min(1).optional(),
   layout: OverlayLayoutSchema.optional(),
   style: OverlayStyleInputSchema.optional(),
@@ -284,6 +305,11 @@ export const OverlayContentSchema = OverlayContentInputSchema.transform((content
     theme: content.theme,
     treatment: content.treatment,
     ...(content.mediaUrl ? { mediaUrl: content.mediaUrl } : {}),
+    ...(content.mediaAssetId ? { mediaAssetId: content.mediaAssetId } : {}),
+    ...(content.mediaPreviewUrl ? { mediaPreviewUrl: content.mediaPreviewUrl } : {}),
+    ...(content.mediaMetadata ? { mediaMetadata: content.mediaMetadata } : {}),
+    playbackMode: content.playbackMode,
+    blendMode: content.blendMode,
     ...(content.linkHref ? { linkHref: content.linkHref } : {}),
     ...(content.layout ? { layout: content.layout } : {}),
     ...(content.style
@@ -325,6 +351,11 @@ export type OverlayContent = {
   theme: OverlayTheme;
   treatment: OverlayTreatment;
   mediaUrl?: string;
+  mediaAssetId?: string;
+  mediaPreviewUrl?: string;
+  mediaMetadata?: OverlayMediaMetadata;
+  playbackMode: OverlayPlaybackMode;
+  blendMode: OverlayBlendMode;
   linkHref?: string;
   layout?: OverlayLayout;
   style?: OverlayStyle;

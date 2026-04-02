@@ -6,6 +6,26 @@ import { createScrollSection, type ScrollSectionController } from "@motionroll/r
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
+function hasRenderableSectionContent(section: ProjectManifest["sections"][number]) {
+  return (
+    Boolean(section.backgroundMedia?.url || section.backgroundMedia?.previewUrl) ||
+    Boolean(section.frameAssets.length) ||
+    Boolean(section.fallback.posterUrl) ||
+    Boolean(section.fallback.fallbackVideoUrl) ||
+    Boolean(section.overlays.length)
+  );
+}
+
+function hasRenderableCanvasContent(manifest: ProjectManifest) {
+  return (
+    Boolean(manifest.canvas.backgroundTrack?.media.url || manifest.canvas.backgroundTrack?.media.previewUrl) ||
+    Boolean(manifest.canvas.frameAssets.length) ||
+    Boolean(manifest.canvas.fallback.posterUrl) ||
+    Boolean(manifest.canvas.fallback.fallbackVideoUrl) ||
+    Boolean(manifest.layers.length)
+  );
+}
+
 export function StandaloneRuntime({
   manifest,
   mode = "desktop",
@@ -23,9 +43,7 @@ export function StandaloneRuntime({
   const controllerRef = useRef<ScrollSectionController | null>(null);
   const section = manifest.sections[0];
   const hasRenderableMedia =
-    Boolean(section?.frameAssets.length) ||
-    Boolean(section?.fallback.posterUrl) ||
-    Boolean(section?.fallback.fallbackVideoUrl);
+    hasRenderableCanvasContent(manifest) || manifest.sections.some(hasRenderableSectionContent);
 
   useEffect(() => {
     if (!hasRenderableMedia) {
